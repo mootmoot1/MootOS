@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <title>MootOS</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Conversation history">
+      <div class="sidebar-header">
+        <div>
+          <p class="eyebrow">MootOS v0.1</p>
+          <h1>Conversations</h1>
+        </div>
+        <button class="icon-button mobile-only" id="closeSidebar" type="button" aria-label="Close history">×</button>
+      </div>
+
+      <button class="primary-button new-chat-button" id="newChatButton" type="button">
+        <span aria-hidden="true">＋</span>
+        New chat
+      </button>
+
+      <label class="field-label" for="projectSelect">Project</label>
+      <select id="projectSelect" class="project-select">
+        <option value="">No project</option>
+      </select>
+
+      <div class="history-heading">
+        <span>Recent</span>
+        <button class="text-button" id="refreshHistoryButton" type="button">Refresh</button>
+      </div>
+      <div class="conversation-list" id="conversationList">
+        <p class="muted small">Loading conversations…</p>
+      </div>
+    </aside>
+
+    <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
+
+    <main class="chat-panel">
+      <header class="topbar">
+        <button class="icon-button mobile-only" id="openSidebar" type="button" aria-label="Open conversation history">☰</button>
+        <div class="topbar-title">
+          <strong id="conversationTitle">New conversation</strong>
+          <span class="status-row">
+            <span class="status-dot" id="statusDot" aria-hidden="true"></span>
+            <span id="statusText">Checking server…</span>
+          </span>
+        </div>
+        <button class="secondary-button" id="headerNewChatButton" type="button">New chat</button>
+      </header>
+
+      <section class="messages" id="messages" aria-live="polite" aria-label="Chat messages">
+        <div class="empty-state" id="emptyState">
+          <div class="logo-mark" aria-hidden="true">M</div>
+          <h2>Talk to MootOS</h2>
+          <p>Start a normal conversation. Your messages and replies will be saved automatically.</p>
+          <div class="starter-grid">
+            <button class="starter" type="button">What do you remember about MootOS?</button>
+            <button class="starter" type="button">Help me plan what to build next.</button>
+            <button class="starter" type="button">Summarize my current project.</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="error-banner" id="errorBanner" role="alert" hidden></div>
+
+      <form class="composer" id="composer">
+        <label class="sr-only" for="messageInput">Message MootOS</label>
+        <textarea
+          id="messageInput"
+          rows="1"
+          maxlength="20000"
+          placeholder="Message MootOS…"
+          autocomplete="off"
+        ></textarea>
+        <button class="send-button" id="sendButton" type="submit" aria-label="Send message">
+          <span aria-hidden="true">↑</span>
+        </button>
+        <p class="composer-hint">Enter to send · Shift + Enter for a new line</p>
+      </form>
+    </main>
+  </div>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
