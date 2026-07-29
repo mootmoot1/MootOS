@@ -1,6 +1,6 @@
 # ADR-012: Conversation Engine and Replaceable Model Router
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-29
 - **Decision owners:** Moot and MootOS
 
