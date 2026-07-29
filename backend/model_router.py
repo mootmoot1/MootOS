@@ -4,7 +4,11 @@ import os
 from dataclasses import dataclass
 from typing import Protocol
 
+from dotenv import load_dotenv
 from openai import OpenAI
+
+
+load_dotenv()
 
 
 class ModelConfigurationError(RuntimeError):
@@ -73,7 +77,7 @@ class OpenAIProvider:
         except Exception as error:
             raise ModelProviderError(f"OpenAI request failed: {error}") from error
 
-        text = response.output_text.strip()
+        text = (response.output_text or "").strip()
         if not text:
             raise ModelProviderError("OpenAI returned an empty response")
         return ModelResponse(text=text, provider=self.name, model=self.model)
