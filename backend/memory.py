@@ -9,6 +9,14 @@ from typing import Any, Optional
 
 DATABASE_PATH = Path(__file__).resolve().parent.parent / "data" / "mootos.db"
 
+DEFAULT_PROJECTS = (
+    ("MootOS", "Development and planning for the MootOS personal AI system."),
+    ("Studio", "Studio sessions, clients, engineering work, and business operations."),
+    ("Social Media", "Content ideas, publishing plans, and audience growth."),
+    ("Cars", "Vehicle maintenance, repairs, and automotive projects."),
+    ("Personal", "Personal information that does not belong to another project."),
+)
+
 
 def _connect() -> sqlite3.Connection:
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -18,8 +26,18 @@ def _connect() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Create the memory database and table when they do not exist."""
+    """Create the database schema and seed the default projects."""
     with _connect() as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                description TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS memories (
@@ -31,6 +49,66 @@ def init_db() -> None:
             )
             """
         )
+        created_at = datetime.now(timezone.utc).isoformat()
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO projects (id, name, description, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                (str(uuid.uuid4()), name, description, created_at)
+                for name, description in DEFAULT_PROJECTS
+            ),
+        )
+
+
+def create_project(name: str, description: Optional[str] = None) -> dict[str, Any]:
+    """Create and return a project."""
+    project = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "description": description,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        with _connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO projects (id, name, description, created_at)
+                VALUES (:id, :name, :description, :created_at)
+                """,
+                project,
+            )
+    except sqlite3.IntegrityError as error:
+        raise ValueError("Project already exists") from error
+    return project
+
+
+def list_projects() -> list[dict[str, Any]]:
+    """Return every project alphabetically."""
+    with _connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, name, description, created_at
+            FROM projects
+            ORDER BY name COLLATE NOCASE
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_project(name: str) -> Optional[dict[str, Any]]:
+    """Return a project by name, ignoring capitalization."""
+    with _connect() as connection:
+        row = connection.execute(
+            """
+            SELECT id, name, description, created_at
+            FROM projects
+            WHERE name = ? COLLATE NOCASE
+            """,
+            (name,),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def create_memory(
@@ -39,6 +117,12 @@ def create_memory(
     memory_type: Optional[str] = None,
 ) -> dict[str, Any]:
     """Store and return a new memory."""
+    if project is not None:
+        saved_project = get_project(project)
+        if saved_project is None:
+            raise ValueError("Project does not exist")
+        project = saved_project["name"]
+
     memory = {
         "id": str(uuid.uuid4()),
         "content": content,
@@ -57,16 +141,30 @@ def create_memory(
     return memory
 
 
-def list_memories() -> list[dict[str, Any]]:
-    """Return every memory, newest first."""
+def list_memories(project: Optional[str] = None) -> list[dict[str, Any]]:
+    """Return memories newest first, optionally filtered by project."""
     with _connect() as connection:
-        rows = connection.execute(
-            """
-            SELECT id, content, project, memory_type, created_at
-            FROM memories
-            ORDER BY created_at DESC
-            """
-        ).fetchall()
+        if project is None:
+            rows = connection.execute(
+                """
+                SELECT id, content, project, memory_type, created_at
+                FROM memories
+                ORDER BY created_at DESC
+                """
+            ).fetchall()
+        else:
+            saved_project = get_project(project)
+            if saved_project is None:
+                raise ValueError("Project does not exist")
+            rows = connection.execute(
+                """
+                SELECT id, content, project, memory_type, created_at
+                FROM memories
+                WHERE project = ? COLLATE NOCASE
+                ORDER BY created_at DESC
+                """,
+                (saved_project["name"],),
+            ).fetchall()
     return [dict(row) for row in rows]
 
 
