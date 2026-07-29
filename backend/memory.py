@@ -1,5 +1,6 @@
 """SQLite-backed persistent memory storage for MootOS."""
 
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -7,7 +8,20 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-DATABASE_PATH = Path(__file__).resolve().parent.parent / "data" / "mootos.db"
+def resolve_database_path() -> Path:
+    """Choose an explicit path, Railway volume, or local development database."""
+    explicit_path = os.getenv("MOOTOS_DATABASE_PATH", "").strip()
+    if explicit_path:
+        return Path(explicit_path).expanduser()
+
+    railway_mount = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
+    if railway_mount:
+        return Path(railway_mount) / "mootos.db"
+
+    return Path(__file__).resolve().parent.parent / "data" / "mootos.db"
+
+
+DATABASE_PATH = resolve_database_path()
 
 DEFAULT_PROJECTS = (
     ("MootOS", "Development and planning for the MootOS personal AI system."),
