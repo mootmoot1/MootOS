@@ -6,11 +6,13 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from backend.memory import (
+    create_project as store_project,
     create_memory as store_memory,
     delete_memory as remove_memory,
     get_memory as load_memory,
     init_db,
     list_memories as load_memories,
+    list_projects as load_projects,
 )
 
 
@@ -28,6 +30,13 @@ class MemoryCreate(BaseModel):
     content: str = Field(min_length=1, max_length=10_000)
     project: Optional[str] = None
     memory_type: Optional[str] = None
+
+
+class ProjectCreate(BaseModel):
+    """Input accepted when creating a project."""
+
+    name: str = Field(min_length=1, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=500)
 
 
 @app.get("/")
@@ -50,20 +59,28 @@ def health_check() -> dict[str, str]:
 @app.post("/memories", status_code=status.HTTP_201_CREATED)
 def create_memory(memory: MemoryCreate) -> dict[str, Any]:
     """Create and persist a memory."""
-    return {
-        "success": True,
-        "data": store_memory(
+    try:
+        saved_memory = store_memory(
             content=memory.content,
             project=memory.project,
             memory_type=memory.memory_type,
-        ),
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {
+        "success": True,
+        "data": saved_memory,
     }
 
 
 @app.get("/memories")
-def list_memories() -> dict[str, Any]:
-    """List all saved memories."""
-    return {"success": True, "data": load_memories()}
+def list_memories(project: Optional[str] = None) -> dict[str, Any]:
+    """List saved memories, optionally filtered by project."""
+    try:
+        memories = load_memories(project=project)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"success": True, "data": memories}
 
 
 @app.get("/memories/{memory_id}")
@@ -81,3 +98,22 @@ def delete_memory(memory_id: str) -> dict[str, Any]:
     if not remove_memory(memory_id):
         raise HTTPException(status_code=404, detail="Memory not found")
     return {"success": True, "data": {"id": memory_id, "status": "deleted"}}
+
+
+@app.get("/projects")
+def list_projects() -> dict[str, Any]:
+    """List all available projects."""
+    return {"success": True, "data": load_projects()}
+
+
+@app.post("/projects", status_code=status.HTTP_201_CREATED)
+def create_project(project: ProjectCreate) -> dict[str, Any]:
+    """Create a project."""
+    try:
+        saved_project = store_project(
+            name=project.name,
+            description=project.description,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"success": True, "data": saved_project}
