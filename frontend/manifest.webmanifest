@@ -1,0 +1,11 @@
+{
+  "name": "MootOS",
+  "short_name": "MootOS",
+  "description": "Moot's private personal AI operating system.",
+  "start_url": "/chat",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#090b10",
+  "theme_color": "#0b0d12",
+  "orientation": "portrait-primary"
+}
