@@ -6,7 +6,7 @@
 
 ## Connection status
 
-ChatGPT is connected to GitHub through the official **ChatGPT Codex Connector**.
+ChatGPT is connected to GitHub through the official ChatGPT GitHub connector.
 
 Verified capabilities:
 
@@ -15,9 +15,7 @@ Verified capabilities:
 - Create branches and commits
 - Open pull requests
 - Read GitHub Actions results
-- Merge approved pull requests
-
-The connector does not currently expose a branch-deletion action.
+- Merge only after Moot gives explicit approval
 
 ## Completed work
 
@@ -27,17 +25,14 @@ Merged into `main`.
 
 Implemented:
 
+- Persistent SQLite memory storage
 - `POST /memories`
 - `GET /memories`
 - `GET /memories/{memory_id}`
 - `DELETE /memories/{memory_id}`
-- SQLite persistence
 - UUID memory IDs
 - UTC timestamps
-- Content validation
-- Missing-record handling
-- Development test dependencies
-- GitHub Actions testing
+- Validation and missing-record handling
 
 ### PR #3 — Minimal project system
 
@@ -45,49 +40,92 @@ Merged into `main`.
 
 Implemented:
 
-- Persistent SQLite project catalog
-- Five default projects:
-  - MootOS
-  - Studio
-  - Social Media
-  - Cars
-  - Personal
+- Five default projects: MootOS, Studio, Social Media, Cars, and Personal
 - `GET /projects`
 - `POST /projects`
-- Validation that assigned projects exist
-- Case-insensitive duplicate-project protection
-- `GET /memories?project=<name>` filtering
-- ADR-011 documenting the limited v0.1 project scope
+- Project validation
+- Case-insensitive duplicate protection
+- Memory filtering by project
+- ADR-011
 
-## Verification
+### PR #5 — Conversation engine and replaceable model router
 
-- All 15 automated tests passed locally.
-- Full Flake8 check passed locally.
-- GitHub Actions passed on Python 3.9, 3.10, and 3.11.
-- `main` was inspected after both merges and contains the memory and project systems.
+Merged into `main`.
 
-## Current unfinished cleanup
+Implemented:
 
-These completed feature branches still exist:
+- Persistent conversations and messages
+- `POST /conversations`
+- `GET /conversations`
+- `GET /conversations/{conversation_id}`
+- `POST /chat`
+- Recent conversation history supplied to the model
+- Relevant project memories supplied to the model
+- Replaceable provider interface
+- OpenAI Responses API provider
+- Provider and model metadata saved with assistant messages
+- Environment-based configuration with no committed API key
+- ADR-012
 
-- `feature/persistent-memory`
-- `feature/project-system-v0.1`
+Manual verification completed in Codespaces:
 
-Their work is already merged into `main`. They can be deleted safely through GitHub. The connected GitHub tool cannot delete branch refs, so this requires clicking **Delete branch** on merged PR #2 and PR #3.
+- MootOS accepted a real message through `POST /chat`
+- OpenAI returned a real `gpt-5-mini` response
+- MootOS saved and returned the conversation ID
+- The response was stored in the local conversation history
+
+ADR-012 is accepted.
+
+## Current work
+
+### Issue #6 — Mobile chat interface
+
+Approved and in development on:
+
+`feature/mobile-chat-interface-v0.1`
+
+Planned scope:
+
+- Normal message bubbles
+- Text composer
+- Automatic conversation-ID handling
+- New Chat control
+- Project selector
+- Conversation history
+- Loading and error states
+- Phone-first responsive layout
+- No frontend framework or external assets
+- ADR-013
+- Automated interface tests
+
+This work is not merged into `main` yet.
+
+## Verification status
+
+For the merged conversation engine:
+
+- GitHub Actions passed on Python 3.9, 3.10, and 3.11
+- Conversation and project-memory tests passed
+- Real OpenAI conversation test passed in Codespaces
+
+The mobile interface must still pass GitHub Actions and be tested from the Codespaces browser before merge approval.
 
 ## Current operating rules
 
-- ChatGPT may inspect, plan, write, and test MootOS changes.
-- Work should use a feature branch and pull request.
-- ChatGPT must explain changes in plain English before merging.
-- High-risk actions, including merges, require Moot's explicit approval.
-- Major architecture decisions use numbered ADRs.
-- Keep v0.1 simple, local-first, modular, and model-provider independent.
+- Work uses a feature branch and pull request
+- ChatGPT explains changes in plain English before merge
+- Merges require Moot's explicit approval
+- Secrets must never be committed
+- Major architecture decisions use numbered ADRs
+- Keep v0.1 simple, local-first, modular, and model-provider independent
 
-## Next development decision
+## Next milestone
 
-The memory and minimal project foundations are complete.
+Finish the mobile chat interface so Moot can talk to MootOS without using Swagger or editing JSON.
 
-The next major v0.1 work should return to the central goal: a usable conversation loop. The likely next planning target is the conversation engine and replaceable model-router boundary, followed by a simple mobile-friendly chat interface.
+After the interface is stable, the next likely feature is natural memory management:
 
-Do not assume this next feature has been approved or implemented. Plan it, explain it, test locally/cloud-first, and wait for Moot's approval before pushing or merging.
+- "Remember this"
+- "Forget that"
+- "Update that"
+- "What do you remember about this project?"
