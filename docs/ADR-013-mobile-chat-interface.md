@@ -1,6 +1,6 @@
 # ADR-013: Server-Rendered Mobile Chat Interface
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-29
 - **Decision owners:** Moot and MootOS
 

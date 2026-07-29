@@ -26,12 +26,8 @@ Merged into `main`.
 Implemented:
 
 - Persistent SQLite memory storage
-- `POST /memories`
-- `GET /memories`
-- `GET /memories/{memory_id}`
-- `DELETE /memories/{memory_id}`
-- UUID memory IDs
-- UTC timestamps
+- Create, list, retrieve, filter, and delete memory endpoints
+- UUID memory IDs and UTC timestamps
 - Validation and missing-record handling
 
 ### PR #3 — Minimal project system
@@ -41,10 +37,8 @@ Merged into `main`.
 Implemented:
 
 - Five default projects: MootOS, Studio, Social Media, Cars, and Personal
-- `GET /projects`
-- `POST /projects`
-- Project validation
-- Case-insensitive duplicate protection
+- Project creation and listing
+- Project validation and duplicate protection
 - Memory filtering by project
 - ADR-011
 
@@ -55,60 +49,69 @@ Merged into `main`.
 Implemented:
 
 - Persistent conversations and messages
-- `POST /conversations`
-- `GET /conversations`
-- `GET /conversations/{conversation_id}`
-- `POST /chat`
+- Conversation and chat endpoints
 - Recent conversation history supplied to the model
 - Relevant project memories supplied to the model
 - Replaceable provider interface
 - OpenAI Responses API provider
-- Provider and model metadata saved with assistant messages
-- Environment-based configuration with no committed API key
-- ADR-012
+- Provider and model metadata
+- Environment-based secret configuration
+- ADR-012 accepted
 
-Manual verification completed in Codespaces:
+### PR #7 — Mobile-friendly chat interface
 
-- MootOS accepted a real message through `POST /chat`
-- OpenAI returned a real `gpt-5-mini` response
-- MootOS saved and returned the conversation ID
-- The response was stored in the local conversation history
+Merged into `main` on July 29, 2026.
 
-ADR-012 is accepted.
+Implemented and manually verified:
+
+- Normal message bubbles and text composer
+- New Chat control
+- Project selector
+- Saved conversation history
+- Reopening old conversations with restored messages
+- Loading and readable error states
+- Responsive phone and desktop layouts
+- Automatic conversation-ID handling
+- Successful project-memory recall through the normal interface
+- Automated interface tests
+- ADR-013 accepted
 
 ## Current work
 
-### Issue #6 — Mobile chat interface
+### Issue #8 — Secure phone deployment
 
 Approved and in development on:
 
-`feature/mobile-chat-interface-v0.1`
+`feature/phone-deployment-v0.1`
 
-Planned scope:
+Planned and implemented on the branch:
 
-- Normal message bubbles
-- Text composer
-- Automatic conversation-ID handling
-- New Chat control
-- Project selector
-- Conversation history
-- Loading and error states
-- Phone-first responsive layout
-- No frontend framework or external assets
-- ADR-013
-- Automated interface tests
+- Railway config-as-code start command and `/health` check
+- Password login before public access
+- Signed HTTP-only session cookies
+- Protected chat, Swagger, memory, project, and conversation APIs
+- Public health endpoint for Railway
+- Logout controls
+- Installable phone web-app metadata
+- Automatic SQLite storage on an attached Railway volume
+- Railway setup guide
+- Authentication and deployment tests
+- ADR-014 proposed
 
-This work is not merged into `main` yet.
+The feature must pass GitHub Actions, be reviewed in plain English, and receive Moot's explicit merge approval.
 
-## Verification status
+## Production setup still required in Railway
 
-For the merged conversation engine:
+After the deployment pull request is merged:
 
-- GitHub Actions passed on Python 3.9, 3.10, and 3.11
-- Conversation and project-memory tests passed
-- Real OpenAI conversation test passed in Codespaces
-
-The mobile interface must still pass GitHub Actions and be tested from the Codespaces browser before merge approval.
+- Connect `mootmoot1/MootOS` to Railway from GitHub
+- Deploy from `main`
+- Add `OPENAI_API_KEY`
+- Add `MOOTOS_PASSWORD`
+- Add `MOOTOS_SESSION_SECRET`
+- Attach one volume at `/data`
+- Generate the public Railway domain
+- Verify login, chat, memory persistence, and Home Screen installation
 
 ## Current operating rules
 
@@ -118,14 +121,15 @@ The mobile interface must still pass GitHub Actions and be tested from the Codes
 - Secrets must never be committed
 - Major architecture decisions use numbered ADRs
 - Keep v0.1 simple, local-first, modular, and model-provider independent
+- Keep the Railway service at one replica while SQLite is the database
 
 ## Next milestone
 
-Finish the mobile chat interface so Moot can talk to MootOS without using Swagger or editing JSON.
+Complete the secure Railway deployment so MootOS remains available from Moot's phone without a running Codespace.
 
-After the interface is stable, the next likely feature is natural memory management:
+After deployment is stable, return to natural memory management:
 
 - "Remember this"
 - "Forget that"
 - "Update that"
-- "What do you remember about this project?"
+- Memory review and correction controls

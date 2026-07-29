@@ -2,12 +2,21 @@
 
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, status
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from backend.auth import (
+    auth_enabled,
+    clear_session_cookie,
+    password_matches,
+    request_is_authenticated,
+    set_session_cookie,
+    validate_auth_configuration,
+)
 from backend.conversation import (
     add_message as store_message,
     create_conversation as store_conversation,
@@ -32,6 +41,16 @@ from backend.model_router import (
 
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+PUBLIC_PATHS = {
+    "/auth/login",
+    "/auth/logout",
+    "/health",
+    "/login",
+    "/manifest.webmanifest",
+}
+HTML_PATHS = {"/", "/chat", "/docs", "/redoc"}
+
+validate_auth_configuration()
 
 app = FastAPI(
     title="MootOS",
@@ -48,6 +67,12 @@ Speak clearly and naturally. Ask a question only when it is actually necessary.
 When Moot corrects old information, treat the correction as more reliable than the
 older memory. Never claim that you completed an outside action unless it truly ran.
 """
+
+
+class LoginRequest(BaseModel):
+    """Password submitted by the private deployment login page."""
+
+    password: str = Field(min_length=1, max_length=1_000)
 
 
 class MemoryCreate(BaseModel):
@@ -80,6 +105,29 @@ class ChatRequest(BaseModel):
     project: Optional[str] = None
 
 
+@app.middleware("http")
+async def require_private_session(request: Request, call_next):
+    """Protect the interface and APIs when production auth is configured."""
+    path = request.url.path
+    if (
+        not auth_enabled()
+        or path in PUBLIC_PATHS
+        or path.startswith("/static/")
+        or request_is_authenticated(request)
+    ):
+        return await call_next(request)
+
+    accepts_html = "text/html" in request.headers.get("accept", "")
+    if request.method == "GET" and (path in HTML_PATHS or accepts_html):
+        destination = quote(path if path.startswith("/") else "/chat", safe="/")
+        return RedirectResponse(url=f"/login?next={destination}", status_code=303)
+
+    return JSONResponse(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        content={"detail": "Authentication required"},
+    )
+
+
 def _build_model_instructions(project: Optional[str]) -> str:
     """Build the identity and memory context supplied to the model provider."""
     memories = load_memories(project=project) if project else load_memories()
@@ -110,15 +158,41 @@ def _get_conversation_or_404(conversation_id: str) -> dict[str, Any]:
     return conversation
 
 
-@app.get("/")
-def home() -> dict[str, str]:
-    """Return the basic MootOS status."""
-    return {
-        "name": "MootOS",
-        "version": "0.1.0",
-        "status": "Backend Running",
-        "message": "Welcome to MootOS.",
-    }
+@app.get("/", include_in_schema=False)
+def home() -> RedirectResponse:
+    """Open the normal MootOS experience instead of a raw status payload."""
+    return RedirectResponse(url="/chat", status_code=307)
+
+
+@app.get("/login", include_in_schema=False)
+def login_page(request: Request):
+    """Serve the password screen for private cloud deployments."""
+    if not auth_enabled() or request_is_authenticated(request):
+        return RedirectResponse(url="/chat", status_code=303)
+    return FileResponse(FRONTEND_DIR / "login.html")
+
+
+@app.post("/auth/login", include_in_schema=False)
+def login(credentials: LoginRequest):
+    """Create a signed browser session after a valid password."""
+    if auth_enabled() and not password_matches(credentials.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect password",
+        )
+
+    response = JSONResponse({"success": True})
+    if auth_enabled():
+        set_session_cookie(response)
+    return response
+
+
+@app.post("/auth/logout", include_in_schema=False)
+def logout() -> RedirectResponse:
+    """Clear the private session and return to the login page."""
+    response = RedirectResponse(url="/login", status_code=303)
+    clear_session_cookie(response)
+    return response
 
 
 @app.get("/chat", include_in_schema=False)
@@ -127,9 +201,18 @@ def chat_interface() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def web_manifest() -> FileResponse:
+    """Serve install metadata for adding MootOS to a phone home screen."""
+    return FileResponse(
+        FRONTEND_DIR / "manifest.webmanifest",
+        media_type="application/manifest+json",
+    )
+
+
 @app.get("/health")
 def health_check() -> dict[str, str]:
-    """Return a simple health check for the application."""
+    """Return a public health check for Railway deployments."""
     return {"status": "healthy"}
 
 

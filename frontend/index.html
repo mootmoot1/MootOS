@@ -4,8 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b0d12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MootOS">
   <title>MootOS</title>
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/deployment.css">
 </head>
 <body>
   <div class="app-shell">
@@ -35,6 +40,10 @@
       <div class="conversation-list" id="conversationList">
         <p class="muted small">Loading conversations…</p>
       </div>
+
+      <form class="logout-form sidebar-logout" action="/auth/logout" method="post">
+        <button class="text-button" type="submit">Log out</button>
+      </form>
     </aside>
 
     <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
@@ -49,7 +58,12 @@
             <span id="statusText">Checking server…</span>
           </span>
         </div>
-        <button class="secondary-button" id="headerNewChatButton" type="button">New chat</button>
+        <div class="topbar-actions">
+          <button class="secondary-button" id="headerNewChatButton" type="button">New chat</button>
+          <form class="logout-form desktop-only" action="/auth/logout" method="post">
+            <button class="text-button" type="submit">Log out</button>
+          </form>
+        </div>
       </header>
 
       <section class="messages" id="messages" aria-live="polite" aria-label="Chat messages">
