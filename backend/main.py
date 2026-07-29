@@ -5,6 +5,13 @@ from typing import Any, Optional
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
+from backend.conversation import (
+    add_message as store_message,
+    create_conversation as store_conversation,
+    get_conversation as load_conversation,
+    list_conversations as load_conversations,
+    list_messages as load_messages,
+)
 from backend.memory import (
     create_project as store_project,
     create_memory as store_memory,
@@ -14,6 +21,11 @@ from backend.memory import (
     list_memories as load_memories,
     list_projects as load_projects,
 )
+from backend.model_router import (
+    ModelConfigurationError,
+    ModelProviderError,
+    get_model_router,
+)
 
 
 app = FastAPI(
@@ -22,6 +34,14 @@ app = FastAPI(
     version="0.1.0",
 )
 init_db()
+
+BASE_INSTRUCTIONS = """You are MootOS Version 0.1, Moot's personal AI operating system.
+Your job is to hold one continuous, useful conversation; organize projects; and use
+relevant saved memories without pretending to know facts that are not provided.
+Speak clearly and naturally. Ask a question only when it is actually necessary.
+When Moot corrects old information, treat the correction as more reliable than the
+older memory. Never claim that you completed an outside action unless it truly ran.
+"""
 
 
 class MemoryCreate(BaseModel):
@@ -37,6 +57,51 @@ class ProjectCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=100)
     description: Optional[str] = Field(default=None, max_length=500)
+
+
+class ConversationCreate(BaseModel):
+    """Input accepted when creating a conversation."""
+
+    project: Optional[str] = None
+    title: Optional[str] = Field(default=None, min_length=1, max_length=100)
+
+
+class ChatRequest(BaseModel):
+    """Input accepted by the first MootOS conversation loop."""
+
+    message: str = Field(min_length=1, max_length=20_000)
+    conversation_id: Optional[str] = None
+    project: Optional[str] = None
+
+
+def _build_model_instructions(project: Optional[str]) -> str:
+    """Build the identity and memory context supplied to the model provider."""
+    memories = load_memories(project=project) if project else load_memories()
+    recent_memories = memories[:20]
+    if not recent_memories:
+        return BASE_INSTRUCTIONS
+
+    memory_lines = []
+    for memory in recent_memories:
+        memory_type = memory["memory_type"] or "memory"
+        memory_project = memory["project"] or "Unassigned"
+        memory_lines.append(
+            f"- [{memory_project} / {memory_type}] {memory['content']}"
+        )
+
+    return (
+        BASE_INSTRUCTIONS
+        + "\nRelevant long-term memory context:\n"
+        + "\n".join(memory_lines)
+        + "\nUse this context only when it helps answer the current request."
+    )
+
+
+def _get_conversation_or_404(conversation_id: str) -> dict[str, Any]:
+    conversation = load_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conversation
 
 
 @app.get("/")
@@ -117,3 +182,100 @@ def create_project(project: ProjectCreate) -> dict[str, Any]:
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return {"success": True, "data": saved_project}
+
+
+@app.post("/conversations", status_code=status.HTTP_201_CREATED)
+def create_conversation(conversation: ConversationCreate) -> dict[str, Any]:
+    """Create a persistent conversation."""
+    try:
+        saved_conversation = store_conversation(
+            project=conversation.project,
+            title=conversation.title,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"success": True, "data": saved_conversation}
+
+
+@app.get("/conversations")
+def list_conversations(project: Optional[str] = None) -> dict[str, Any]:
+    """List conversations, optionally filtered by project."""
+    try:
+        conversations = load_conversations(project=project)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"success": True, "data": conversations}
+
+
+@app.get("/conversations/{conversation_id}")
+def get_conversation(conversation_id: str) -> dict[str, Any]:
+    """Retrieve one conversation and all of its messages."""
+    return {"success": True, "data": _get_conversation_or_404(conversation_id)}
+
+
+@app.post("/chat")
+def chat(request: ChatRequest) -> dict[str, Any]:
+    """Run the first real MootOS conversation loop."""
+    router = get_model_router()
+    try:
+        router.ensure_ready()
+    except ModelConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+    if request.conversation_id:
+        conversation = _get_conversation_or_404(request.conversation_id)
+        if request.project is not None:
+            existing_project = conversation["project"] or ""
+            if existing_project.casefold() != request.project.casefold():
+                raise HTTPException(
+                    status_code=409,
+                    detail="The requested project does not match this conversation",
+                )
+    else:
+        try:
+            conversation = store_conversation(
+                project=request.project,
+                title=request.message.strip()[:80],
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    user_message = store_message(
+        conversation_id=conversation["id"],
+        role="user",
+        content=request.message,
+    )
+    history = load_messages(conversation["id"], limit=20)
+    model_messages = [
+        {"role": message["role"], "content": message["content"]}
+        for message in history
+    ]
+
+    try:
+        model_response = router.generate(
+            messages=model_messages,
+            instructions=_build_model_instructions(conversation["project"]),
+        )
+    except ModelConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except ModelProviderError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+    assistant_message = store_message(
+        conversation_id=conversation["id"],
+        role="assistant",
+        content=model_response.text,
+        provider=model_response.provider,
+        model=model_response.model,
+    )
+    return {
+        "success": True,
+        "data": {
+            "conversation_id": conversation["id"],
+            "project": conversation["project"],
+            "user_message": user_message,
+            "assistant_message": assistant_message,
+            "provider": model_response.provider,
+            "model": model_response.model,
+        },
+    }
