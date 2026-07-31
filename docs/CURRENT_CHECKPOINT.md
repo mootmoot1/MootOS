@@ -18,27 +18,14 @@ Verified production facts:
 - Conversations, messages, projects, and memories use SQLite at `/data/mootos.db`.
 - Railway volume `mootos-volume` is attached at `/data`.
 - Railway remains at one replica.
-- Conversations and memories survived three consecutive deployments before foundation hardening.
-- After PR #11 deployed, Moot verified that conversation history still survived the update and reboot cycle.
-- The hardened SQLite and migration startup completed successfully in production.
+- Foundation hardening deployed successfully without losing older conversations.
+- Explicit chat memory saves are working in production.
+- A global fact saved in one chat was recalled in a completely new chat.
+- The same fact remained available after another Railway rebuild.
 
-Automatic off-volume backups and tested disaster recovery are not implemented.
+This proves that the normal chat interface writes durable memory to SQLite and that the Railway volume preserves that memory through deployment rebuilds.
 
-## Important behavior discovered after PR #11
-
-Moot tested long-term memory through the normal chat interface.
-
-Observed behavior:
-
-1. Moot told the assistant to save a fact.
-2. The assistant said it saved the fact.
-3. The fact appeared available in the same conversation because it remained in message history.
-4. A brand-new conversation did not know the fact.
-5. The memory API and database existed, but ordinary chat was not connected to memory creation.
-
-Conclusion:
-
-The persistence system was working. The missing feature was a deterministic chat-to-memory write path. The model could claim it saved something without any SQLite memory row being created.
+Automatic off-volume backups, retention, and tested disaster recovery are not implemented.
 
 ## Completed milestones
 
@@ -124,97 +111,49 @@ Production result:
 - The application remained usable.
 - Conversation history survived the deployment.
 
-## Current work — PR #12 chat memory commands
+### PR #12 — Chat memory commands
 
-Branch:
+Merged into `main` on July 31, 2026.
+
+Squash merge commit:
 
 ```text
-feature/chat-memory-commands-v0.1
+067ad6f00c9adba8723d7de5706eaea0ff13533a
 ```
 
-Purpose:
+Implemented:
 
-Connect explicit natural-language save commands to the existing persistent `memories` table.
-
-Implemented on the draft branch:
-
-- Deterministic parser in `backend/memory_commands.py`
-- Supported command forms beginning with `remember`, `save this`, or `save to memory`
-- Ordinary questions such as `Do you remember ...?` remain normal model requests
-- Incomplete, placeholder, and punctuation-only content is rejected
-- Complete explicit-memory chat turns are stored atomically in `backend/chat_memory.py`
+- Deterministic parser for explicit `remember` and `save` commands
+- Rejection of incomplete, placeholder, and punctuation-only content
+- Atomic explicit-memory chat transaction in `backend/chat_memory.py`
 - New conversation, user message, memory row, and confirmation commit together
-- Any failed memory or confirmation write rolls back the complete turn
+- Complete rollback when the memory or confirmation write fails
 - Save commands bypass OpenAI and do not spend model credits
-- Saved chat memories use memory type `explicit_chat`
-- Internal confirmation messages record provider `mootos` and model `memory-command-v1`
-- Unassigned memories are global and available in project chats
+- Chat-created memories use memory type `explicit_chat`
+- Internal confirmations use provider `mootos` and model `memory-command-v1`
+- Global memories are available in project chats
 - Project memories remain isolated from unrelated projects
-- Existing 10,000-character memory limit is enforced
-- End-to-end test saves in one chat and recalls in a brand-new conversation
-- Parser, project-scope, model-routing, transaction, rollback, listing, and validation tests
+- Existing 10,000-character memory limit
+- Cross-chat recall and rollback regression tests
+- External read-only review followed by a second verification review
 
-Not included:
+Automated verification:
 
-- Natural-language forget
-- Natural-language update or correction
-- Memory review UI
-- Duplicate detection
-- Keyword or semantic search
-- Automatic profile import
-- Schema changes
-- Frontend redesign
+- GitHub Actions passed on Python 3.9, 3.10, and 3.11.
+- Dependency installation, blocking-error lint, and the complete test suite passed in every matrix job.
 
-## External read-only review
+Production verification:
 
-A separate Grok review was performed without repository writes.
+1. Railway rebuilt from the merged `main` branch.
+2. The application returned online.
+3. Login and chat worked.
+4. Moot saved a unique fact through an explicit chat memory command.
+5. MootOS returned its deterministic database-backed confirmation.
+6. A brand-new chat recalled the saved fact.
+7. Railway was rebuilt again.
+8. Another new chat recalled the same fact after the rebuild.
 
-Accepted and fixed findings:
-
-- A failed memory write could leave an unmatched user message or new conversation.
-- Punctuation-only commands could create junk memories.
-- Parser boundary and command-variant coverage was too narrow.
-- Global confirmation casing was inconsistent.
-- Failure-path, existing-conversation, listing-scope, and additional validation tests were missing.
-
-Reviewed but intentionally not changed in this PR:
-
-- Manual deletion of a project could break an old project conversation. There is no project-delete API today, so that lifecycle belongs to a future focused change.
-- A command beginning with `Remember` remains explicit even when the saved content ends with a question mark.
-
-## Verification status for PR #12
-
-Completed:
-
-- Explicit save commands write to SQLite before confirmation.
-- A save command does not call the model provider.
-- The saved memory is supplied to a separate new conversation.
-- Global memories are available across projects.
-- Project memories do not leak into unrelated projects.
-- Incomplete, punctuation-only, and ordinary question inputs are not misclassified.
-- Oversized memories are rejected before any new turn data is stored.
-- Forced memory-write failure rolls back a new chat completely.
-- Forced memory-write failure leaves an existing chat unchanged.
-- Forced confirmation-write failure rolls back the memory and conversation turn.
-- Project-filtered memory listing remains project-only.
-- GitHub Actions passed on Python 3.9, 3.10, and 3.11 after the external-review fixes.
-- Dependency installation, blocking-error lint, and the full test suite passed in every matrix job.
-- All 13 changed files were reviewed.
-- The current implementation guide and checkpoint were synchronized with the atomic transaction behavior.
-
-Still required before merge:
-
-- Plain-language review with Moot
-- Explicit merge approval
-
-Still required after merge:
-
-- Railway startup confirmation
-- Login verification
-- Save a unique fact through normal chat
-- Start a brand-new chat and recall the fact
-- Verify the row through the memory API or interface when available
-- Redeploy once and confirm the saved memory remains
+PR #12 is complete and production-verified.
 
 ## Current implementation boundaries
 
@@ -229,19 +168,74 @@ MootOS remains:
 - No local model
 - No runtime tools
 - No multi-agent system
-- No automatic backups
+- No automatic off-volume backups
 
-After PR #12, explicit save commands exist, but forget, update, correction, review, and search remain incomplete.
+Memory currently supports deliberate save and cross-chat recall. Memory review, correction, archival, keyword retrieval, duplicate handling, and natural-language forget or update are incomplete.
 
-## Next product milestones
+## Current planning decision
 
-After PR #12 is reviewed, merged, and verified:
+The next memory-control sequence is:
 
-1. Add safe memory review and correction controls.
-2. Add explicit forget and update workflows with confirmation.
-3. Add simple keyword retrieval before embeddings.
-4. Improve behavior for short notes and status statements.
-5. Prepare a curated Moot bootstrap profile only after correction controls are safe.
+1. Read-only memory review interface
+2. UI-selected memory correction with preserved history
+3. UI-selected recoverable archive or forget workflow
+4. Basic keyword retrieval before embeddings
+5. Focused conversation behavior refinement
+6. Curated Moot bootstrap profile only after memory controls exist
+
+Correction and forgetting should share one memory lifecycle model so the database is not redesigned repeatedly. The planned lifecycle states are conceptually:
+
+```text
+active
+superseded
+archived
+```
+
+The exact migration design must be reviewed before implementation.
+
+## Current documentation branch
+
+Branch:
+
+```text
+docs/pr12-production-verification
+```
+
+Purpose:
+
+- Record PR #12 as merged and production-verified
+- Remove stale draft and pending language
+- Record the next agreed product sequence
+- Add a manual SQLite backup and restore procedure before migration 2
+
+The procedure is documented in [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md).
+
+Documentation does not equal a verified backup. Before migration 2 reaches production, MootOS still needs:
+
+- A consistent SQLite snapshot
+- A matching off-volume copy
+- Recorded integrity and SHA-256 verification
+- A non-production restore drill
+
+No private database file, backup, or memory content belongs in GitHub.
+
+## Next product branch
+
+After this documentation PR is reviewed and merged:
+
+```text
+feature/memory-review-ui-v0.1
+```
+
+Planned first scope:
+
+- Read-only memory list on mobile
+- Memory content
+- Global or project scope
+- Memory type or source
+- Creation date
+- Project filtering
+- No editing, deletion, correction, search, or redesign in the first branch
 
 ## Preserved future ideas
 
@@ -260,16 +254,16 @@ A future advisory system may use specialist business, technical, creative, and r
 ## Operating rules
 
 - One focused purpose per branch and PR
-- No secrets in GitHub
+- No secrets or private backups in GitHub
 - Tests for important behavior
 - Documentation updated in the same PR
 - Major architecture decisions use ADRs
 - One Railway replica while SQLite is live
-- Backups before destructive storage changes
+- Verified backup and restore drill before destructive or schema-changing production work
 - Never claim a memory was saved unless the complete storage transaction committed
 - Honest reporting of tests, deployments, and uncertainty
 - Moot explicitly approves merges and high-risk actions
 
 ## Immediate decision
 
-Review PR #12 in plain language. Do not merge until Moot explicitly approves it.
+Review and merge the production-verification documentation branch. Then build the read-only memory review interface as the next focused product PR.

@@ -12,7 +12,7 @@ Each version should improve one major capability while protecting what already w
 
 MootOS is in Version 0.1 foundation development.
 
-Merged and working:
+Merged and production-verified:
 
 - Private Railway deployment
 - Phone-friendly chat interface
@@ -30,23 +30,41 @@ Merged and working:
 - Versioned schema migrations
 - Railway auth fail-closed behavior
 - Exact dependency pins
-
-Current draft milestone:
-
-- Explicit `remember` and `save this` commands that write long-term memory through chat
-- Write-before-confirm behavior
+- Explicit `remember` and `save` commands through normal chat
+- Atomic write-before-confirm memory storage
 - Cross-chat recall from SQLite
 - Global and project memory scope
-- End-to-end tests proving recall in a brand-new conversation
+- Long-term memory persistence through a Railway rebuild
 
-Immediate priorities after the chat-memory PR is merged and verified:
+PR #12 is merged and production-verified. MootOS saved a unique fact through the normal chat interface, recalled it in a brand-new conversation, survived another Railway rebuild, and recalled it again afterward.
 
-1. Memory review and correction controls
-2. Safe `forget` and `update` commands
-3. Basic keyword retrieval
-4. Better behavior for notes and status statements
-5. Curated Moot bootstrap profile import
-6. More distinct interface design
+## Immediate sequence
+
+Before product work:
+
+1. Record PR #12 production verification in the repository.
+2. Document a safe manual backup and restore procedure.
+3. Complete a consistent off-volume backup and non-production restore drill before migration 2 reaches production.
+
+Next five product branches:
+
+1. `feature/memory-review-ui-v0.1`
+2. `feature/memory-correction-v0.1`
+3. `feature/memory-forget-v0.1`
+4. `feature/memory-keyword-retrieval-v0.1`
+5. `feature/conversation-refinement-v0.1`
+
+Then:
+
+6. `feature/moot-bootstrap-profile-v0.1`
+
+This order follows the control loop:
+
+```text
+see → correct → archive → find → converse better → import curated profile
+```
+
+Visibility comes before mutation. Correction comes before forgetting. Keyword retrieval comes after memory review and lifecycle controls. Permanent profile import comes only after the user can inspect, correct, archive, and retrieve memories.
 
 ---
 
@@ -73,52 +91,134 @@ Create a private personal AI that can hold useful ongoing conversations, deliber
 - Versioned migrations and schema checks
 - Automated tests and ADR-based workflow
 - Comprehensive documentation baseline
+- Explicit chat memory commands
+- Atomic memory write and confirmation transaction
+- Cross-chat memory recall
+- Production persistence through a rebuild
 
-## Current chat-memory checkpoint
+## Verified chat-memory checkpoint
 
-The current draft PR adds:
+PR #12 delivered and verified:
 
 - Deterministic command parsing for `remember`, `save this`, and `save to memory`
-- SQLite writes before confirmation
+- Rejection of incomplete and punctuation-only content
+- SQLite transaction containing the conversation, user message, memory row, and confirmation
+- Full rollback after memory or confirmation failure
 - No model-provider call for explicit saves
 - `explicit_chat` memory type
 - Global memories available across projects
 - Project memories isolated from unrelated projects
 - Internal action metadata using `mootos` and `memory-command-v1`
-- Parser, validation, isolation, and cross-chat recall tests
-
-This checkpoint is complete only after:
-
-- GitHub Actions passes
-- The PR is reviewed and approved
-- Railway deploys successfully
-- A fact is saved through normal chat
-- A brand-new chat recalls the fact
-- The memory survives another redeploy
+- Parser, validation, isolation, rollback, and cross-chat recall tests
+- GitHub Actions on Python 3.9, 3.10, and 3.11
+- Successful Railway deployment
+- Save in one chat and recall in a brand-new chat
+- Recall again after another Railway rebuild
 
 ## Remaining Version 0.1 work
 
-### Controlled memory management
+### Memory visibility
 
-- Memory review interface
-- Memory edit or replacement workflow
-- `Forget that ...` command with confirmation
-- `Update that ...` command with correction history
-- Duplicate and conflict handling
-- Basic keyword search
-- Clear handling of sensitive memories
+First product branch:
+
+```text
+feature/memory-review-ui-v0.1
+```
+
+Scope:
+
+- Read-only mobile memory list
+- Memory content
+- Global or project scope
+- Memory type or source
+- Creation date
+- Project filtering
+
+Out of scope for the first branch:
+
+- Editing
+- Deleting
+- Archiving
+- Keyword search
+- Pagination redesign
+- Full settings redesign
+
+### Controlled memory lifecycle
+
+Correction and forgetting should share one lifecycle model rather than introducing separate incompatible schema changes.
+
+Planned conceptual states:
+
+```text
+active
+superseded
+archived
+```
+
+The exact migration design must be reviewed before implementation.
+
+Correction should:
+
+- Be selected from the review interface
+- Preserve the old value as history
+- Create or mark one current active value
+- Exclude superseded values from model context
+- Commit atomically
+- Be verified in a brand-new conversation
+
+Forgetting should:
+
+- Be selected from the review interface
+- Show the exact memory affected
+- Require confirmation
+- Archive rather than immediately hard-delete
+- Exclude archived values from all model context and default lists
+- Optionally support restoration
+
+Natural-language `update that` and `forget that` commands remain later thin branches because ambiguous matching is riskier than UI-selected actions.
+
+### Basic keyword retrieval
+
+After review, correction, and archival:
+
+- Tokenize the current request
+- Use understandable keyword or `LIKE` matching
+- Rank active memories by term matches and recency
+- Respect global and project scope
+- Merge keyword matches with recent memories
+- Cap the final context set
+- Add search to the memory review interface when practical
+
+Do not add embeddings, a vector database, or FTS5 until the simple approach proves inadequate.
 
 ### Conversation refinement
 
 - Better handling of notes and status statements
 - Less generic default behavior
+- Fewer reflexive questions
 - Capability honesty
 - Clearer uncertainty
 - More consistent MootOS identity
+- Realistic conversation regression cases
+
+Normal notes must not silently become permanent memories.
+
+### Curated Moot bootstrap profile
+
+The profile belongs only after memory review, correction, archival, and retrieval controls exist.
+
+It should contain:
+
+- Selected high-confidence facts
+- Useful preferences
+- Important ongoing context
+- Clear project scope
+- User-reviewable entries
+
+It must not be a raw dump of prior conversations.
 
 ### Interface and control refinement
 
-- Memory controls
 - Basic settings
 - Readable activity logging
 - More distinct MootOS visual identity
@@ -126,11 +226,17 @@ This checkpoint is complete only after:
 
 ### Backup and recovery
 
-- Consistent SQLite backups
-- Encrypted off-volume copies
+Current direction:
+
+- Manual consistent SQLite backup procedure
+- Off-volume private copy
+- SHA-256 and integrity verification
+- Non-production restore drill before migration 2 reaches production
+- Later automated encrypted backups
 - Retention rules
-- Restore testing
-- Clear recovery approval flow
+- Tested production recovery flow
+
+See [`docs/MANUAL_BACKUP_AND_RESTORE.md`](docs/MANUAL_BACKUP_AND_RESTORE.md).
 
 ## Version 0.1 completion rule
 
@@ -169,7 +275,7 @@ Possible features:
 
 - Semantic search after keyword search is proven
 - Memory confidence and source tracking
-- Correction history
+- Richer correction history
 - Related memories
 - Timeline view
 - Automatic conversation summaries
@@ -381,9 +487,9 @@ Possible commercial paths include a studio operating assistant, content-producti
 - Planned features must not be documented as implemented.
 - One focused branch and PR at a time.
 - Tests and documentation are part of completion.
-- Never claim a memory was saved before the database write succeeds.
+- Never claim a memory was saved before the complete database transaction succeeds.
 - Reliability before scale.
-- Backups before destructive storage migration.
+- Verified backup and restore drill before destructive storage migration.
 - Permissions before automation.
 - Real internal use before commercial promises.
 - Moot approves major changes and remains the final authority.
