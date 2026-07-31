@@ -2,7 +2,7 @@
 
 MootOS is Moot's private, mobile-friendly personal AI foundation.
 
-Version 0.1 provides a working chat interface, persistent conversations, explicit long-term-memory saves through normal chat, project-organized memory context, a replaceable model-provider boundary, private password access, and Railway deployment with hardened persistent SQLite storage.
+Version 0.1 provides a working chat interface, persistent conversations, explicit long-term-memory saves through normal chat, a read-only memory review screen, project-organized memory context, a replaceable model-provider boundary, private password access, and Railway deployment with hardened persistent SQLite storage.
 
 MootOS is built in small, reviewable steps. The goal is a reliable system that Moot controls and can expand without rebuilding the foundation.
 
@@ -32,6 +32,9 @@ See [`docs/CURRENT_CHECKPOINT.md`](docs/CURRENT_CHECKPOINT.md) for the latest ve
 - Cross-chat recall from the `memories` table
 - Global memories available across project chats
 - Project memories isolated to their matching project
+- Read-only memory review at `/memory`
+- All-memory, global-only, and exact-project memory filters
+- Memory content, scope, project, source, and creation date display
 - Relevant memory context supplied to the model
 - Replaceable model-provider boundary
 - OpenAI Responses API integration
@@ -73,13 +76,39 @@ Do you remember that studio session?
 
 remain ordinary model requests and are not interpreted as writes.
 
+## Review saved memories
+
+Open the protected memory page:
+
+```text
+/memory
+```
+
+Or tap **Memories** from the chat interface.
+
+The screen shows saved rows newest first, including:
+
+- Memory content
+- Global or project scope
+- Project name
+- Memory type or source
+- Creation date
+
+Available filters:
+
+- All memories
+- Global only
+- One exact project
+
+This first interface is deliberately read-only. It does not expose editing, correction, archive, restore, or permanent deletion controls. Those lifecycle changes require a later reviewed schema migration and focused branches.
+
 ## What is not built yet
 
 The following remain planned:
 
 - Natural-language `forget` commands
 - Natural-language memory update and correction commands
-- Memory review and editing interface
+- Memory correction, archive, restore, and search controls
 - Duplicate and conflict detection
 - Keyword or semantic memory search
 - Automatic profile import
@@ -109,7 +138,7 @@ FastAPI application (backend/main.py)
         |-- Project and memory storage (backend/memory.py)
         |-- Explicit memory-command parser (backend/memory_commands.py)
         |-- Model provider boundary (backend/model_router.py)
-        |-- Static mobile interface (frontend/)
+        |-- Static chat and memory review interfaces (frontend/)
         |
         v
 SQLite database
@@ -154,6 +183,8 @@ The browser never receives the OpenAI API key.
 - Conversations without a project can load all memories.
 - At most 20 newest relevant memories are supplied to the model.
 
+The review page can display every saved row, but that does not mean every row is supplied to each model request.
+
 This is simple newest-first retrieval. Keyword ranking, embeddings, correction history, and deduplication are not implemented.
 
 ## Repository layout
@@ -169,7 +200,7 @@ MootOS/
 |   |-- memory.py              Project and memory persistence
 |   |-- memory_commands.py     Explicit save-command parsing
 |   `-- model_router.py        Replaceable provider protocol
-|-- frontend/                  Mobile web interface
+|-- frontend/                  Mobile chat and memory review interfaces
 |-- tests/                     Automated behavior and safety tests
 |-- docs/                      Current truth, runbooks, ADRs, and references
 |-- railway.toml               Railway start and health configuration
@@ -223,6 +254,7 @@ Open:
 
 ```text
 http://127.0.0.1:8000/chat
+http://127.0.0.1:8000/memory
 ```
 
 ### Test
@@ -305,6 +337,7 @@ Protected application routes:
 
 - `GET /chat`
 - `POST /chat`
+- `GET /memory`
 - Project, memory, and conversation APIs
 
 See [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md).
@@ -317,8 +350,9 @@ Current protections:
 - Signed HTTP-only sessions
 - Secure cookies on Railway
 - Environment-based secrets
-- Protected application and APIs
+- Protected chat, memory review, and APIs
 - Verified write-before-confirm memory behavior
+- Read-only memory review browser path
 - Explicit approval before merges
 
 Current limitations:

@@ -1,6 +1,6 @@
 # MootOS Current Implementation
 
-**Applies to:** Version 0.1 with foundation hardening and production-verified explicit chat memory  
+**Applies to:** Version 0.1 with foundation hardening, production-verified explicit chat memory, and the read-only memory review UI  
 **Purpose:** Describe what the code actually does, separate from future plans.
 
 ## 1. Runtime shape
@@ -9,7 +9,7 @@ MootOS runs as one FastAPI application process.
 
 Production uses one Railway service and one replica. The same process:
 
-- Serves the mobile web interface
+- Serves the mobile chat and memory review interfaces
 - Handles login and session validation
 - Exposes JSON APIs
 - Runs schema migrations during startup
@@ -33,6 +33,7 @@ Responsibilities:
 - Initializes the database through the migration runner
 - Defines request models and routes
 - Applies authentication middleware
+- Serves the protected `/chat` and `/memory` interfaces
 - Resolves normal conversations and stores normal chat messages
 - Routes explicit memory-save commands to the atomic chat-memory storage operation
 - Builds model instructions from identity rules and saved memories
@@ -104,6 +105,8 @@ Current migration:
 ```text
 1 — initial_schema
 ```
+
+The memory review UI does not change the database schema.
 
 ### `backend/memory.py`
 
@@ -215,7 +218,7 @@ Current OpenAI behavior:
 
 The frontend is plain HTML, CSS, and JavaScript.
 
-It provides:
+The chat interface provides:
 
 - Login and logout
 - User and assistant message bubbles
@@ -225,8 +228,26 @@ It provides:
 - Saved conversation history
 - Loading and error states
 - Installable web-app metadata
+- A Memories control linking to `/memory`
 
-The frontend does not contain special memory-command controls. Explicit commands are typed into the normal chat composer.
+The memory review interface provides:
+
+- A protected read-only page at `/memory`
+- Newest-first memory cards loaded from `GET /memories`
+- Memory content
+- Global or project scope
+- Project name
+- Memory type or source label
+- Creation date
+- All-memory, global-only, and exact-project filters
+- Refresh, loading, empty, and error states
+- A direct return link to chat
+
+The memory page creates DOM nodes and assigns memory data through `textContent`. It does not render saved memory content as HTML.
+
+The browser memory script contains no `DELETE`, `PATCH`, or `PUT` request. It cannot edit, archive, restore, or permanently delete a memory. The existing administrative delete API still exists, but this interface does not expose it.
+
+The frontend does not contain special memory-save controls. Explicit save commands are typed into the normal chat composer.
 
 ## 3. Database schema
 
@@ -373,7 +394,20 @@ Current retrieval limitations:
 - No duplicate detection
 - No source metadata beyond project, type, and timestamp
 
-## 8. Authentication flow
+## 8. Read-only memory review flow
+
+1. An authenticated browser opens `GET /memory`.
+2. FastAPI serves `frontend/memory.html`.
+3. The browser loads the current project list from `GET /projects`.
+4. The browser loads memories from `GET /memories`.
+5. For an exact project filter, the browser requests `GET /memories?project=<name>`.
+6. For the global-only filter, the browser loads the complete list and displays rows whose project is `NULL`.
+7. Memory cards are rendered newest first with content, scope, project, source, and creation date.
+8. The interface performs no mutation request.
+
+The review screen displays the stored rows. It does not represent the exact 20-row subset sent to a particular model request, and it does not rank memories by relevance.
+
+## 9. Authentication flow
 
 ### Local development
 
@@ -383,7 +417,7 @@ When Railway metadata is absent and both auth variables are absent, auth is disa
 
 When both auth variables are present:
 
-1. Protected browser routes redirect to `/login`.
+1. Protected browser routes, including `/chat` and `/memory`, redirect to `/login`.
 2. Protected APIs return HTTP `401` without a valid cookie.
 3. Correct login creates a signed 30-day cookie.
 4. Logout deletes the cookie.
@@ -396,7 +430,7 @@ When Railway metadata is present:
 - Missing both values causes startup failure.
 - Public startup requires `MOOTOS_ALLOW_PUBLIC=true`.
 
-## 9. Production deployment
+## 10. Production deployment
 
 - Builder: Railpack
 - Server: Uvicorn
@@ -417,7 +451,9 @@ Production verification completed on July 31, 2026:
 - Another Railway rebuild completed.
 - A new conversation recalled the same memory after the rebuild.
 
-## 10. Test coverage
+The memory review UI still requires production verification after its PR is merged.
+
+## 11. Test coverage
 
 Tests cover:
 
@@ -435,13 +471,17 @@ Tests cover:
 - Project-filtered listing behavior
 - Model routing for ordinary memory questions
 - Memory size validation for new and existing conversations
-- Auth, Railway configuration, and mobile interface assets
+- Auth, Railway configuration, and mobile chat assets
+- Protected `/memory` routing
+- Memory page, JavaScript, and responsive stylesheet availability
+- Presence of memory and project API reads in the browser script
+- Absence of browser-side `DELETE`, `PATCH`, and `PUT` requests
 
 Known missing areas:
 
+- Memory correction, archive, restore, and search controls
 - Natural-language forget and update workflows
 - Duplicate and conflict handling
-- Memory review UI
 - Automated backup and restore
 - Provider timeout recovery after saving a user message
 - Login rate limiting
@@ -449,7 +489,7 @@ Known missing areas:
 
 A manual backup and restore procedure is documented in [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md), but an off-volume backup and restore drill have not yet been recorded as complete.
 
-## 11. Intentional boundaries
+## 12. Intentional boundaries
 
 Version 0.1 remains:
 
@@ -465,7 +505,9 @@ Version 0.1 remains:
 
 Explicit chat saves are deliberately narrow. MootOS does not silently convert ordinary conversation into permanent memory.
 
-## 12. Source of truth
+The memory review interface is deliberately read-only. Database lifecycle fields, correction history, and recoverable archival remain planned for migration 2 and later focused branches.
+
+## 13. Source of truth
 
 When code and documentation disagree:
 

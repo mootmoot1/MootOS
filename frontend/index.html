@@ -11,6 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/static/styles.css">
   <link rel="stylesheet" href="/static/deployment.css">
+  <link rel="stylesheet" href="/static/memory.css">
 </head>
 <body>
   <div class="app-shell">
@@ -27,6 +28,10 @@
         <span aria-hidden="true">＋</span>
         New chat
       </button>
+
+      <form class="memory-nav-form" action="/memory" method="get">
+        <button class="secondary-button memory-nav-button" type="submit">Memories</button>
+      </form>
 
       <label class="field-label" for="projectSelect">Project</label>
       <select id="projectSelect" class="project-select">
@@ -59,6 +64,9 @@
           </span>
         </div>
         <div class="topbar-actions">
+          <form class="memory-nav-form topbar-memory-nav" action="/memory" method="get">
+            <button class="secondary-button" type="submit">Memories</button>
+          </form>
           <button class="secondary-button" id="headerNewChatButton" type="button">New chat</button>
           <form class="logout-form desktop-only" action="/auth/logout" method="post">
             <button class="text-button" type="submit">Log out</button>

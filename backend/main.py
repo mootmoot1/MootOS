@@ -56,7 +56,7 @@ PUBLIC_PATHS = {
     "/login",
     "/manifest.webmanifest",
 }
-HTML_PATHS = {"/", "/chat", "/docs", "/redoc"}
+HTML_PATHS = {"/", "/chat", "/memory", "/docs", "/redoc"}
 MAX_MEMORY_CONTENT_LENGTH = 10_000
 
 validate_auth_configuration()
@@ -231,6 +231,12 @@ def logout() -> RedirectResponse:
 def chat_interface() -> FileResponse:
     """Serve the mobile-friendly MootOS chat interface."""
     return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/memory", include_in_schema=False)
+def memory_interface() -> FileResponse:
+    """Serve the read-only long-term-memory review interface."""
+    return FileResponse(FRONTEND_DIR / "memory.html")
 
 
 @app.get("/manifest.webmanifest", include_in_schema=False)

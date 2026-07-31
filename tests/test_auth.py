@@ -18,12 +18,15 @@ def private_client(monkeypatch):
 
 
 def test_private_deployment_redirects_browser_and_blocks_api(private_client):
-    browser = private_client.get("/chat", follow_redirects=False)
+    chat_browser = private_client.get("/chat", follow_redirects=False)
+    memory_browser = private_client.get("/memory", follow_redirects=False)
     api = private_client.get("/projects")
     health = private_client.get("/health")
 
-    assert browser.status_code == 303
-    assert browser.headers["location"] == "/login?next=/chat"
+    assert chat_browser.status_code == 303
+    assert chat_browser.headers["location"] == "/login?next=/chat"
+    assert memory_browser.status_code == 303
+    assert memory_browser.headers["location"] == "/login?next=/memory"
     assert api.status_code == 401
     assert api.json()["detail"] == "Authentication required"
     assert health.status_code == 200
@@ -49,7 +52,9 @@ def test_correct_password_unlocks_interface_and_api(private_client):
     assert login.status_code == 200
     assert "mootos_session" in private_client.cookies
     assert private_client.get("/chat").status_code == 200
+    assert private_client.get("/memory").status_code == 200
     assert private_client.get("/projects").status_code == 200
+    assert private_client.get("/memories").status_code == 200
 
 
 def test_logout_clears_private_session(private_client):
@@ -73,6 +78,7 @@ def test_auth_can_remain_disabled_for_local_development(monkeypatch):
     client = TestClient(app)
 
     assert client.get("/chat").status_code == 200
+    assert client.get("/memory").status_code == 200
     assert client.get("/projects").status_code == 200
 
 

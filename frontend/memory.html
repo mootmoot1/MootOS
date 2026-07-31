@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MootOS">
+  <title>Memories · MootOS</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/deployment.css">
+  <link rel="stylesheet" href="/static/memory.css">
+</head>
+<body class="memory-page">
+  <div class="memory-shell">
+    <header class="memory-page-header">
+      <div>
+        <p class="eyebrow">MootOS v0.1</p>
+        <h1>Long-term memories</h1>
+        <p class="memory-intro">
+          Review what MootOS has stored in SQLite. This first version is read-only.
+        </p>
+      </div>
+
+      <div class="memory-page-actions">
+        <a class="secondary-button memory-link-button" href="/chat">Back to chat</a>
+        <form class="logout-form" action="/auth/logout" method="post">
+          <button class="text-button" type="submit">Log out</button>
+        </form>
+      </div>
+    </header>
+
+    <section class="memory-toolbar" aria-label="Memory filters">
+      <div class="memory-filter-group">
+        <label class="memory-field-label" for="memoryProjectFilter">Scope</label>
+        <select id="memoryProjectFilter" class="project-select">
+          <option value="all">All memories</option>
+          <option value="global">Global only</option>
+        </select>
+      </div>
+
+      <button class="secondary-button" id="refreshMemoriesButton" type="button">
+        Refresh
+      </button>
+    </section>
+
+    <p class="memory-summary" id="memorySummary">Loading memories…</p>
+    <div class="error-banner memory-error" id="memoryError" role="alert" hidden></div>
+
+    <main
+      class="memory-list"
+      id="memoryList"
+      aria-live="polite"
+      aria-busy="true"
+      aria-label="Saved long-term memories"
+    >
+      <div class="memory-loading-state">
+        <div class="memory-loading-dot" aria-hidden="true"></div>
+        <p>Loading saved memories…</p>
+      </div>
+    </main>
+
+    <section class="memory-readonly-note" aria-label="Read-only notice">
+      <strong>Read-only for safety.</strong>
+      <span>
+        Correction, archive, restore, and search controls will be added in later reviewed branches.
+      </span>
+    </section>
+  </div>
+
+  <script src="/static/memory.js" defer></script>
+</body>
+</html>
