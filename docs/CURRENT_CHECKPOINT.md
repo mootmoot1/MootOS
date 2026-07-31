@@ -199,11 +199,11 @@ Completed:
 - Project-filtered memory listing remains project-only.
 - GitHub Actions passed on Python 3.9, 3.10, and 3.11 after the external-review fixes.
 - Dependency installation, blocking-error lint, and the full test suite passed in every matrix job.
-- All 13 changed files were reviewed before the final documentation update.
+- All 13 changed files were reviewed.
+- The current implementation guide and checkpoint were synchronized with the atomic transaction behavior.
 
 Still required before merge:
 
-- Final documentation-only GitHub Actions run
 - Plain-language review with Moot
 - Explicit merge approval
 
@@ -272,4 +272,4 @@ A future advisory system may use specialist business, technical, creative, and r
 
 ## Immediate decision
 
-Wait for the final documentation-only GitHub Actions run, review PR #12 in plain language, and do not merge until Moot explicitly approves it.
+Review PR #12 in plain language. Do not merge until Moot explicitly approves it.
