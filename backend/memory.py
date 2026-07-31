@@ -127,6 +127,37 @@ def list_memories(project: Optional[str] = None) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def list_context_memories(project: Optional[str] = None) -> list[dict[str, Any]]:
+    """Return memories relevant to model context.
+
+    Unassigned memories are global and available in every project conversation.
+    Project-assigned memories remain limited to their matching project.
+    """
+    with database_connection() as connection:
+        if project is None:
+            rows = connection.execute(
+                """
+                SELECT id, content, project, memory_type, created_at
+                FROM memories
+                ORDER BY created_at DESC
+                """
+            ).fetchall()
+        else:
+            saved_project = _get_project(connection, project)
+            if saved_project is None:
+                raise ValueError("Project does not exist")
+            rows = connection.execute(
+                """
+                SELECT id, content, project, memory_type, created_at
+                FROM memories
+                WHERE project IS NULL OR project = ? COLLATE NOCASE
+                ORDER BY created_at DESC
+                """,
+                (saved_project["name"],),
+            ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_memory(memory_id: str) -> Optional[dict[str, Any]]:
     """Return one memory or None when it does not exist."""
     with database_connection() as connection:
