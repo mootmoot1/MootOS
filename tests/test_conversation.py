@@ -181,3 +181,139 @@ def test_conversation_messages_survive_database_reconnect(
             (data["conversation_id"],),
         ).fetchone()[0]
     assert count == 2
+
+
+def test_chat_memory_command_writes_before_confirming(
+    clean_db,
+    client,
+    monkeypatch,
+):
+    def unexpected_router():
+        raise AssertionError("Explicit memory saves must not call the model provider")
+
+    monkeypatch.setattr("backend.main.get_model_router", unexpected_router)
+
+    response = client.post(
+        "/chat",
+        json={
+            "message": "Remember that my favorite tea is jasmine.",
+            "project": "Personal",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["provider"] == "mootos"
+    assert data["model"] == "memory-command-v1"
+    assert "Saved to Personal long-term memory" in data["assistant_message"]["content"]
+
+    memories = client.get("/memories", params={"project": "Personal"}).json()["data"]
+    assert len(memories) == 1
+    assert memories[0]["content"] == "my favorite tea is jasmine."
+    assert memories[0]["memory_type"] == "explicit_chat"
+
+
+def test_chat_memory_is_available_in_a_brand_new_conversation(
+    clean_db,
+    client,
+    monkeypatch,
+):
+    saved = client.post(
+        "/chat",
+        json={
+            "message": "Save this to memory: My favorite tea is jasmine.",
+            "project": "Personal",
+        },
+    )
+    assert saved.status_code == 200
+
+    fake_router = FakeRouter(text="Your favorite tea is jasmine.")
+    monkeypatch.setattr("backend.main.get_model_router", lambda: fake_router)
+
+    recalled = client.post(
+        "/chat",
+        json={"message": "What is my favorite tea?", "project": "Personal"},
+    )
+
+    assert recalled.status_code == 200
+    assert "My favorite tea is jasmine." in fake_router.instructions
+    assert recalled.json()["data"]["provider"] == "fake"
+
+
+def test_global_chat_memory_is_available_inside_project_chats(
+    clean_db,
+    client,
+    monkeypatch,
+):
+    saved = client.post(
+        "/chat",
+        json={"message": "Remember that I prefer plain explanations."},
+    )
+    assert saved.status_code == 200
+
+    fake_router = FakeRouter()
+    monkeypatch.setattr("backend.main.get_model_router", lambda: fake_router)
+
+    response = client.post(
+        "/chat",
+        json={"message": "Explain the next task.", "project": "MootOS"},
+    )
+
+    assert response.status_code == 200
+    assert "I prefer plain explanations." in fake_router.instructions
+    assert "[Global / explicit_chat]" in fake_router.instructions
+
+
+def test_project_chat_memory_does_not_leak_to_another_project(
+    clean_db,
+    client,
+    monkeypatch,
+):
+    saved = client.post(
+        "/chat",
+        json={
+            "message": "Remember that the brake pads need replacement.",
+            "project": "Cars",
+        },
+    )
+    assert saved.status_code == 200
+
+    fake_router = FakeRouter()
+    monkeypatch.setattr("backend.main.get_model_router", lambda: fake_router)
+
+    response = client.post(
+        "/chat",
+        json={"message": "What should I work on?", "project": "Studio"},
+    )
+
+    assert response.status_code == 200
+    assert "brake pads need replacement" not in fake_router.instructions
+
+
+def test_memory_question_still_uses_the_model_provider(
+    clean_db,
+    client,
+    monkeypatch,
+):
+    fake_router = FakeRouter(text="I can check the saved context.")
+    monkeypatch.setattr("backend.main.get_model_router", lambda: fake_router)
+
+    response = client.post(
+        "/chat",
+        json={"message": "Do you remember that studio session?"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["provider"] == "fake"
+    assert fake_router.messages[-1]["content"] == "Do you remember that studio session?"
+
+
+def test_chat_memory_command_respects_memory_size_limit(clean_db, client):
+    response = client.post(
+        "/chat",
+        json={"message": "Remember that " + ("x" * 10_001)},
+    )
+
+    assert response.status_code == 422
+    assert "10,000 characters or fewer" in response.json()["detail"]
+    assert client.get("/conversations").json()["data"] == []
