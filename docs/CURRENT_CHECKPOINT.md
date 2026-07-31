@@ -141,7 +141,10 @@ Implemented on the draft branch:
 - Deterministic parser in `backend/memory_commands.py`
 - Supported command forms beginning with `remember`, `save this`, or `save to memory`
 - Ordinary questions such as `Do you remember ...?` remain normal model requests
-- Database write occurs before confirmation
+- Incomplete, placeholder, and punctuation-only content is rejected
+- Complete explicit-memory chat turns are stored atomically in `backend/chat_memory.py`
+- New conversation, user message, memory row, and confirmation commit together
+- Any failed memory or confirmation write rolls back the complete turn
 - Save commands bypass OpenAI and do not spend model credits
 - Saved chat memories use memory type `explicit_chat`
 - Internal confirmation messages record provider `mootos` and model `memory-command-v1`
@@ -149,7 +152,7 @@ Implemented on the draft branch:
 - Project memories remain isolated from unrelated projects
 - Existing 10,000-character memory limit is enforced
 - End-to-end test saves in one chat and recalls in a brand-new conversation
-- Parser, project-scope, model-routing, and validation tests
+- Parser, project-scope, model-routing, transaction, rollback, listing, and validation tests
 
 Not included:
 
@@ -162,22 +165,45 @@ Not included:
 - Schema changes
 - Frontend redesign
 
+## External read-only review
+
+A separate Grok review was performed without repository writes.
+
+Accepted and fixed findings:
+
+- A failed memory write could leave an unmatched user message or new conversation.
+- Punctuation-only commands could create junk memories.
+- Parser boundary and command-variant coverage was too narrow.
+- Global confirmation casing was inconsistent.
+- Failure-path, existing-conversation, listing-scope, and additional validation tests were missing.
+
+Reviewed but intentionally not changed in this PR:
+
+- Manual deletion of a project could break an old project conversation. There is no project-delete API today, so that lifecycle belongs to a future focused change.
+- A command beginning with `Remember` remains explicit even when the saved content ends with a question mark.
+
 ## Verification status for PR #12
 
-Completed in code and tests on the branch:
+Completed:
 
 - Explicit save commands write to SQLite before confirmation.
 - A save command does not call the model provider.
 - The saved memory is supplied to a separate new conversation.
 - Global memories are available across projects.
 - Project memories do not leak into unrelated projects.
-- Incomplete commands and ordinary questions are not misclassified.
-- Oversized memories are rejected before a conversation is created.
+- Incomplete, punctuation-only, and ordinary question inputs are not misclassified.
+- Oversized memories are rejected before any new turn data is stored.
+- Forced memory-write failure rolls back a new chat completely.
+- Forced memory-write failure leaves an existing chat unchanged.
+- Forced confirmation-write failure rolls back the memory and conversation turn.
+- Project-filtered memory listing remains project-only.
+- GitHub Actions passed on Python 3.9, 3.10, and 3.11 after the external-review fixes.
+- Dependency installation, blocking-error lint, and the full test suite passed in every matrix job.
+- All 13 changed files were reviewed before the final documentation update.
 
 Still required before merge:
 
-- GitHub Actions on Python 3.9, 3.10, and 3.11
-- Final diff review
+- Final documentation-only GitHub Actions run
 - Plain-language review with Moot
 - Explicit merge approval
 
@@ -240,10 +266,10 @@ A future advisory system may use specialist business, technical, creative, and r
 - Major architecture decisions use ADRs
 - One Railway replica while SQLite is live
 - Backups before destructive storage changes
-- Never claim a memory was saved unless the database write succeeded
+- Never claim a memory was saved unless the complete storage transaction committed
 - Honest reporting of tests, deployments, and uncertainty
 - Moot explicitly approves merges and high-risk actions
 
 ## Immediate decision
 
-Finish PR #12 documentation and automated review. Do not merge until checks pass and Moot explicitly approves it.
+Wait for the final documentation-only GitHub Actions run, review PR #12 in plain language, and do not merge until Moot explicitly approves it.
