@@ -1,6 +1,6 @@
 # MootOS Current Implementation
 
-**Applies to:** Version 0.1 with foundation hardening and draft chat-memory commands  
+**Applies to:** Version 0.1 with foundation hardening and production-verified explicit chat memory  
 **Purpose:** Describe what the code actually does, separate from future plans.
 
 ## 1. Runtime shape
@@ -408,6 +408,15 @@ When Railway metadata is present:
 - Volume mount: `/data`
 - Database: `/data/mootos.db`
 
+Production verification completed on July 31, 2026:
+
+- PR #12 deployed from merged `main`.
+- Login and normal chat remained functional.
+- An explicit memory command created a durable global memory.
+- A brand-new conversation recalled that memory.
+- Another Railway rebuild completed.
+- A new conversation recalled the same memory after the rebuild.
+
 ## 10. Test coverage
 
 Tests cover:
@@ -433,10 +442,12 @@ Known missing areas:
 - Natural-language forget and update workflows
 - Duplicate and conflict handling
 - Memory review UI
-- Automatic backup and restore
+- Automated backup and restore
 - Provider timeout recovery after saving a user message
 - Login rate limiting
 - Browser end-to-end tests against Railway
+
+A manual backup and restore procedure is documented in [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md), but an off-volume backup and restore drill have not yet been recorded as complete.
 
 ## 11. Intentional boundaries
 
