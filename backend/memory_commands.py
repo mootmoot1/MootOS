@@ -37,8 +37,8 @@ def _strip_optional_please(message: str) -> str:
 
 
 def _content_after_prefix(message: str, prefix: str) -> Optional[str]:
-    lowered = message.casefold()
-    if not lowered.startswith(prefix):
+    candidate = message[: len(prefix)]
+    if candidate.casefold() != prefix:
         return None
 
     if len(message) > len(prefix):
@@ -48,7 +48,11 @@ def _content_after_prefix(message: str, prefix: str) -> Optional[str]:
 
     content = message[len(prefix) :].lstrip(" \t\r\n:,-").strip()
     placeholder = content.casefold().strip(" \t\r\n?!.,:;-")
-    if not content or placeholder in {"this", "that"}:
+    if (
+        not content
+        or placeholder in {"this", "that"}
+        or not any(character.isalnum() for character in content)
+    ):
         return None
     return content
 
