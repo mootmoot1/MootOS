@@ -155,6 +155,95 @@ Production verification:
 
 PR #12 is complete and production-verified.
 
+### PR #13 — Production verification documentation
+
+Merged into `main` on July 31, 2026.
+
+Squash merge commit:
+
+```text
+8376fd9da4fdf685ac39dca453bd23e81c53849c
+```
+
+Implemented:
+
+- Recorded PR #12 production verification
+- Removed stale draft and pending language
+- Locked the memory-control branch sequence
+- Added a manual WAL-safe SQLite backup and restore procedure
+- Clarified main, WAL, and SHM handling during restore
+- Kept automatic off-volume backup and tested recovery honestly incomplete
+
+## Current work — read-only memory review UI
+
+Branch:
+
+```text
+feature/memory-review-ui-v0.1
+```
+
+Purpose:
+
+Let Moot inspect the long-term memories currently stored in SQLite before correction or forgetting controls are introduced.
+
+Implemented on the branch:
+
+- Protected `GET /memory` browser route
+- Memories controls in the chat sidebar and desktop top bar
+- Read-only memory cards loaded from the existing `GET /memories` API
+- Memory content
+- Global or project scope
+- Project name
+- Memory type or source label
+- Creation date
+- All-memory, global-only, and exact-project filters
+- Refresh, loading, empty, and error states
+- Mobile responsive layout
+- Safe DOM rendering through `textContent`
+- No browser-side `DELETE`, `PATCH`, or `PUT` requests
+- Auth tests proving `/memory` remains private
+- Interface tests proving `/memory` does not replace `/memories`
+- Synchronized README, API reference, and implementation documentation
+
+Not included:
+
+- Database schema changes
+- Memory editing or correction
+- Archive, restore, or permanent delete controls
+- Natural-language `forget` or `update`
+- Search or relevance ranking
+- Pagination
+- Frontend redesign outside the memory-review surface
+
+## Verification status for the memory review branch
+
+Completed before draft review:
+
+- Branch created from merged `main`
+- Existing JSON memory API reused without behavior changes
+- Protected HTML route added separately from `/memories`
+- Read-only browser implementation added
+- Focused route, asset, and auth tests added
+- Documentation synchronized
+
+Still required before merge:
+
+- GitHub Actions on the exact final head
+- Complete diff review
+- External read-only Grok review when requested
+- Plain-language review with Moot
+- Moot's explicit merge approval
+
+Still required after merge:
+
+- Railway reaches online status
+- Login remains functional
+- Open Memories from the phone chat interface
+- Confirm the production global test memory appears
+- Confirm all, global-only, and one project filter work
+- Confirm no edit or delete controls appear
+- Confirm chat and existing conversations still work
+
 ## Current implementation boundaries
 
 MootOS remains:
@@ -170,11 +259,13 @@ MootOS remains:
 - No multi-agent system
 - No automatic off-volume backups
 
-Memory currently supports deliberate save and cross-chat recall. Memory review, correction, archival, keyword retrieval, duplicate handling, and natural-language forget or update are incomplete.
+Memory supports deliberate save and cross-chat recall in production. The read-only review UI is implemented on the current branch but is not production-verified until it is reviewed, merged, deployed, and tested.
+
+Memory correction, archival, keyword retrieval, duplicate handling, and natural-language forget or update remain incomplete.
 
 ## Current planning decision
 
-The next memory-control sequence is:
+The memory-control sequence remains:
 
 1. Read-only memory review interface
 2. UI-selected memory correction with preserved history
@@ -193,24 +284,7 @@ archived
 
 The exact migration design must be reviewed before implementation.
 
-## Current documentation branch
-
-Branch:
-
-```text
-docs/pr12-production-verification
-```
-
-Purpose:
-
-- Record PR #12 as merged and production-verified
-- Remove stale draft and pending language
-- Record the next agreed product sequence
-- Add a manual SQLite backup and restore procedure before migration 2
-
-The procedure is documented in [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md).
-
-Documentation does not equal a verified backup. Before migration 2 reaches production, MootOS still needs:
+Before migration 2 reaches production, MootOS still needs the backup checkpoint documented in [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md):
 
 - A consistent SQLite snapshot
 - A matching off-volume copy
@@ -218,24 +292,6 @@ Documentation does not equal a verified backup. Before migration 2 reaches produ
 - A non-production restore drill
 
 No private database file, backup, or memory content belongs in GitHub.
-
-## Next product branch
-
-After this documentation PR is reviewed and merged:
-
-```text
-feature/memory-review-ui-v0.1
-```
-
-Planned first scope:
-
-- Read-only memory list on mobile
-- Memory content
-- Global or project scope
-- Memory type or source
-- Creation date
-- Project filtering
-- No editing, deletion, correction, search, or redesign in the first branch
 
 ## Preserved future ideas
 
@@ -266,4 +322,4 @@ A future advisory system may use specialist business, technical, creative, and r
 
 ## Immediate decision
 
-Review and merge the production-verification documentation branch. Then build the read-only memory review interface as the next focused product PR.
+Open the memory review UI as a draft PR, complete automated and external review, and do not merge until Moot explicitly approves the exact final head.
