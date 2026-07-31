@@ -44,6 +44,12 @@ Redirects to `/chat` with HTTP `307`.
 
 Serves the main chat interface.
 
+### `GET /memory`
+
+Serves the protected read-only memory review interface.
+
+The browser page reads from `GET /projects` and `GET /memories`. It does not expose editing, archive, restore, or delete controls.
+
 ### `GET /login`
 
 Serves the private login page. Redirects to `/chat` when auth is disabled or the request is already authenticated.
@@ -207,6 +213,8 @@ The project filter returns only memories assigned to that project. It does not i
 
 Unknown project filter returns HTTP `404`.
 
+The `/memory` browser interface uses this endpoint. Its global-only option loads the complete list and displays rows whose `project` value is `null`.
+
 ### `GET /memories/{memory_id}`
 
 Returns one memory. Missing records return HTTP `404`.
@@ -227,7 +235,7 @@ Success:
 }
 ```
 
-There is no memory update endpoint yet.
+There is no memory update endpoint yet. The read-only review page does not call this delete endpoint.
 
 ## Conversations
 
@@ -465,7 +473,7 @@ Not implemented:
 - Duplicate detection
 - Conflict resolution
 - Keyword or semantic search
-- Memory review UI
+- Memory correction, archive, and restore UI
 
 ## FastAPI-generated documentation
 
