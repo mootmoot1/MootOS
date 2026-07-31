@@ -5,18 +5,54 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from backend.memory import DATABASE_PATH, get_project
+from backend.db import database_connection
 
 
 VALID_MESSAGE_ROLES = {"user", "assistant"}
 
 
-def _connect() -> sqlite3.Connection:
-    """Open the shared MootOS SQLite database."""
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DATABASE_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
+def _canonical_project_name(
+    connection: sqlite3.Connection,
+    project: str,
+) -> Optional[str]:
+    row = connection.execute(
+        "SELECT name FROM projects WHERE name = ? COLLATE NOCASE",
+        (project,),
+    ).fetchone()
+    return str(row["name"]) if row else None
+
+
+def _list_messages(
+    connection: sqlite3.Connection,
+    conversation_id: str,
+    limit: Optional[int] = None,
+) -> list[dict[str, Any]]:
+    if limit is None:
+        rows = connection.execute(
+            """
+            SELECT id, conversation_id, role, content, provider, model, created_at
+            FROM messages
+            WHERE conversation_id = ?
+            ORDER BY created_at ASC
+            """,
+            (conversation_id,),
+        ).fetchall()
+    else:
+        rows = connection.execute(
+            """
+            SELECT id, conversation_id, role, content, provider, model, created_at
+            FROM (
+                SELECT id, conversation_id, role, content, provider, model, created_at
+                FROM messages
+                WHERE conversation_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            )
+            ORDER BY created_at ASC
+            """,
+            (conversation_id, limit),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def create_conversation(
@@ -24,21 +60,21 @@ def create_conversation(
     title: Optional[str] = None,
 ) -> dict[str, Any]:
     """Create and return a conversation."""
-    if project is not None:
-        saved_project = get_project(project)
-        if saved_project is None:
-            raise ValueError("Project does not exist")
-        project = saved_project["name"]
+    with database_connection() as connection:
+        if project is not None:
+            canonical_name = _canonical_project_name(connection, project)
+            if canonical_name is None:
+                raise ValueError("Project does not exist")
+            project = canonical_name
 
-    now = datetime.now(timezone.utc).isoformat()
-    conversation = {
-        "id": str(uuid.uuid4()),
-        "title": title or "New conversation",
-        "project": project,
-        "created_at": now,
-        "updated_at": now,
-    }
-    with _connect() as connection:
+        now = datetime.now(timezone.utc).isoformat()
+        conversation = {
+            "id": str(uuid.uuid4()),
+            "title": title or "New conversation",
+            "project": project,
+            "created_at": now,
+            "updated_at": now,
+        }
         connection.execute(
             """
             INSERT INTO conversations (id, title, project, created_at, updated_at)
@@ -51,7 +87,7 @@ def create_conversation(
 
 def list_conversations(project: Optional[str] = None) -> list[dict[str, Any]]:
     """Return conversations newest first, optionally filtered by project."""
-    with _connect() as connection:
+    with database_connection() as connection:
         if project is None:
             rows = connection.execute(
                 """
@@ -61,8 +97,8 @@ def list_conversations(project: Optional[str] = None) -> list[dict[str, Any]]:
                 """
             ).fetchall()
         else:
-            saved_project = get_project(project)
-            if saved_project is None:
+            canonical_name = _canonical_project_name(connection, project)
+            if canonical_name is None:
                 raise ValueError("Project does not exist")
             rows = connection.execute(
                 """
@@ -71,14 +107,14 @@ def list_conversations(project: Optional[str] = None) -> list[dict[str, Any]]:
                 WHERE project = ? COLLATE NOCASE
                 ORDER BY updated_at DESC
                 """,
-                (saved_project["name"],),
+                (canonical_name,),
             ).fetchall()
     return [dict(row) for row in rows]
 
 
 def get_conversation(conversation_id: str) -> Optional[dict[str, Any]]:
     """Return one conversation with its complete message history."""
-    with _connect() as connection:
+    with database_connection() as connection:
         row = connection.execute(
             """
             SELECT id, title, project, created_at, updated_at
@@ -87,12 +123,12 @@ def get_conversation(conversation_id: str) -> Optional[dict[str, Any]]:
             """,
             (conversation_id,),
         ).fetchone()
-    if row is None:
-        return None
+        if row is None:
+            return None
 
-    conversation = dict(row)
-    conversation["messages"] = list_messages(conversation_id)
-    return conversation
+        conversation = dict(row)
+        conversation["messages"] = _list_messages(connection, conversation_id)
+        return conversation
 
 
 def list_messages(
@@ -100,33 +136,8 @@ def list_messages(
     limit: Optional[int] = None,
 ) -> list[dict[str, Any]]:
     """Return conversation messages oldest first."""
-    with _connect() as connection:
-        if limit is None:
-            rows = connection.execute(
-                """
-                SELECT id, conversation_id, role, content, provider, model, created_at
-                FROM messages
-                WHERE conversation_id = ?
-                ORDER BY created_at ASC
-                """,
-                (conversation_id,),
-            ).fetchall()
-        else:
-            rows = connection.execute(
-                """
-                SELECT id, conversation_id, role, content, provider, model, created_at
-                FROM (
-                    SELECT id, conversation_id, role, content, provider, model, created_at
-                    FROM messages
-                    WHERE conversation_id = ?
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                )
-                ORDER BY created_at ASC
-                """,
-                (conversation_id, limit),
-            ).fetchall()
-    return [dict(row) for row in rows]
+    with database_connection() as connection:
+        return _list_messages(connection, conversation_id, limit)
 
 
 def add_message(
@@ -136,11 +147,9 @@ def add_message(
     provider: Optional[str] = None,
     model: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Persist one user or assistant message."""
+    """Persist one user or assistant message and update its conversation."""
     if role not in VALID_MESSAGE_ROLES:
         raise ValueError("Message role must be user or assistant")
-    if get_conversation(conversation_id) is None:
-        raise ValueError("Conversation does not exist")
 
     created_at = datetime.now(timezone.utc).isoformat()
     message = {
@@ -152,7 +161,15 @@ def add_message(
         "model": model,
         "created_at": created_at,
     }
-    with _connect() as connection:
+
+    with database_connection() as connection:
+        conversation = connection.execute(
+            "SELECT 1 FROM conversations WHERE id = ?",
+            (conversation_id,),
+        ).fetchone()
+        if conversation is None:
+            raise ValueError("Conversation does not exist")
+
         connection.execute(
             """
             INSERT INTO messages (
