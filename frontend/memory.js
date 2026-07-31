@@ -6,6 +6,8 @@ const elements = {
   memoryError: document.querySelector("#memoryError"),
 };
 
+let memoryRequestGeneration = 0;
+
 function normalizeError(detail, fallback) {
   if (typeof detail === "string" && detail.trim()) {
     return detail;
@@ -213,11 +215,13 @@ async function loadProjects() {
 }
 
 async function loadMemories() {
+  const requestGeneration = ++memoryRequestGeneration;
+  const filterValue = elements.projectFilter.value;
+
   setLoading(true);
   clearError();
 
   try {
-    const filterValue = elements.projectFilter.value;
     let path = "/memories";
 
     if (filterValue.startsWith("project:")) {
@@ -226,17 +230,27 @@ async function loadMemories() {
     }
 
     let memories = await apiRequest(path);
+    if (requestGeneration !== memoryRequestGeneration) {
+      return;
+    }
+
     if (filterValue === "global") {
       memories = memories.filter((memory) => !memory.project);
     }
 
     renderMemories(memories);
   } catch (error) {
+    if (requestGeneration !== memoryRequestGeneration) {
+      return;
+    }
+
     elements.memorySummary.textContent = "Unable to load memories";
     elements.memoryList.replaceChildren();
     showError(error.message);
   } finally {
-    setLoading(false);
+    if (requestGeneration === memoryRequestGeneration) {
+      setLoading(false);
+    }
   }
 }
 
