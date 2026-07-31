@@ -11,7 +11,8 @@ These documents describe the code and deployment that exist today.
 - [`CURRENT_CHECKPOINT.md`](CURRENT_CHECKPOINT.md) — latest verified project status and next milestone
 - [`CURRENT_IMPLEMENTATION.md`](CURRENT_IMPLEMENTATION.md) — current modules, request flows, boundaries, and known limitations
 - [`API_REFERENCE.md`](API_REFERENCE.md) — current HTTP routes, request fields, response shapes, and errors
-- [`DATA_AND_PERSISTENCE.md`](DATA_AND_PERSISTENCE.md) — SQLite layout, database paths, Railway volume rules, backup guidance, and future migration triggers
+- [`DATA_AND_PERSISTENCE.md`](DATA_AND_PERSISTENCE.md) — SQLite layout, database paths, Railway volume rules, backup guidance, and migration behavior
+- [`FOUNDATION_HARDENING.md`](FOUNDATION_HARDENING.md) — centralized SQLite settings, schema migrations, production auth safety, validation, and deployment checks
 
 When a statement in a future-looking document conflicts with these files, these files should be treated as the description of the current implementation.
 
@@ -20,7 +21,7 @@ When a statement in a future-looking document conflicts with these files, these 
 These documents explain how to deploy, verify, recover, and maintain the live system.
 
 - [`PHONE_DEPLOYMENT.md`](PHONE_DEPLOYMENT.md) — initial Railway and phone setup
-- [`OPERATIONS_RUNBOOK.md`](OPERATIONS_RUNBOOK.md) — routine deployment, health checks, persistence verification, incident response, and rollback
+- [`OPERATIONS_RUNBOOK.md`](OPERATIONS_RUNBOOK.md) — routine deployment, health checks, persistence verification, incident response, migration safety, and rollback
 
 ## 3. Architecture history
 
@@ -30,6 +31,7 @@ These documents preserve why important technical choices were made.
 - [`ADR-012-conversation-engine-and-model-router.md`](ADR-012-conversation-engine-and-model-router.md)
 - [`ADR-013-mobile-chat-interface.md`](ADR-013-mobile-chat-interface.md)
 - [`ADR-014-secure-phone-deployment.md`](ADR-014-secure-phone-deployment.md)
+- [`ADR-015-foundation-hardening.md`](ADR-015-foundation-hardening.md)
 
 The repository root also contains:
 
@@ -53,15 +55,17 @@ For a new developer or AI coding agent:
 2. `docs/CURRENT_CHECKPOINT.md`
 3. `docs/CURRENT_IMPLEMENTATION.md`
 4. `docs/DATA_AND_PERSISTENCE.md`
-5. `CONTRIBUTING.md`
-6. The ADR related to the system being changed
-7. The relevant code and tests
+5. `docs/FOUNDATION_HARDENING.md`
+6. `CONTRIBUTING.md`
+7. The ADR related to the system being changed
+8. The relevant code and tests
 
 For operating the live Railway deployment:
 
 1. `docs/OPERATIONS_RUNBOOK.md`
 2. `docs/DATA_AND_PERSISTENCE.md`
-3. `docs/PHONE_DEPLOYMENT.md`
+3. `docs/FOUNDATION_HARDENING.md`
+4. `docs/PHONE_DEPLOYMENT.md`
 
 For planning a future feature:
 
