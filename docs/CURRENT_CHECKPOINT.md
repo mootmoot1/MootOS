@@ -127,25 +127,23 @@ Production setup completed:
 - Login and chat verified
 - Persistence verified across three deployments
 
-## Current documentation work
+### PR #10 — Comprehensive documentation baseline
 
-Branch:
+Established:
 
-```text
-docs/comprehensive-documentation-v0.1
-```
+- A complete repository README and system overview
+- A documentation index and recommended reading order
+- Exact current-implementation documentation separated from future vision
+- A full current API reference
+- SQLite, Railway volume, backup, redundancy, and migration guidance
+- A production operations and incident-response runbook
+- A documentation maintenance policy
+- Updated deployment, requirements, checkpoint, and roadmap documents
 
-Purpose:
+Runtime impact:
 
-- Replace the minimal README with a complete project guide
-- Separate current implementation from future vision
-- Document the API
-- Document database and persistence rules
-- Add an operations runbook
-- Add a documentation-maintenance policy
-- Update deployment, roadmap, architecture, and contribution guidance
-
-This branch is documentation-only. It must not change application runtime behavior.
+- Documentation only
+- No application, database, frontend, dependency, authentication, provider, or Railway configuration behavior changed
 
 ## Current implementation boundaries
 
@@ -169,7 +167,7 @@ These limits are documented so planned features are not confused with existing b
 
 ## Next engineering milestone
 
-After the documentation PR is reviewed and merged, prepare a focused foundation-hardening PR.
+Prepare a focused foundation-hardening PR.
 
 Recommended scope:
 
@@ -229,6 +227,4 @@ This system should begin small, remain reviewable, and avoid wasting API credits
 
 ## Immediate decision
 
-Finish and review the comprehensive documentation PR first.
-
-Then harden the foundation before expanding memory behavior or adding major features.
+Proceed with foundation hardening before expanding memory behavior or adding major features.
