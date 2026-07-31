@@ -81,6 +81,33 @@ def test_existing_chat_memory_write_failure_leaves_no_unmatched_message(
     assert _table_count("memories") == 0
 
 
+def test_confirmation_write_failure_rolls_back_memory_and_conversation(
+    clean_db,
+    monkeypatch,
+):
+    from backend import chat_memory
+
+    original_insert_message = chat_memory._insert_message
+
+    def fail_assistant_message(*args, **kwargs):
+        if kwargs.get("role") == "assistant":
+            raise RuntimeError("forced confirmation write failure")
+        return original_insert_message(*args, **kwargs)
+
+    monkeypatch.setattr("backend.chat_memory._insert_message", fail_assistant_message)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.post(
+        "/chat",
+        json={"message": "Remember that I prefer plain explanations."},
+    )
+
+    assert response.status_code == 500
+    assert _table_count("conversations") == 0
+    assert _table_count("messages") == 0
+    assert _table_count("memories") == 0
+
+
 def test_oversized_memory_in_existing_chat_writes_nothing(clean_db):
     client = TestClient(app)
     conversation = client.post(
