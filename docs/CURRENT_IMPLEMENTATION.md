@@ -33,8 +33,8 @@ Responsibilities:
 - Initializes the database through the migration runner
 - Defines request models and routes
 - Applies authentication middleware
-- Resolves conversations and stores messages
-- Routes explicit memory-save commands to SQLite
+- Resolves normal conversations and stores normal chat messages
+- Routes explicit memory-save commands to the atomic chat-memory storage operation
 - Builds model instructions from identity rules and saved memories
 - Sends ordinary chat requests to the configured model provider
 
@@ -136,7 +136,7 @@ Responsibilities:
 
 - Detects clear imperative save commands at the beginning of a message
 - Extracts the content that should become long-term memory
-- Rejects incomplete phrases
+- Rejects incomplete phrases and punctuation-only content
 - Avoids treating ordinary questions as save commands
 
 Supported command families include:
@@ -157,6 +157,20 @@ Not supported yet:
 - `Update that ...`
 - Vague phrases such as `keep that in mind`
 - Automatic extraction of memories from normal conversation
+
+### `backend/chat_memory.py`
+
+Responsibilities:
+
+- Handles the complete explicit-memory chat turn in one SQLite transaction
+- Loads or creates the target conversation
+- Validates project scope
+- Stores the user command
+- Stores the `explicit_chat` memory row
+- Stores the deterministic assistant confirmation
+- Rolls back the complete turn when any insert fails
+
+For a new chat, a failed memory or confirmation write leaves no conversation, message, or memory row. For an existing chat, a failed write leaves the prior conversation unchanged.
 
 ### `backend/conversation.py`
 
@@ -314,14 +328,17 @@ Remember that my favorite tea is jasmine.
 MootOS performs this flow:
 
 1. Extracts `my favorite tea is jasmine.` from the command.
-2. Rejects extracted content longer than 10,000 characters.
-3. Validates or creates the conversation.
-4. Stores the user's original command as a conversation message.
-5. Writes the extracted content to `memories`.
-6. Uses the conversation project when one exists; otherwise stores a global memory.
-7. Sets `memory_type` to `explicit_chat`.
-8. Stores a deterministic assistant confirmation.
-9. Returns success only after the memory write completed.
+2. Rejects incomplete, punctuation-only, or longer-than-10,000-character content.
+3. Opens one SQLite transaction.
+4. Validates or creates the conversation inside that transaction.
+5. Stores the user's original command.
+6. Writes the extracted content to `memories`.
+7. Uses the conversation project when one exists; otherwise stores a global memory.
+8. Sets `memory_type` to `explicit_chat`.
+9. Stores a deterministic assistant confirmation.
+10. Commits all records together and returns success.
+
+If conversation creation, the user message, the memory row, or the confirmation fails, the transaction rolls back. No partial explicit-memory chat turn remains.
 
 The explicit save path does not call OpenAI.
 
@@ -401,12 +418,14 @@ Tests cover:
 - Memory CRUD and persistence
 - Project validation and filtering
 - Conversation creation and continuation
-- Explicit memory-command parsing
-- Write-before-confirm behavior
+- Explicit memory-command parsing and boundary variants
+- Rejection of incomplete and punctuation-only memory content
+- Atomic rollback after forced memory or confirmation write failures
 - Save in one chat and recall in a brand-new chat
 - Global memory availability and project isolation
+- Project-filtered listing behavior
 - Model routing for ordinary memory questions
-- Memory size validation
+- Memory size validation for new and existing conversations
 - Auth, Railway configuration, and mobile interface assets
 
 Known missing areas:
@@ -442,4 +461,4 @@ When code and documentation disagree:
 1. Code and tests describe runtime behavior.
 2. Documentation must be corrected in the same PR that changes behavior.
 3. Planned features must remain labeled as planned.
-4. A memory is not considered saved until the database write succeeds.
+4. A memory is not considered saved until the complete explicit-memory transaction commits.
