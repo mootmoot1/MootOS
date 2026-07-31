@@ -1,23 +1,24 @@
 # MootOS Current Implementation
 
-**Applies to:** Version 0.1 on `main` as of July 31, 2026  
-**Purpose:** Describe what the current code actually does, separate from the long-term architecture vision.
+**Applies to:** Version 0.1 foundation hardening  
+**Purpose:** Describe what the code actually does, separate from future plans.
 
 ## 1. Runtime shape
 
-MootOS currently runs as one FastAPI application process.
+MootOS runs as one FastAPI application process.
 
-Production uses one Railway service and one replica. Railway starts the application with Uvicorn. The same service:
+Production uses one Railway service and one replica. The same process:
 
 - Serves the mobile web interface
 - Handles login and session validation
-- Exposes the JSON APIs
+- Exposes JSON APIs
+- Runs schema migrations during startup
 - Reads and writes SQLite
 - Builds model context
 - Calls the configured AI provider
 - Returns responses to the browser
 
-There are no separate microservices, background workers, task queues, cache servers, or vector databases in the current implementation.
+There are no microservices, background workers, task queues, cache servers, vector databases, or multiple application replicas.
 
 ## 2. Current modules
 
@@ -26,55 +27,93 @@ There are no separate microservices, background workers, task queues, cache serv
 Responsibilities:
 
 - Creates the FastAPI application
-- Mounts the frontend static directory
-- Initializes the database schema during application import
-- Defines Pydantic request models
+- Mounts frontend static files
+- Validates auth configuration during import
+- Initializes the database through `memory.init_db()`, which delegates to the migration runner
+- Defines request models and routes
 - Applies authentication middleware
-- Serves the login page, chat interface, manifest, and health endpoint
-- Exposes project, memory, conversation, and chat routes
-- Builds model instructions from the base identity prompt and saved memories
-- Orchestrates the full chat request
-
-The file does not directly implement cookie signing, database CRUD details, or OpenAI request construction. Those responsibilities are delegated to other modules.
+- Builds model instructions from identity rules and saved memories
+- Orchestrates chat requests
 
 ### `backend/auth.py`
 
 Responsibilities:
 
-- Determines whether password protection is enabled
-- Verifies that password and session-secret configuration are supplied together
-- Compares login submissions with the configured password using constant-time comparison
-- Creates signed session tokens containing expiration, nonce, and token version
-- Verifies signatures and expiration
-- Reads the session cookie from incoming requests
+- Detects whether authentication is configured
+- Requires password and session secret together
+- Detects Railway through Railway environment metadata
+- Refuses Railway startup when both private auth values are absent
+- Permits public Railway startup only when `MOOTOS_ALLOW_PUBLIC=true`
+- Compares passwords using constant-time comparison
+- Creates and verifies signed session tokens
 - Sets and clears HTTP-only cookies
-- Automatically uses secure cookies on Railway
+- Uses secure cookies automatically on Railway
 
-Current authentication boundary:
+Current auth boundary:
 
-- Single configured password
-- Single application-wide session secret
+- One configured password
+- One application-wide session secret
 - No user accounts or roles
 - No password-reset workflow
 - No login rate limiting
 - No server-side session database
 
-### `backend/memory.py`
+### `backend/db.py`
 
 Responsibilities:
 
-- Resolves the SQLite database path
-- Opens SQLite connections for project and memory operations
-- Creates the initial database schema
-- Seeds five default projects
-- Creates and lists projects
-- Creates, lists, retrieves, filters, and deletes memories
+- Resolves the SQLite path
+- Creates the database parent directory
+- Opens all application SQLite connections
+- Applies one consistent connection policy
+- Provides a context manager that commits, rolls back, and closes connections
 
 Database path priority:
 
 1. `MOOTOS_DATABASE_PATH`
 2. `RAILWAY_VOLUME_MOUNT_PATH/mootos.db`
 3. Repository-local `data/mootos.db`
+
+Every connection applies:
+
+```text
+foreign_keys = ON
+journal_mode = WAL
+synchronous = NORMAL
+busy_timeout = 5000 milliseconds
+connection timeout = 5 seconds
+row_factory = sqlite3.Row
+```
+
+### `backend/migrations.py`
+
+Responsibilities:
+
+- Defines ordered numbered migrations
+- Creates and reads `schema_migrations`
+- Serializes migration work with `BEGIN IMMEDIATE`
+- Applies unapplied migrations in order
+- Records migration name, version, and application time
+- Rejects a database schema newer than the current application understands
+- Seeds the five default projects during the initial migration
+
+Current migration:
+
+```text
+1 — initial_schema
+```
+
+The first hardened startup adopts an existing Version 0.1 database without dropping or replacing its data.
+
+### `backend/memory.py`
+
+Responsibilities:
+
+- Delegates startup initialization to the migration runner
+- Creates and lists projects
+- Creates, lists, retrieves, filters, and deletes memories
+- Uses the central database context manager for all operations
+- Validates projects inside the same connection used for the memory operation
 
 Default projects:
 
@@ -84,30 +123,23 @@ Default projects:
 - Cars
 - Personal
 
-Current schema initialization uses `CREATE TABLE IF NOT EXISTS`. There is not yet a versioned migration runner.
-
 ### `backend/conversation.py`
 
 Responsibilities:
 
-- Opens SQLite connections for conversation operations
-- Creates conversations
-- Lists conversations, optionally by project
+- Creates and lists conversations
 - Loads one conversation and its messages
 - Adds user and assistant messages
-- Updates the conversation timestamp when a message is stored
+- Updates conversation timestamps
+- Uses the central database context manager
+- Checks conversation existence in the same transaction used to add a message
 
-Each storage operation opens a connection for that operation and closes it through a context manager.
-
-Current conversation roles are limited to:
+Current message roles:
 
 - `user`
 - `assistant`
 
-Assistant messages may also store:
-
-- Provider name
-- Model name
+Assistant messages may store provider and model names.
 
 ### `backend/model_router.py`
 
@@ -115,11 +147,11 @@ Responsibilities:
 
 - Defines the normalized model response
 - Defines the provider protocol
-- Selects the configured provider
-- Validates provider configuration
-- Calls the provider and converts provider failures into application-specific errors
+- Selects and validates the configured provider
+- Calls the provider
+- Converts provider failures into application errors
 
-Current supported provider:
+Current provider:
 
 - OpenAI
 
@@ -127,31 +159,40 @@ Current OpenAI behavior:
 
 - Uses the OpenAI Python SDK
 - Uses the Responses API
-- Sends model instructions separately from conversation messages
-- Disables OpenAI-side response storage with `store=False`
+- Sends instructions separately from conversation messages
+- Uses `store=False`
 - Returns normalized text, provider, and model metadata
 
-The provider boundary is replaceable, but other providers are not implemented yet.
+Other providers are not implemented yet.
 
 ### `frontend/`
 
-Responsibilities:
+The frontend is plain HTML, CSS, and JavaScript.
 
-- Displays the chat interface
-- Displays user and assistant message bubbles
-- Lets the user select a project
-- Starts new conversations
-- Loads saved conversation history
-- Sends messages to the FastAPI backend
-- Displays loading and error states
-- Provides login and logout controls
-- Supplies installable web-app metadata
+It provides:
 
-The frontend is plain HTML, CSS, and JavaScript. It does not use React, Node.js, a frontend build process, or an external UI framework.
+- Login and logout
+- User and assistant message bubbles
+- Text composer
+- Project selection
+- New conversation control
+- Saved conversation history
+- Loading and error states
+- Installable web-app metadata
+
+It does not use React, Node.js, or a frontend build process.
 
 ## 3. Database schema
 
-MootOS currently uses one SQLite file.
+MootOS uses one SQLite file.
+
+### `schema_migrations`
+
+| Column | Meaning |
+|---|---|
+| `version` | Applied numeric schema version |
+| `name` | Migration name |
+| `applied_at` | UTC application timestamp |
 
 ### `projects`
 
@@ -159,8 +200,8 @@ MootOS currently uses one SQLite file.
 |---|---|
 | `id` | UUID text primary key |
 | `name` | Unique project name, case-insensitive |
-| `description` | Optional project description |
-| `created_at` | UTC timestamp stored as text |
+| `description` | Optional description |
+| `created_at` | UTC timestamp text |
 
 ### `memories`
 
@@ -170,7 +211,7 @@ MootOS currently uses one SQLite file.
 | `content` | Memory text |
 | `project` | Optional project name |
 | `memory_type` | Optional caller-supplied category |
-| `created_at` | UTC timestamp stored as text |
+| `created_at` | UTC timestamp text |
 
 ### `conversations`
 
@@ -179,8 +220,8 @@ MootOS currently uses one SQLite file.
 | `id` | UUID text primary key |
 | `title` | Conversation title |
 | `project` | Optional project name |
-| `created_at` | UTC timestamp stored as text |
-| `updated_at` | UTC timestamp of the latest stored message |
+| `created_at` | UTC timestamp text |
+| `updated_at` | Latest stored-message timestamp |
 
 ### `messages`
 
@@ -190,175 +231,157 @@ MootOS currently uses one SQLite file.
 | `conversation_id` | Owning conversation ID |
 | `role` | `user` or `assistant` |
 | `content` | Message text |
-| `provider` | Optional model-provider name |
+| `provider` | Optional provider name |
 | `model` | Optional model name |
-| `created_at` | UTC timestamp stored as text |
+| `created_at` | UTC timestamp text |
 
 An index exists on `messages.conversation_id`.
 
-The schema declares a foreign key from messages to conversations. SQLite foreign-key enforcement is not yet explicitly enabled on every connection. That hardening belongs in a future code PR, not this documentation PR.
+The messages table declares a foreign key to conversations, and the central connection layer now enforces it.
 
-## 4. Chat request flow
+## 4. Startup flow
+
+1. Python imports `backend.main`.
+2. Auth configuration is validated.
+3. Railway without auth values fails unless explicit public access is configured.
+4. FastAPI is created.
+5. Database initialization delegates to the migration runner.
+6. The migration runner opens a hardened SQLite connection.
+7. It acquires `BEGIN IMMEDIATE`.
+8. It creates `schema_migrations` when needed.
+9. It reads the current schema version.
+10. It refuses a newer unknown version.
+11. It applies each missing migration in order.
+12. It commits and closes the connection.
+13. The application becomes available.
+
+## 5. Chat request flow
 
 ### New conversation
 
 1. `POST /chat` receives `message` and optional `project`.
-2. The model router verifies that the selected provider is configured before a conversation is created.
+2. The model router verifies provider configuration.
 3. MootOS creates a conversation.
-4. The initial title is the first 80 trimmed characters of the user message.
+4. The first 80 trimmed characters become the initial title.
 5. The user message is saved.
-6. Up to 20 recent messages are loaded in chronological order.
+6. Up to 20 recent messages are loaded chronologically.
 7. Model instructions are built.
-8. The configured provider generates a response.
-9. The assistant message is saved with provider and model metadata.
-10. The API returns the conversation ID and both stored messages.
+8. The provider generates a response.
+9. The assistant response is saved with provider metadata.
+10. The API returns the stored messages and conversation ID.
 
-### Existing conversation
-
-1. `POST /chat` receives `conversation_id`.
-2. MootOS verifies that the conversation exists.
-3. When a project is also supplied, MootOS verifies that it matches the conversation project.
-4. The remaining flow is the same as a new conversation.
-
-### Provider failure behavior
+### Provider failure
 
 - Missing provider configuration returns HTTP `503`.
 - Provider request failure returns HTTP `502`.
-- A missing model configuration is checked before saving the new chat, preventing creation of an empty conversation in that case.
-- When the provider fails after the user message is stored, the current implementation can leave the user message without a matching assistant response. Recovery behavior for that situation is not yet implemented.
+- Missing configuration is checked before a new conversation is created.
+- A provider failure after the user message is stored can still leave an unmatched user message. Recovery for that case is not implemented.
 
-## 5. Memory supplied to the model
+## 6. Memory supplied to the model
 
-The base instructions identify the assistant as MootOS Version 0.1 and establish basic behavior and honesty rules.
-
-Memory behavior:
-
-- When a conversation has a project, MootOS loads memories assigned to that project.
-- When a conversation has no project, MootOS loads memories across all projects.
+- Project conversations load memories assigned to that project.
+- Unassigned conversations load memories across projects.
 - Memories are ordered newest first.
-- At most 20 recent memories are placed in the model instructions.
-- Each memory line includes project, memory type, and content.
+- At most 20 are placed in model instructions.
+- Each line includes project, memory type, and content.
 
 Current limitations:
 
-- No keyword ranking
-- No semantic ranking
+- No keyword or semantic ranking
 - No embeddings
 - No confidence score
-- No source tracking beyond stored fields
-- No automatic correction chain
-- No natural-language remember/forget/update command handling
-- No memory deduplication
+- No detailed source tracking
+- No correction chain
+- No natural-language remember, forget, or update commands
+- No deduplication
 
-## 6. Authentication flow
+## 7. Authentication flow
 
-1. When both `MOOTOS_PASSWORD` and `MOOTOS_SESSION_SECRET` are absent, authentication is disabled.
-2. When exactly one is present, application configuration validation raises an error.
-3. When both are present, application and API routes require a valid signed cookie.
-4. Browser requests for protected HTML are redirected to `/login`.
-5. Protected API requests without authentication receive HTTP `401` JSON.
-6. A correct login creates a signed cookie with a 30-day maximum age.
-7. Logout deletes the cookie.
+### Local development
 
-Public paths include login, logout, health, manifest, and static assets.
+When Railway metadata is absent and both auth variables are absent, auth is disabled.
 
-The production deployment is expected to configure both private variables. A future security-hardening PR should make a Railway deployment refuse to start if both are missing instead of interpreting that state as local development.
+### Private deployment
 
-## 7. Production deployment
+When both auth variables are present:
 
-Railway configuration:
+1. Protected browser routes redirect to `/login`.
+2. Protected APIs return HTTP `401` without a valid cookie.
+3. Correct login creates a signed 30-day cookie.
+4. Logout deletes the cookie.
+
+### Railway fail-closed behavior
+
+When Railway metadata is present:
+
+- Both private auth values are required by default.
+- Missing both values causes startup failure.
+- Public startup requires `MOOTOS_ALLOW_PUBLIC=true`.
+
+Public paths remain login, logout, health, manifest, and static assets.
+
+## 8. Production deployment
 
 - Builder: Railpack
-- Start command: Uvicorn serving `backend.main:app`
+- Server: Uvicorn
 - Bind address: `0.0.0.0`
-- Port: Railway-provided `PORT`
+- Port: Railway `PORT`
 - Health check: `/health`
-- Restart policy: restart on failure
-- Replicas: one while SQLite is used
-- Persistent volume mount: `/data`
+- Restart on failure
+- One replica
+- Volume mount: `/data`
+- Database: `/data/mootos.db`
 
-When the volume is attached, Railway supplies `RAILWAY_VOLUME_MOUNT_PATH`. MootOS then stores the database at `/data/mootos.db`.
-
-Persistence was manually verified by saving data and confirming it survived three consecutive deployments.
-
-## 8. Current HTTP surface
-
-Interface and auth:
-
-- `GET /`
-- `GET /login`
-- `POST /auth/login`
-- `POST /auth/logout`
-- `GET /chat`
-- `GET /manifest.webmanifest`
-- `GET /health`
-
-Memory and projects:
-
-- `POST /memories`
-- `GET /memories`
-- `GET /memories/{memory_id}`
-- `DELETE /memories/{memory_id}`
-- `GET /projects`
-- `POST /projects`
-
-Conversations:
-
-- `POST /conversations`
-- `GET /conversations`
-- `GET /conversations/{conversation_id}`
-- `POST /chat`
-
-See `API_REFERENCE.md` for details.
+Persistence was manually verified across three deployments before hardening. The hardened deployment requires another smoke test after merge.
 
 ## 9. Test coverage
 
-The repository includes automated tests covering:
+Tests cover:
 
-- Memory creation, retrieval, listing, deletion, and persistence
-- Project creation, validation, duplicate handling, and filtering
+- Required SQLite PRAGMAs
+- Clean migration startup
+- Adoption of an existing database without data loss
+- Idempotent migrations
+- Rejection of newer unknown schema versions
+- Foreign-key enforcement
+- Concurrent writes
+- Memory CRUD and persistence
+- Project validation and filtering
 - Conversation creation and continuation
-- Chat message persistence
-- Model-provider mocking
-- Project-memory injection into model instructions
-- Missing model configuration
-- Mobile interface assets and routes
-- Authentication redirects, login, logout, and configuration validation
-- Railway port and health-check configuration
-- Railway volume path resolution
-- Web-app manifest behavior
+- Chat persistence and fake provider behavior
+- Auth redirects, login, logout, partial configuration, Railway fail-closed behavior, and public override
+- Railway path and configuration
+- Mobile interface assets
 
-Known missing test areas include:
+Known missing areas:
 
-- Concurrent SQLite writes
-- Explicit WAL and foreign-key enforcement
-- Schema migrations
-- Backup and restore
-- Provider timeout recovery after a user message is saved
+- Automated backup and restore
+- Real production migration rehearsal against a copied Railway database
+- Provider timeout recovery after saving a user message
 - Login rate limiting
-- Browser end-to-end testing against the deployed Railway environment
+- Browser end-to-end tests against Railway
 
 ## 10. Intentional boundaries
 
-Version 0.1 is currently:
+Version 0.1 remains:
 
 - Single user
 - Single Railway replica
 - One SQLite database
-- One implemented AI provider
+- One implemented model provider
 - Text chat only
 - Synchronous provider calls
-- No task queue
+- No background queue
 - No autonomous external actions
 - No multi-agent system
 
-These are deliberate limits, not hidden capabilities.
+WAL and busy timeout improve one-process SQLite behavior. They do not authorize multiple replicas.
 
-## 11. Source of truth rule
+## 11. Source of truth
 
-When documentation and code disagree:
+When code and documentation disagree:
 
-1. The code and tests describe actual runtime behavior.
-2. This document should be corrected in the same PR that changes behavior.
-3. Future-looking documents must label planned features as planned.
-4. No documentation should claim a feature works until it is implemented and verified.
+1. Code and tests describe runtime behavior.
+2. Documentation must be corrected in the same PR that changes behavior.
+3. Planned features must remain labeled as planned.
+4. A capability is not complete until it is implemented and verified.
