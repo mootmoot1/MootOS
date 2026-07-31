@@ -102,6 +102,36 @@ def test_migration_adopts_existing_schema_without_losing_data(tmp_path):
     assert get_schema_version(database_path) == LATEST_SCHEMA_VERSION
 
 
+def test_incompatible_existing_schema_is_not_marked_migrated(tmp_path):
+    database_path = tmp_path / "incompatible.db"
+
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE memories (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                project TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
+    with pytest.raises(RuntimeError, match="missing required columns: memory_type"):
+        initialize_database(database_path)
+
+    with sqlite3.connect(database_path) as connection:
+        migration_table = connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'schema_migrations'
+            """
+        ).fetchone()
+
+    assert migration_table is None
+
+
 def test_migrations_are_idempotent(tmp_path):
     database_path = tmp_path / "repeat.db"
 
