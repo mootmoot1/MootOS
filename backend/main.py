@@ -30,9 +30,11 @@ from backend.memory import (
     delete_memory as remove_memory,
     get_memory as load_memory,
     init_db,
+    list_context_memories as load_context_memories,
     list_memories as load_memories,
     list_projects as load_projects,
 )
+from backend.memory_commands import parse_memory_save_command
 from backend.model_router import (
     ModelConfigurationError,
     ModelProviderError,
@@ -49,6 +51,7 @@ PUBLIC_PATHS = {
     "/manifest.webmanifest",
 }
 HTML_PATHS = {"/", "/chat", "/docs", "/redoc"}
+MAX_MEMORY_CONTENT_LENGTH = 10_000
 
 validate_auth_configuration()
 
@@ -66,6 +69,9 @@ relevant saved memories without pretending to know facts that are not provided.
 Speak clearly and naturally. Ask a question only when it is actually necessary.
 When Moot corrects old information, treat the correction as more reliable than the
 older memory. Never claim that you completed an outside action unless it truly ran.
+Never claim that long-term memory was saved unless MootOS actually completed a
+memory write. Explicit commands beginning with "remember" or "save this" are
+handled by MootOS storage before a confirmation is returned.
 """
 
 
@@ -78,7 +84,7 @@ class LoginRequest(BaseModel):
 class MemoryCreate(BaseModel):
     """Input accepted when creating a memory."""
 
-    content: str = Field(min_length=1, max_length=10_000)
+    content: str = Field(min_length=1, max_length=MAX_MEMORY_CONTENT_LENGTH)
     project: Optional[str] = None
     memory_type: Optional[str] = None
 
@@ -98,7 +104,7 @@ class ConversationCreate(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """Input accepted by the first MootOS conversation loop."""
+    """Input accepted by the MootOS conversation loop."""
 
     message: str = Field(min_length=1, max_length=20_000)
     conversation_id: Optional[str] = None
@@ -130,7 +136,7 @@ async def require_private_session(request: Request, call_next):
 
 def _build_model_instructions(project: Optional[str]) -> str:
     """Build the identity and memory context supplied to the model provider."""
-    memories = load_memories(project=project) if project else load_memories()
+    memories = load_context_memories(project=project)
     recent_memories = memories[:20]
     if not recent_memories:
         return BASE_INSTRUCTIONS
@@ -138,7 +144,7 @@ def _build_model_instructions(project: Optional[str]) -> str:
     memory_lines = []
     for memory in recent_memories:
         memory_type = memory["memory_type"] or "memory"
-        memory_project = memory["project"] or "Unassigned"
+        memory_project = memory["project"] or "Global"
         memory_lines.append(
             f"- [{memory_project} / {memory_type}] {memory['content']}"
         )
@@ -156,6 +162,26 @@ def _get_conversation_or_404(conversation_id: str) -> dict[str, Any]:
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
+
+
+def _chat_response(
+    conversation: dict[str, Any],
+    user_message: dict[str, Any],
+    assistant_message: dict[str, Any],
+    provider: Optional[str],
+    model: Optional[str],
+) -> dict[str, Any]:
+    return {
+        "success": True,
+        "data": {
+            "conversation_id": conversation["id"],
+            "project": conversation["project"],
+            "user_message": user_message,
+            "assistant_message": assistant_message,
+            "provider": provider,
+            "model": model,
+        },
+    }
 
 
 @app.get("/", include_in_schema=False)
@@ -310,12 +336,21 @@ def get_conversation(conversation_id: str) -> dict[str, Any]:
 
 @app.post("/chat")
 def chat(request: ChatRequest) -> dict[str, Any]:
-    """Run the first real MootOS conversation loop."""
-    router = get_model_router()
-    try:
-        router.ensure_ready()
-    except ModelConfigurationError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
+    """Run conversation or an explicit long-term-memory save command."""
+    memory_command = parse_memory_save_command(request.message)
+    if memory_command and len(memory_command.content) > MAX_MEMORY_CONTENT_LENGTH:
+        raise HTTPException(
+            status_code=422,
+            detail="Memory content must be 10,000 characters or fewer",
+        )
+
+    router = None
+    if memory_command is None:
+        router = get_model_router()
+        try:
+            router.ensure_ready()
+        except ModelConfigurationError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
 
     if request.conversation_id:
         conversation = _get_conversation_or_404(request.conversation_id)
@@ -340,6 +375,37 @@ def chat(request: ChatRequest) -> dict[str, Any]:
         role="user",
         content=request.message,
     )
+
+    if memory_command is not None:
+        try:
+            saved_memory = store_memory(
+                content=memory_command.content,
+                project=conversation["project"],
+                memory_type="explicit_chat",
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+        memory_scope = saved_memory["project"] or "global"
+        confirmation = (
+            f"Saved to {memory_scope} long-term memory: "
+            f"{saved_memory['content']}"
+        )
+        assistant_message = store_message(
+            conversation_id=conversation["id"],
+            role="assistant",
+            content=confirmation,
+            provider="mootos",
+            model="memory-command-v1",
+        )
+        return _chat_response(
+            conversation=conversation,
+            user_message=user_message,
+            assistant_message=assistant_message,
+            provider="mootos",
+            model="memory-command-v1",
+        )
+
     history = load_messages(conversation["id"], limit=20)
     model_messages = [
         {"role": message["role"], "content": message["content"]}
@@ -363,14 +429,10 @@ def chat(request: ChatRequest) -> dict[str, Any]:
         provider=model_response.provider,
         model=model_response.model,
     )
-    return {
-        "success": True,
-        "data": {
-            "conversation_id": conversation["id"],
-            "project": conversation["project"],
-            "user_message": user_message,
-            "assistant_message": assistant_message,
-            "provider": model_response.provider,
-            "model": model_response.model,
-        },
-    }
+    return _chat_response(
+        conversation=conversation,
+        user_message=user_message,
+        assistant_message=assistant_message,
+        provider=model_response.provider,
+        model=model_response.model,
+    )
