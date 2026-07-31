@@ -30,6 +30,15 @@ from hashlib import sha256
 from pathlib import Path
 import sqlite3
 
+
+def hash_file(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as file_handle:
+        for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 source = Path("/data/mootos.db")
 backup_dir = Path("/data/backups")
 backup_dir.mkdir(parents=True, exist_ok=True)
@@ -60,7 +69,7 @@ if integrity != "ok":
     destination.unlink(missing_ok=True)
     raise SystemExit(f"Backup integrity check failed: {integrity}")
 
-digest = sha256(destination.read_bytes()).hexdigest()
+digest = hash_file(destination)
 
 print(f"backup_path={destination}")
 print(f"sha256={digest}")
@@ -105,16 +114,16 @@ Perform this drill on a local machine or isolated non-production service. Do not
 
 1. Make a working copy of the downloaded backup.
 2. Verify its SHA-256 digest.
-3. Run the following integrity and schema check:
+3. Run the following integrity and schema check, replacing the sample path with the working copy:
 
 ```bash
-python - <<'PY'
+python - /path/to/mootos-backup.db <<'PY'
 from pathlib import Path
 import sqlite3
 import sys
 
 if len(sys.argv) != 2:
-    raise SystemExit("Usage: python verify_backup.py /path/to/mootos-backup.db")
+    raise SystemExit("Usage: python - /path/to/mootos-backup.db")
 
 path = Path(sys.argv[1])
 if not path.exists():
@@ -142,12 +151,6 @@ print(f"memories={memories}")
 if integrity != "ok":
     raise SystemExit(1)
 PY
-```
-
-For direct use, save that snippet as `verify_backup.py`, then run:
-
-```bash
-python verify_backup.py /path/to/mootos-backup.db
 ```
 
 4. Start MootOS locally or in isolation with `MOOTOS_DATABASE_PATH` pointing to the working copy.
