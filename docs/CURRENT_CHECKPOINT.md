@@ -83,7 +83,7 @@ The volume proves normal redeployment persistence. Automatic off-volume backups 
 - Updated roadmap and Version 0.1 requirements
 - Documentation-only runtime impact
 
-## Current work — Foundation hardening
+## Current work — PR #11 foundation hardening
 
 Branch:
 
@@ -106,12 +106,13 @@ Implemented on the branch:
 - Versioned migrations in `backend/migrations.py`
 - `schema_migrations` history table
 - Existing Version 0.1 database adoption as migration 1
+- Required table, column, and message foreign-key verification before migration success
 - Refusal to run an older build against a newer unknown schema
 - Memory and conversation storage routed through the central layer
 - Railway auth fail-closed behavior
 - Explicit `MOOTOS_ALLOW_PUBLIC=true` override for intentionally public Railway deployment
-- Exact direct dependency pins
-- Tests for PRAGMAs, migrations, existing-data preservation, foreign keys, newer-schema rejection, concurrent writes, and Railway auth safety
+- Exact direct dependency pins, including CI lint tooling
+- Tests for PRAGMAs, migrations, existing-data preservation, incompatible schemas, foreign keys, newer-schema rejection, concurrent writes, and Railway auth safety
 - ADR-015 and complete documentation updates
 
 Not included:
@@ -126,18 +127,23 @@ Not included:
 
 ## Verification status
 
-Completed before pushing:
+Completed:
 
-- Generated database hardening code passed seven focused local tests.
-- Concurrent writes completed without lock failures in the focused test.
-- Documentation was updated in the same branch.
+- Investigated two rejected GitHub write calls; neither changed the repository.
+- Reviewed all changed filenames and the critical database, migration, authentication, dependency, CI, and documentation files.
+- Added missing `.env.example` documentation for `MOOTOS_ALLOW_PUBLIC`.
+- Added the hardening guide and ADR to the documentation index.
+- Pinned Flake8 and removed the unpinned CI installation.
+- Added schema compatibility verification before migration success.
+- Added a regression test proving incompatible legacy schemas roll back without migration history.
+- GitHub Actions passed on Python 3.9, 3.10, and 3.11.
+- Dependency installation, blocking-error lint, and the full test suite passed in every matrix job.
 
 Still required before merge:
 
-- GitHub Actions on Python 3.9, 3.10, and 3.11
-- Full PR diff review
 - Plain-language review with Moot
 - Explicit merge approval
+- Final release-status documentation update and ADR acceptance
 
 Still required after merge:
 
@@ -204,4 +210,4 @@ A future advisory system may use specialist business, technical, creative, and r
 
 ## Immediate decision
 
-Finish technical and human review of the foundation-hardening PR. Do not merge until checks pass and Moot approves it.
+Review PR #11 in plain language. Do not merge until Moot explicitly approves it.
