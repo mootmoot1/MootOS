@@ -15,6 +15,24 @@ from fastapi.responses import Response
 
 COOKIE_NAME = "mootos_session"
 SESSION_DAYS = 30
+TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+def _environment_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in TRUE_VALUES
+
+
+def running_on_railway() -> bool:
+    """Return whether Railway production metadata is present."""
+    return bool(
+        os.getenv("RAILWAY_ENVIRONMENT", "").strip()
+        or os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
+    )
+
+
+def public_access_allowed() -> bool:
+    """Return whether public startup was explicitly approved."""
+    return _environment_flag("MOOTOS_ALLOW_PUBLIC")
 
 
 def auth_enabled() -> bool:
@@ -23,12 +41,20 @@ def auth_enabled() -> bool:
 
 
 def validate_auth_configuration() -> None:
-    """Fail closed when only half of the production auth config is present."""
+    """Reject incomplete or accidentally public production configuration."""
     password = os.getenv("MOOTOS_PASSWORD", "").strip()
     session_secret = os.getenv("MOOTOS_SESSION_SECRET", "").strip()
+
     if bool(password) != bool(session_secret):
         raise RuntimeError(
             "MOOTOS_PASSWORD and MOOTOS_SESSION_SECRET must be configured together"
+        )
+
+    if running_on_railway() and not password and not public_access_allowed():
+        raise RuntimeError(
+            "Railway deployments require MOOTOS_PASSWORD and "
+            "MOOTOS_SESSION_SECRET. Set MOOTOS_ALLOW_PUBLIC=true only when "
+            "public access is intentional."
         )
 
 
@@ -101,8 +127,8 @@ def request_is_authenticated(request: Request) -> bool:
 def _secure_cookie_enabled() -> bool:
     explicit = os.getenv("MOOTOS_SECURE_COOKIES", "").strip().lower()
     if explicit:
-        return explicit in {"1", "true", "yes", "on"}
-    return bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PUBLIC_DOMAIN"))
+        return explicit in TRUE_VALUES
+    return running_on_railway()
 
 
 def set_session_cookie(response: Response) -> None:
