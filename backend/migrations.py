@@ -21,6 +21,22 @@ DEFAULT_PROJECTS = (
     ("Personal", "Personal information that does not belong to another project."),
 )
 
+REQUIRED_COLUMNS = {
+    "projects": {"id", "name", "description", "created_at"},
+    "memories": {"id", "content", "project", "memory_type", "created_at"},
+    "conversations": {"id", "title", "project", "created_at", "updated_at"},
+    "messages": {
+        "id",
+        "conversation_id",
+        "role",
+        "content",
+        "provider",
+        "model",
+        "created_at",
+    },
+    "schema_migrations": {"version", "name", "applied_at"},
+}
+
 
 @dataclass(frozen=True)
 class Migration:
@@ -124,6 +140,33 @@ def _current_schema_version(connection: sqlite3.Connection) -> int:
     return int(row["version"])
 
 
+def _verify_schema(connection: sqlite3.Connection) -> None:
+    """Reject a partially compatible schema before recording success."""
+    for table, required_columns in REQUIRED_COLUMNS.items():
+        rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
+        actual_columns = {str(row["name"]) for row in rows}
+        missing_columns = required_columns - actual_columns
+        if missing_columns:
+            missing = ", ".join(sorted(missing_columns))
+            raise RuntimeError(
+                f"Database schema is incompatible: table {table} "
+                f"is missing required columns: {missing}"
+            )
+
+    foreign_keys = connection.execute("PRAGMA foreign_key_list(messages)").fetchall()
+    has_message_conversation_key = any(
+        str(row["table"]) == "conversations"
+        and str(row["from"]) == "conversation_id"
+        and str(row["to"]) == "id"
+        for row in foreign_keys
+    )
+    if not has_message_conversation_key:
+        raise RuntimeError(
+            "Database schema is incompatible: messages.conversation_id "
+            "must reference conversations.id"
+        )
+
+
 def run_migrations(database_path: Optional[DatabasePath] = None) -> int:
     """Apply every unapplied migration in one serialized transaction."""
     connection = connect(database_path)
@@ -162,6 +205,7 @@ def run_migrations(database_path: Optional[DatabasePath] = None) -> int:
             )
             current_version = migration.version
 
+        _verify_schema(connection)
         connection.commit()
         return current_version
     except Exception:
