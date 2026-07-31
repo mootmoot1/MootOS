@@ -21,7 +21,11 @@ It documents how to create a consistent SQLite backup, move it off the Railway v
 
 ## Stage 1 — Create a consistent snapshot on the Railway volume
 
+Before relying on this procedure, confirm that the current Railway plan and interface provide an approved way to run Python inside the service environment and transfer the generated file off the volume. If direct shell, one-off execution, or volume download is unavailable, use an approved alternative that still runs SQLite's backup API against the live database and preserves the same verification steps.
+
 Run the following inside the MootOS Railway service environment. It uses Python's standard-library SQLite backup API, so no separate SQLite command-line program is required.
+
+The online backup API is designed to create a consistent snapshot while the application is running in WAL mode. For a planned pre-migration backup, prefer a quiet period and avoid starting large chat or write bursts until the snapshot finishes.
 
 ```bash
 python - <<'PY'
@@ -153,6 +157,8 @@ if integrity != "ok":
 PY
 ```
 
+In that shell form, the database path is an argument to `python -`; the Python program itself is read from the heredoc on standard input.
+
 4. Start MootOS locally or in isolation with `MOOTOS_DATABASE_PATH` pointing to the working copy.
 5. Confirm startup accepts the recorded schema.
 6. Confirm at least one known conversation opens.
@@ -165,13 +171,13 @@ The restore drill is complete only after the application reads the restored copy
 
 A real production restore is a high-risk operation. Use this only after diagnosis, explicit approval, and a verified backup.
 
-1. Stop normal writes and establish a maintenance window.
+1. Stop the MootOS service completely, establish a maintenance window, and confirm no process still has the database open.
 2. Record the currently deployed commit, schema version, volume, and database path.
 3. Create one final backup of the current database when possible, even if it may be damaged.
-4. Preserve the current database under a different filename instead of deleting it.
+4. Preserve the current SQLite file set together. Move `mootos.db` and any existing `mootos.db-wal` and `mootos.db-shm` files into a timestamped incident directory. Do not leave an old WAL or SHM file beside a replacement main database.
 5. Verify the selected restore file's digest and `PRAGMA integrity_check` result.
 6. Confirm the deployed code supports the backup's schema version.
-7. With the application stopped, place the verified database at `/data/mootos.db`.
+7. With the application still stopped, confirm no stale `mootos.db-wal` or `mootos.db-shm` remains at the live path, then place the verified restore database alone at `/data/mootos.db`.
 8. Start one replica.
 9. Confirm health and login.
 10. Confirm known conversations and memories.
