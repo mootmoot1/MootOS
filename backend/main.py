@@ -17,6 +17,12 @@ from backend.auth import (
     set_session_cookie,
     validate_auth_configuration,
 )
+from backend.chat_memory import (
+    ConversationNotFoundError,
+    ProjectMismatchError,
+    ProjectNotFoundError,
+    save_explicit_memory_chat,
+)
 from backend.conversation import (
     add_message as store_message,
     create_conversation as store_conversation,
@@ -344,13 +350,35 @@ def chat(request: ChatRequest) -> dict[str, Any]:
             detail="Memory content must be 10,000 characters or fewer",
         )
 
-    router = None
-    if memory_command is None:
-        router = get_model_router()
+    if memory_command is not None:
         try:
-            router.ensure_ready()
-        except ModelConfigurationError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
+            saved_turn = save_explicit_memory_chat(
+                request_message=request.message,
+                memory_content=memory_command.content,
+                conversation_id=request.conversation_id,
+                project=request.project,
+                title=request.message.strip()[:80],
+            )
+        except ConversationNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ProjectMismatchError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ProjectNotFoundError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+        return _chat_response(
+            conversation=saved_turn["conversation"],
+            user_message=saved_turn["user_message"],
+            assistant_message=saved_turn["assistant_message"],
+            provider="mootos",
+            model="memory-command-v1",
+        )
+
+    router = get_model_router()
+    try:
+        router.ensure_ready()
+    except ModelConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
     if request.conversation_id:
         conversation = _get_conversation_or_404(request.conversation_id)
@@ -375,37 +403,6 @@ def chat(request: ChatRequest) -> dict[str, Any]:
         role="user",
         content=request.message,
     )
-
-    if memory_command is not None:
-        try:
-            saved_memory = store_memory(
-                content=memory_command.content,
-                project=conversation["project"],
-                memory_type="explicit_chat",
-            )
-        except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
-
-        memory_scope = saved_memory["project"] or "global"
-        confirmation = (
-            f"Saved to {memory_scope} long-term memory: "
-            f"{saved_memory['content']}"
-        )
-        assistant_message = store_message(
-            conversation_id=conversation["id"],
-            role="assistant",
-            content=confirmation,
-            provider="mootos",
-            model="memory-command-v1",
-        )
-        return _chat_response(
-            conversation=conversation,
-            user_message=user_message,
-            assistant_message=assistant_message,
-            provider="mootos",
-            model="memory-command-v1",
-        )
-
     history = load_messages(conversation["id"], limit=20)
     model_messages = [
         {"role": message["role"], "content": message["content"]}
