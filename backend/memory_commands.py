@@ -24,6 +24,7 @@ COMMAND_PREFIXES = (
     "save this",
     "save that",
     "remember that",
+    "remember this",
     "remember",
 )
 
@@ -45,10 +46,11 @@ def _content_after_prefix(message: str, prefix: str) -> Optional[str]:
         if not boundary.isspace() and boundary not in {":", ",", "-"}:
             return None
 
-    content = message[len(prefix) :].lstrip(" \t\r\n:,-")
-    if not content or content.casefold() in {"this", "that"}:
+    content = message[len(prefix) :].lstrip(" \t\r\n:,-").strip()
+    placeholder = content.casefold().strip(" \t\r\n?!.,:;-")
+    if not content or placeholder in {"this", "that"}:
         return None
-    return content.strip()
+    return content
 
 
 def parse_memory_save_command(message: str) -> Optional[MemorySaveCommand]:
