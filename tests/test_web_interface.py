@@ -47,6 +47,8 @@ def test_interface_assets_are_served():
     assert "conversation_id" in chat_script.text
     assert 'apiRequest("/projects")' in memory_script.text
     assert 'let path = "/memories"' in memory_script.text
+    assert "memoryRequestGeneration" in memory_script.text
+    assert "requestGeneration !== memoryRequestGeneration" in memory_script.text
     assert 'method: "DELETE"' not in memory_script.text
     assert 'method: "PATCH"' not in memory_script.text
     assert 'method: "PUT"' not in memory_script.text
