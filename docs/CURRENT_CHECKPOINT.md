@@ -9,20 +9,36 @@
 
 MootOS is deployed on Railway and accessible through its private phone-friendly interface.
 
-Verified facts before foundation hardening:
+Verified production facts:
 
 - Railway deploys from `main`.
 - FastAPI is online.
 - Private password login works.
 - OpenAI returns real responses through the backend.
-- Conversations, messages, projects, and memories are stored in SQLite.
-- Project memories are supplied to the model.
+- Conversations, messages, projects, and memories use SQLite at `/data/mootos.db`.
 - Railway volume `mootos-volume` is attached at `/data`.
-- Production database is `/data/mootos.db`.
-- Conversations and memories survived three consecutive deployments on July 31, 2026.
 - Railway remains at one replica.
+- Conversations and memories survived three consecutive deployments before foundation hardening.
+- After PR #11 deployed, Moot verified that conversation history still survived the update and reboot cycle.
+- The hardened SQLite and migration startup completed successfully in production.
 
-The volume proves normal redeployment persistence. Automatic off-volume backups and tested disaster recovery are not implemented.
+Automatic off-volume backups and tested disaster recovery are not implemented.
+
+## Important behavior discovered after PR #11
+
+Moot tested long-term memory through the normal chat interface.
+
+Observed behavior:
+
+1. Moot told the assistant to save a fact.
+2. The assistant said it saved the fact.
+3. The fact appeared available in the same conversation because it remained in message history.
+4. A brand-new conversation did not know the fact.
+5. The memory API and database existed, but ordinary chat was not connected to memory creation.
+
+Conclusion:
+
+The persistence system was working. The missing feature was a deterministic chat-to-memory write path. The model could claim it saved something without any SQLite memory row being created.
 
 ## Completed milestones
 
@@ -81,77 +97,98 @@ The volume proves normal redeployment persistence. Automatic off-volume backups 
 - Operations runbook
 - Documentation policy
 - Updated roadmap and Version 0.1 requirements
-- Documentation-only runtime impact
 
-## Current work — PR #11 foundation hardening
+### PR #11 — Foundation hardening
+
+Merged into `main` on July 31, 2026.
+
+Implemented:
+
+- Central SQLite connection layer
+- Foreign-key enforcement
+- WAL mode
+- `NORMAL` synchronous mode
+- Five-second connection and busy timeouts
+- Versioned migrations and `schema_migrations`
+- Existing-schema compatibility verification
+- Rejection of newer unknown schemas
+- Railway auth fail-closed behavior
+- Explicit public override
+- Exact dependency pins
+- Concurrent-write, migration, and auth safety tests
+- ADR-015 and synchronized documentation
+
+Production result:
+
+- Railway deployed successfully.
+- The application remained usable.
+- Conversation history survived the deployment.
+
+## Current work — PR #12 chat memory commands
 
 Branch:
 
 ```text
-feature/foundation-hardening-v0.1
+feature/chat-memory-commands-v0.1
 ```
 
 Purpose:
 
-Make the existing single-user SQLite and Railway foundation more predictable and safer without adding product features.
+Connect explicit natural-language save commands to the existing persistent `memories` table.
 
-Implemented on the branch:
+Implemented on the draft branch:
 
-- Central database path and connection layer in `backend/db.py`
-- Consistent connection commit, rollback, and close behavior
-- Foreign-key enforcement on every connection
-- WAL mode
-- `NORMAL` synchronous mode
-- Five-second busy and connection timeouts
-- Versioned migrations in `backend/migrations.py`
-- `schema_migrations` history table
-- Existing Version 0.1 database adoption as migration 1
-- Required table, column, and message foreign-key verification before migration success
-- Refusal to run an older build against a newer unknown schema
-- Memory and conversation storage routed through the central layer
-- Railway auth fail-closed behavior
-- Explicit `MOOTOS_ALLOW_PUBLIC=true` override for intentionally public Railway deployment
-- Exact direct dependency pins, including CI lint tooling
-- Tests for PRAGMAs, migrations, existing-data preservation, incompatible schemas, foreign keys, newer-schema rejection, concurrent writes, and Railway auth safety
-- ADR-015 and complete documentation updates
+- Deterministic parser in `backend/memory_commands.py`
+- Supported command forms beginning with `remember`, `save this`, or `save to memory`
+- Ordinary questions such as `Do you remember ...?` remain normal model requests
+- Database write occurs before confirmation
+- Save commands bypass OpenAI and do not spend model credits
+- Saved chat memories use memory type `explicit_chat`
+- Internal confirmation messages record provider `mootos` and model `memory-command-v1`
+- Unassigned memories are global and available in project chats
+- Project memories remain isolated from unrelated projects
+- Existing 10,000-character memory limit is enforced
+- End-to-end test saves in one chat and recalls in a brand-new conversation
+- Parser, project-scope, model-routing, and validation tests
 
 Not included:
 
-- Natural-language memory commands
-- Memory UI changes
-- Backup automation
-- PostgreSQL
-- Multiple replicas
-- Model-provider changes
-- Interface redesign
+- Natural-language forget
+- Natural-language update or correction
+- Memory review UI
+- Duplicate detection
+- Keyword or semantic search
+- Automatic profile import
+- Schema changes
+- Frontend redesign
 
-## Verification status
+## Verification status for PR #12
 
-Completed:
+Completed in code and tests on the branch:
 
-- Investigated two rejected GitHub write calls; neither changed the repository.
-- Reviewed all changed filenames and the critical database, migration, authentication, dependency, CI, and documentation files.
-- Added missing `.env.example` documentation for `MOOTOS_ALLOW_PUBLIC`.
-- Added the hardening guide and ADR to the documentation index.
-- Pinned Flake8 and removed the unpinned CI installation.
-- Added schema compatibility verification before migration success.
-- Added a regression test proving incompatible legacy schemas roll back without migration history.
-- GitHub Actions passed on Python 3.9, 3.10, and 3.11.
-- Dependency installation, blocking-error lint, and the full test suite passed in every matrix job.
+- Explicit save commands write to SQLite before confirmation.
+- A save command does not call the model provider.
+- The saved memory is supplied to a separate new conversation.
+- Global memories are available across projects.
+- Project memories do not leak into unrelated projects.
+- Incomplete commands and ordinary questions are not misclassified.
+- Oversized memories are rejected before a conversation is created.
 
 Still required before merge:
 
+- GitHub Actions on Python 3.9, 3.10, and 3.11
+- Final diff review
 - Plain-language review with Moot
 - Explicit merge approval
-- Final release-status documentation update and ADR acceptance
 
 Still required after merge:
 
 - Railway startup confirmation
 - Login verification
-- Pre-hardening conversation and memory verification
-- New write verification
-- One redeployment persistence check
+- Save a unique fact through normal chat
+- Start a brand-new chat and recall the fact
+- Verify the row through the memory API or interface when available
+- Redeploy once and confirm the saved memory remains
 
 ## Current implementation boundaries
 
@@ -161,23 +198,21 @@ MootOS remains:
 - Text chat only
 - One Railway service and replica
 - One SQLite database
-- One implemented model provider
+- One implemented external model provider
 - No background queue
 - No local model
 - No runtime tools
 - No multi-agent system
-- No natural-language memory commands
 - No automatic backups
 
-## Next product milestone
+After PR #12, explicit save commands exist, but forget, update, correction, review, and search remain incomplete.
 
-After foundation hardening is reviewed, merged, and verified in Railway:
+## Next product milestones
 
-1. Add explicit natural-language memory commands:
-   - “Remember this”
-   - “Forget that”
-   - “Update that”
-2. Add memory review and correction controls.
+After PR #12 is reviewed, merged, and verified:
+
+1. Add safe memory review and correction controls.
+2. Add explicit forget and update workflows with confirmation.
 3. Add simple keyword retrieval before embeddings.
 4. Improve behavior for short notes and status statements.
 5. Prepare a curated Moot bootstrap profile only after correction controls are safe.
@@ -202,12 +237,13 @@ A future advisory system may use specialist business, technical, creative, and r
 - No secrets in GitHub
 - Tests for important behavior
 - Documentation updated in the same PR
-- Major decisions use ADRs
+- Major architecture decisions use ADRs
 - One Railway replica while SQLite is live
 - Backups before destructive storage changes
+- Never claim a memory was saved unless the database write succeeded
 - Honest reporting of tests, deployments, and uncertainty
 - Moot explicitly approves merges and high-risk actions
 
 ## Immediate decision
 
-Review PR #11 in plain language. Do not merge until Moot explicitly approves it.
+Finish PR #12 documentation and automated review. Do not merge until checks pass and Moot explicitly approves it.
