@@ -1,291 +1,340 @@
 # MootOS Data and Persistence
 
-**Applies to:** MootOS Version 0.1 as of July 31, 2026
+**Applies to:** MootOS Version 0.1 foundation hardening
 
-This document explains where MootOS stores data, what the Railway volume protects, how to verify persistence, what redundancy means for the current system, and when the database design should change.
+This document explains where MootOS stores data, how SQLite is configured, how schema migrations work, what the Railway volume protects, what is still not backed up, and when the database design should change.
 
 ## 1. Current database choice
 
 MootOS uses SQLite.
 
-SQLite is a database engine stored in one file. It does not require a separate database server, account, network connection, or managed database service.
-
-For the current single-user MootOS deployment, SQLite provides:
+For the current single-user, one-replica deployment, SQLite provides:
 
 - Simple local development
 - Low operational cost
-- Fast reads and writes for a small personal workload
+- Fast reads and writes for a personal workload
 - Easy portability to a future local computer
-- A database file that can be backed up and restored
+- One database file that can be backed up and restored
 - A small dependency footprint
 
-SQLite is not being used because it is the newest database. It is being used because it matches the present workload and local-first direction.
+SQLite is used because it fits the present workload and local-first direction, not because it is the newest database.
 
 ## 2. What is stored
 
-The SQLite file currently contains:
+The SQLite database contains:
 
+- Applied schema migration history
 - Projects
-- Long-term memory entries
+- Long-term memories
 - Conversations
 - User messages
 - Assistant messages
-- Model-provider and model metadata for assistant messages
+- Provider and model metadata for assistant messages
 
-Frontend files, source code, secrets, and application configuration are not stored in SQLite.
+Source code, frontend assets, secrets, and Railway configuration are not stored in SQLite.
 
 ## 3. Database path selection
 
 MootOS selects the database path in this order:
 
-### Priority 1 — Explicit override
+1. `MOOTOS_DATABASE_PATH`
+2. `<RAILWAY_VOLUME_MOUNT_PATH>/mootos.db`
+3. Repository-local `data/mootos.db`
 
-When `MOOTOS_DATABASE_PATH` is set, MootOS uses that exact path.
-
-Example:
-
-```text
-MOOTOS_DATABASE_PATH=/private/mootos/custom.db
-```
-
-This is useful for testing, recovery, controlled migration, or a future local installation.
-
-### Priority 2 — Railway volume
-
-When Railway attaches a volume, it supplies `RAILWAY_VOLUME_MOUNT_PATH`.
-
-The approved production mount path is:
+The approved Railway volume mount is:
 
 ```text
 /data
 ```
 
-MootOS stores the production database at:
+Production therefore uses:
 
 ```text
 /data/mootos.db
 ```
 
-### Priority 3 — Local development
+## 4. Central connection policy
 
-Without either environment variable, MootOS stores the database at:
+All application database access goes through `backend/db.py`.
+
+Every connection enables:
 
 ```text
-data/mootos.db
+PRAGMA foreign_keys = ON
+PRAGMA journal_mode = WAL
+PRAGMA synchronous = NORMAL
+PRAGMA busy_timeout = 5000
 ```
 
-inside the repository working directory.
+The SQLite connection timeout is also five seconds.
 
-## 4. Verified production persistence
+The shared context manager:
+
+- Commits successful work
+- Rolls back failed work
+- Closes every connection
+
+This avoids separate modules silently using different SQLite behavior.
+
+## 5. What the SQLite settings mean
+
+### Foreign-key enforcement
+
+SQLite does not enforce foreign keys merely because they are declared in a table. Enforcement must be enabled per connection.
+
+MootOS now enables it every time. A message cannot be inserted for a nonexistent conversation through a correctly configured application connection.
+
+### WAL mode
+
+Write-ahead logging allows readers to continue while another connection writes and reduces some reader-writer blocking.
+
+Active WAL databases may have:
+
+```text
+mootos.db
+mootos.db-wal
+mootos.db-shm
+```
+
+Do not manually delete the WAL or shared-memory files while MootOS is running.
+
+### Busy timeout
+
+When the database is temporarily locked, MootOS waits up to five seconds before failing. This helps with short write contention but does not make long locks safe.
+
+### Synchronous mode
+
+`NORMAL` synchronous mode is used with WAL as a practical reliability and performance balance for the current service.
+
+## 6. Versioned schema migrations
+
+Schema initialization is handled by `backend/migrations.py`.
+
+Applied migrations are stored in:
+
+```text
+schema_migrations
+```
+
+Current migration:
+
+```text
+1 — initial_schema
+```
+
+The migration runner:
+
+1. Opens a hardened SQLite connection.
+2. Starts `BEGIN IMMEDIATE` to serialize migration work.
+3. Creates `schema_migrations` when absent.
+4. Reads the current version.
+5. Refuses a version newer than the application understands.
+6. Applies missing migrations in numeric order.
+7. Records each applied migration.
+8. Commits or rolls back as one startup operation.
+
+## 7. Existing production database adoption
+
+The first hardened deployment adopts the existing Railway database.
+
+Migration 1 uses `CREATE TABLE IF NOT EXISTS` and `INSERT OR IGNORE` for default projects. It does not drop tables, replace the database, or delete records.
+
+The expected first hardened startup is:
+
+```text
+Existing /data/mootos.db
+        |
+        v
+Create schema_migrations
+        |
+        v
+Confirm current Version 0.1 tables
+        |
+        v
+Record migration 1
+        |
+        v
+Start MootOS
+```
+
+Automated tests verify adoption of an existing database while preserving a saved memory.
+
+Production must still be manually verified after merge.
+
+## 8. Newer-schema protection
+
+An older MootOS build refuses to start against a database with a newer unknown migration version.
+
+This prevents an accidental code rollback from silently using a schema it does not understand.
+
+The correct response is to deploy a compatible application version or follow a documented data rollback. Do not edit `schema_migrations` merely to force startup.
+
+## 9. Verified production persistence
 
 On July 31, 2026:
 
-- A Railway volume named `mootos-volume` was attached to the MootOS service.
-- The volume was mounted at `/data`.
-- MootOS deployed successfully and returned online.
-- A saved conversation and memory remained available after three consecutive Railway deployments.
+- Railway volume `mootos-volume` was attached.
+- It was mounted at `/data`.
+- A saved conversation and memory survived three consecutive deployments.
 
-This verifies that normal Railway rebuilds are using the persistent volume instead of the temporary application filesystem.
+That verifies persistence across normal rebuilds. It does not prove backup recovery or protection from volume deletion, corruption, or account loss.
 
-This test proves deployment persistence. It does not replace backups or prove recovery from database corruption.
+## 10. One-replica rule
 
-## 5. One replica rule
+Keep Railway at **one replica** while SQLite remains the live database.
 
-Keep the Railway service at **one replica** while SQLite remains the live production database.
+WAL improves concurrency between connections using the same local database file. It does not make one SQLite file suitable for multiple Railway application replicas.
 
-Reason:
+A move to multiple replicas requires a planned database architecture decision, likely including PostgreSQL.
 
-- SQLite is one database file.
-- Multiple application replicas can create confusing ownership and coordination problems around one file or separate files.
-- The current application has not been designed or tested for multiple writers across replicas.
+## 11. Redundancy versus dual writing
 
-Do not increase replicas as a performance experiment. A move to multiple application replicas should be treated as a database architecture change and documented through a new ADR.
+MootOS should not write every record to SQLite and an unrelated second live database merely for redundancy.
 
-## 6. Redundancy versus double-writing
+Dual writing creates questions such as:
 
-Redundancy is good. Writing every application change to two unrelated live databases at the same time is not the recommended Version 0.1 approach.
-
-A dual-write system creates new failure questions:
-
-- What happens when SQLite succeeds and the second database fails?
-- Which database becomes the source of truth?
-- How are differences detected?
+- Which write wins when one database fails?
+- Which database is authoritative?
 - How are partial writes repaired?
-- What happens when records receive different IDs or timestamps?
-- Which database is trusted during restore?
+- How are conflicting IDs and timestamps reconciled?
+- Which copy is safe to restore?
 
-For the current system, the recommended redundancy model is:
+The current redundancy direction is:
 
 ```text
-One live SQLite database
+One live SQLite source of truth
         |
         v
-Regular verified backup copies
+Verified backup copies
         |
         v
-Documented restore procedure
+Documented restore testing
 ```
 
-This gives MootOS one clear source of truth while protecting against accidental deletion, broken deployments, device failure, or database damage.
+## 12. Current backup status
 
-## 7. Current backup status
+The Railway volume protects against normal redeployments.
 
-The Railway volume protects data from normal application redeployments.
+MootOS still does not implement:
 
-The repository does **not** currently implement:
-
-- Automatic scheduled database backups
-- Encrypted off-platform backups
-- Backup retention rules
+- Automatic scheduled backups
+- Encrypted off-platform backup storage
+- Retention policies
 - One-click restore
 - Automated restore tests
 - Point-in-time recovery
 
-Until those features are built, the volume should not be treated as a complete disaster-recovery system.
+The volume is persistent storage, not a complete disaster-recovery system.
 
-## 8. Safe backup direction
+## 13. Safe backup direction
 
 A future backup feature should:
 
-1. Create a consistent SQLite backup instead of copying a file during an active write.
-2. Write the backup to a separate location from the live volume.
-3. Encrypt backups containing private memories.
-4. Record backup time, size, and checksum.
-5. Keep more than one historical copy.
-6. Test restore into a non-production environment.
-7. Require explicit approval before replacing the live database.
+1. Use SQLite's backup mechanism or another consistent snapshot method.
+2. Store copies separately from the live volume.
+3. Encrypt private data.
+4. Record time, size, checksum, and schema version.
+5. Keep multiple historical copies.
+6. Test restore away from production.
+7. Require explicit approval before replacing live data.
 
-Potential destinations may include:
+A backup that has never been restored is not fully verified.
 
-- An encrypted local computer
-- Encrypted object storage
-- A second controlled storage provider
-- A future self-hosted backup device
+## 14. Manual persistence verification
 
-No destination should be selected until privacy, cost, authentication, and restore behavior are documented.
+After database, migration, or deployment changes:
 
-## 9. Manual persistence verification
+1. Log in.
+2. Open an older conversation.
+3. Confirm old messages are present.
+4. Confirm saved memories are present.
+5. Create a uniquely named test conversation or memory.
+6. Redeploy.
+7. Wait for Railway to return online.
+8. Log in again.
+9. Confirm both old and new data remain.
 
-After a storage or deployment change:
+Do not detach or replace the existing volume because a new deployment merely appears healthy.
 
-1. Log in to the production MootOS interface.
-2. Create a uniquely named test conversation.
-3. Add a unique memory or message containing the current date.
-4. Confirm it appears before deployment.
-5. Deploy or redeploy the Railway service.
-6. Wait until the service is online.
-7. Log in again.
-8. Reopen the conversation and verify the exact test content remains.
-9. Repeat when validating a new storage architecture.
+## 15. Migration development rules
 
-Do not delete an old database or detach a volume merely because a new deployment appears healthy.
+Every future schema change must:
 
-## 10. Current schema limitations
+- Receive the next numeric migration version
+- Be safe on a clean database
+- Be tested from the previous schema version
+- Preserve existing data unless deletion is explicitly approved
+- Document backup and rollback behavior
+- Update current implementation and persistence documentation
+- Use a focused PR
+- Receive Moot's explicit approval before merge
 
-The database schema is created with `CREATE TABLE IF NOT EXISTS`.
+Do not silently edit an already-applied migration. Add a new migration instead.
 
-That works for creating missing tables but does not provide controlled schema evolution. It cannot safely document or sequence changes such as:
+## 16. When to keep SQLite
 
-- Adding required columns
-- Renaming columns
-- Moving data between tables
-- Creating new relationships
-- Transforming existing values
-- Rolling back an incompatible release
-
-Before adding substantial new database-backed features, MootOS should receive a versioned migration system.
-
-The recommended first migration system can remain lightweight:
-
-- `schema_version` table
-- Ordered migration files or Python migration functions
-- Migration applied once in a transaction
-- Tests for clean install and upgrade from the previous schema
-- Recorded migration failures
-
-Alembic is an option, but it is not mandatory for the current project size.
-
-## 11. Current SQLite hardening gaps
-
-The current implementation has not yet explicitly configured every SQLite connection for:
-
-- Foreign-key enforcement
-- Write-ahead logging (WAL)
-- Busy timeout
-- Deliberate synchronous mode
-- Lock retry behavior
-
-The current one-user, one-replica system has worked in production testing. These gaps should still be addressed in a focused foundation-hardening code PR before the workload or schema becomes significantly more complex.
-
-This documentation PR does not change database behavior.
-
-## 12. When to keep SQLite
-
-Keep SQLite while most of the following remain true:
+Keep SQLite while most of these remain true:
 
 - Moot is the only user
-- Railway remains at one replica
-- The workload is mostly conversation and memory storage
+- Railway uses one replica
 - Writes are relatively low volume
+- The workload is conversation and memory storage
 - The database fits comfortably on one volume
-- Local-first portability remains important
-- Operational simplicity matters more than horizontal scaling
+- Local-first portability matters
+- Simplicity matters more than horizontal scaling
 
-SQLite can support a serious personal application for a long time under those conditions.
+## 17. When to consider PostgreSQL
 
-## 13. When to consider PostgreSQL
-
-Consider PostgreSQL when one or more of these become real requirements:
+Consider PostgreSQL when real requirements include:
 
 - Multiple independent user accounts
 - Multiple application replicas
 - Many simultaneous writers
+- Managed backups and point-in-time recovery
 - Strong server-side access controls
-- Managed automated backups and point-in-time recovery
-- Complex analytics and reporting
-- Large relational workflows
-- A commercial hosted product used by many studios or customers
-- Cross-device synchronization requiring a central authoritative server
+- Commercial hosted use by many customers
+- Complex reporting or relational workflows
+- Central cross-device synchronization
 
-A move to PostgreSQL should be a planned migration, not a last-minute reaction. The application should first centralize database access and add schema migrations so the move is controlled.
+The central database layer and migration history make a future planned migration easier, but they do not perform that migration automatically.
 
-## 14. DynamoDB and MongoDB
+## 18. DynamoDB and MongoDB
 
-DynamoDB and MongoDB are valid databases, but “newer” or “larger scale” does not automatically mean “better for MootOS.”
+DynamoDB and MongoDB are valid databases, but larger-scale or newer branding does not automatically make them a better fit.
 
 ### DynamoDB
 
-Best suited to workloads designed around Amazon Web Services, known access patterns, high scale, and managed distributed storage. It adds cloud dependency and a different data-modeling style.
+Useful for AWS-centered systems designed around known access patterns and distributed scale. It introduces stronger cloud coupling and a different modeling approach.
 
 ### MongoDB
 
-Stores document-shaped records and can be useful when data varies heavily. MootOS currently has clear relationships between projects, memories, conversations, and messages, which fit a relational database naturally.
+Useful for document-shaped data that varies heavily. MootOS currently has clear relationships among conversations, messages, projects, and memories.
 
 ### PostgreSQL
 
-The most likely future hosted-database upgrade for MootOS because it preserves relational modeling, transactions, constraints, and familiar SQL while supporting more users and concurrent application instances.
+The most likely future hosted upgrade because it preserves relational modeling, constraints, transactions, and SQL while supporting multiple users and replicas.
 
-No database migration is currently justified solely because another database has newer branding or can support workloads MootOS does not yet have.
+## 19. Source of truth
 
-## 15. Source of truth
+The live SQLite database on the Railway volume is the production source of truth.
 
-The live SQLite database on the mounted Railway volume is currently the production source of truth.
+GitHub stores code and documentation, not production conversations or memories.
 
-GitHub stores source code and documentation, not production conversations or memories.
+OpenAI generates responses but is not MootOS's history database. Provider-side response storage is disabled, and MootOS stores its own history.
 
-OpenAI is used to generate model responses but is not configured as MootOS's conversation-history store. The application calls the Responses API with provider-side response storage disabled and keeps its own history in SQLite.
+## 20. Rules before storage changes
 
-## 16. Rules before storage changes
-
-Before changing any storage behavior:
+Before changing storage:
 
 - Create a focused branch and PR
-- Explain the reason in plain language
 - Identify the source of truth
-- Define migration and rollback steps
+- Explain migration and rollback in plain language
 - Protect the current production database
-- Add automated migration tests
-- Verify a backup exists
+- Add upgrade and clean-install tests
+- Verify a backup when the change is destructive or difficult to reverse
 - Test restore separately
 - Keep secrets out of GitHub
-- Receive Moot's explicit approval before production migration
+- Keep one replica while SQLite is live
+- Receive Moot's explicit approval
+
+See [`FOUNDATION_HARDENING.md`](FOUNDATION_HARDENING.md) and [`ADR-015-foundation-hardening.md`](ADR-015-foundation-hardening.md).

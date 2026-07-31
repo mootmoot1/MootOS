@@ -6,15 +6,13 @@
 
 MootOS will be developed in small, stable versions.
 
-Each version should improve one major capability while protecting everything that already works. The goal is steady progress, not collecting features faster than they can be understood, tested, documented, and controlled.
-
-The roadmap describes direction, not guaranteed delivery dates.
+Each version should improve one major capability while protecting what already works. The roadmap describes direction, not guaranteed delivery dates.
 
 ## Current position
 
 MootOS is in Version 0.1 foundation development.
 
-Already working:
+Already merged and working:
 
 - Private Railway deployment
 - Phone-friendly chat interface
@@ -24,15 +22,27 @@ Already working:
 - Relevant memory context in model prompts
 - Replaceable model-provider boundary
 - OpenAI provider
-- Persistent Railway volume verified across three deployments
-- Comprehensive repository, implementation, API, persistence, and operations documentation
+- Railway volume persistence verified across three deployments
+- Comprehensive repository and operations documentation
 
-Immediate priorities:
+Implemented on the current hardening branch, pending review and production verification:
 
-1. Database and production foundation hardening
-2. Natural-language memory commands
-3. Memory review, correction, and keyword retrieval
-4. Better chat behavior and a more distinct interface
+- Central SQLite connection policy
+- Foreign-key enforcement
+- WAL mode and five-second busy timeout
+- Versioned schema migrations
+- Existing database adoption
+- Concurrent-write and migration tests
+- Railway auth fail-closed behavior
+- Exact direct dependency pins
+
+Immediate priorities after hardening is merged and verified:
+
+1. Natural-language memory commands
+2. Memory review, correction, and keyword retrieval
+3. Better chat behavior for notes and status statements
+4. Curated Moot bootstrap profile import
+5. A more distinct interface without unnecessary complexity
 
 ---
 
@@ -61,18 +71,26 @@ Create a private personal AI that can hold useful ongoing conversations, deliber
 - Automated tests and ADR-based development workflow
 - Comprehensive documentation baseline
 
-## Remaining Version 0.1 work
+## Foundation hardening checkpoint
 
-### Foundation hardening
+The current hardening branch adds:
 
-- Central SQLite connection configuration
+- One database connection layer
+- Consistent commit, rollback, and close behavior
 - Foreign-key enforcement
-- WAL mode and busy timeout
-- Versioned schema migrations
-- Concurrency and migration tests
-- Production auth fail-closed behavior
-- Pinned production dependency versions
-- Backup and restore design
+- WAL mode
+- `NORMAL` synchronous mode
+- Five-second connection and busy timeouts
+- Numbered migration history
+- Refusal to use a newer unknown schema
+- Railway startup that is private by default
+- Exact direct dependency pins
+
+This checkpoint is not considered complete until GitHub Actions pass, the PR is reviewed and approved, Railway starts successfully, and pre-existing data is manually verified.
+
+Automatic backups and restore testing remain separate work.
+
+## Remaining Version 0.1 work
 
 ### Natural memory management
 
@@ -92,16 +110,25 @@ Create a private personal AI that can hold useful ongoing conversations, deliber
 - Clearer uncertainty
 - More consistent MootOS identity
 
-### Interface refinement
+### Interface and control refinement
 
 - Memory controls
 - Basic settings
+- Readable activity logging
 - More distinct MootOS visual identity
 - Improved navigation without unnecessary frontend complexity
 
+### Backup and recovery
+
+- Consistent SQLite backups
+- Encrypted off-volume copies
+- Retention rules
+- Restore testing
+- Clear recovery approval flow
+
 ## Version 0.1 completion rule
 
-Version 0.1 is complete when Moot can deliberately control memory through the normal interface and use the system daily without undocumented setup, data-loss risk, or misleading capability claims.
+Version 0.1 is complete when Moot can deliberately control memory through the normal interface and use the system daily without undocumented setup, avoidable data-loss risk, or misleading capability claims.
 
 ---
 
@@ -114,12 +141,9 @@ Turn projects from simple labels into useful workspaces.
 Possible features:
 
 - Project dashboards
-- Goals
-- Tasks
-- Deadlines
-- Notes
-- Decisions
-- Project status
+- Goals and tasks
+- Deadlines and notes
+- Decisions and project status
 - Conversation summaries
 - Related files and repositories
 - People connected to a project
@@ -137,9 +161,8 @@ Improve what MootOS remembers, why it remembers it, and how it finds the right i
 
 Possible features:
 
-- Semantic memory search
-- Memory confidence
-- Memory source tracking
+- Semantic memory search after keyword search is proven
+- Memory confidence and source tracking
 - Correction history
 - Related memories
 - Timeline view
@@ -148,7 +171,7 @@ Possible features:
 - Sensitive-memory controls
 - Memory import and export
 
-Simple keyword search should be proven before adding embeddings or a vector database.
+A curated Moot bootstrap profile belongs after review and correction controls exist. It should contain high-confidence useful facts, not a raw dump of every prior conversation.
 
 ---
 
@@ -161,11 +184,10 @@ Allow MootOS to interact with outside systems through explicit permissions.
 Possible read-first integrations:
 
 - GitHub
-- Files
+- Files and documents
 - Calendar
 - Contacts
 - Web research
-- Documents
 
 Possible later write actions:
 
@@ -174,14 +196,7 @@ Possible later write actions:
 - Preparing code changes
 - Publishing approved content
 
-Every tool must document:
-
-- What it reads
-- What it sends outside the system
-- What it changes
-- What requires approval
-- What gets logged
-- How failure and rollback work
+Every tool must document what it reads, what leaves the system, what it changes, what requires approval, what gets logged, and how failure and rollback work.
 
 ---
 
@@ -195,8 +210,7 @@ Possible features:
 
 - Repository understanding
 - Feature planning
-- Code generation
-- Bug fixing
+- Code generation and bug fixing
 - Test generation
 - Pull request preparation
 - Documentation updates
@@ -205,11 +219,11 @@ Possible features:
 
 ## Reviewable engineering learning
 
-MootOS may observe repeated engineering patterns and propose standards such as:
+MootOS may observe repeated patterns and propose standards, for example:
 
 > “We always add a migration test when changing the schema. Should this become a permanent project rule?”
 
-The system should not silently rewrite its own engineering rules. Proposed learning must remain visible, explainable, and subject to Moot's approval.
+It should not silently rewrite its own engineering rules. Proposed learning must remain visible, explainable, and subject to Moot's approval.
 
 ---
 
@@ -217,12 +231,12 @@ The system should not silently rewrite its own engineering rules. Proposed learn
 
 ## Goal
 
-Prove one revenue-producing workflow based on Moot's real work without distracting from studio time or existing content creation.
+Prove one revenue-producing workflow based on Moot's real work without distracting from the core system.
 
 Possible content features:
 
-- Upload and organize video ideas or media references
-- Generate content angles and repurposing plans
+- Organize video ideas and media references
+- Generate approved content angles and repurposing plans
 - Track drafts and publishing status
 - Learn approved brand and tone guidelines
 - Connect content to business goals
@@ -244,19 +258,15 @@ The first commercial feature should solve a real problem in Moot's own studio be
 
 ## Goal
 
-Add natural spoken interaction.
+Add natural spoken interaction using the same memory, permission, and project systems.
 
 Possible features:
 
-- Speech-to-text
-- Text-to-speech
-- Voice settings
+- Speech-to-text and text-to-speech
 - Interruption handling
-- Voice memory controls
+- Voice settings and memory controls
 - Mobile microphone support
-- Clear indication when audio is being processed or stored
-
-Voice should use the same memory, permission, and project systems rather than becoming a separate assistant.
+- Clear indication when audio is processed or stored
 
 ---
 
@@ -264,12 +274,11 @@ Voice should use the same memory, permission, and project systems rather than be
 
 ## Goal
 
-Allow MootOS to understand images, screenshots, documents, and selected media.
+Understand images, screenshots, documents, and selected media.
 
 Possible features:
 
-- Image understanding
-- Screenshot analysis
+- Image and screenshot analysis
 - Document extraction
 - Video transcript and scene analysis
 - Visual memory controls
@@ -287,8 +296,7 @@ Reduce repetitive work through controlled, observable automation.
 
 Possible features:
 
-- Scheduled tasks
-- Follow-ups
+- Scheduled tasks and follow-ups
 - Conditional checks
 - Recurring reports
 - Notifications
@@ -319,42 +327,23 @@ Expected platform capabilities:
 - Local AI support where practical
 - Understandable logs and documentation
 
-Version 1.0 represents a stable platform, not the end of development.
+Version 1.0 is a stable platform, not the end of development.
 
 ---
 
 # Long-term model independence
 
-MootOS should own:
+MootOS should own its memories, projects, permissions, logs, configuration, operating rules, tool history, and engineering knowledge.
 
-- Memories
-- Projects
-- Permissions
-- Logs
-- Configuration
-- Operating rules
-- Tool history
-- Engineering knowledge
+AI providers remain replaceable engines. Future routing may consider privacy, cost, speed, task type, internet availability, local hardware, and user preference.
 
-AI providers should remain replaceable engines.
-
-Future routing may consider:
-
-- Privacy
-- Cost
-- Speed
-- Task type
-- Internet availability
-- Local hardware
-- User preference
-
-Local AI is a strategic direction, but it should not block useful development before suitable hardware is available.
+Local AI is strategic, but it should not block useful development before suitable hardware is available.
 
 ---
 
 # Future advisory system — Board of Directors
 
-A future MootOS feature may use multiple specialist AI roles to evaluate important decisions.
+A future MootOS feature may use specialist AI roles to evaluate important decisions.
 
 Possible roles:
 
@@ -365,52 +354,34 @@ Possible roles:
 - Operations director
 - Final synthesizer or chairman
 
-A board response should show:
+A board response should show each recommendation, important disagreement, risks, assumptions, missing information, one synthesized recommendation, and the decision that still belongs to Moot.
 
-- Each specialist's recommendation
-- Important disagreement
-- Risks and assumptions
-- Missing information
-- One synthesized recommendation
-- The decision that still belongs to Moot
-
-The first version should be small, likely three specialists and one synthesizer. It should not create a swarm of agents that repeat each other and waste API credits.
-
-This feature is advisory, not autonomous authority.
+The first version should be small—likely three specialists and one synthesizer—not a swarm that repeats itself and wastes API credits. It remains advisory, not autonomous authority.
 
 ---
 
 # Database scaling direction
 
-SQLite remains the current live database while MootOS is single-user and runs one replica.
+SQLite remains the live database while MootOS is single-user and runs one replica.
 
-Before commercial multi-user deployment, evaluate PostgreSQL for:
+Before commercial multi-user deployment, evaluate PostgreSQL for multiple users, multiple application replicas, concurrent writers, managed recovery, stronger server-side controls, and commercial reliability requirements.
 
-- Multiple users
-- Multiple application replicas
-- Concurrent writers
-- Managed backups
-- Stronger server-side controls
-- Commercial reliability requirements
-
-Do not dual-write every record to unrelated databases merely for appearance of redundancy. Prefer one source of truth, verified backups, and a tested migration path.
+Do not dual-write every record to unrelated databases merely for the appearance of redundancy. Prefer one source of truth, verified backups, and a tested migration path.
 
 ---
 
 # Product and revenue direction
-
-The long-term business goal is not “add AI to everything.”
 
 The strongest product direction is:
 
 1. Use MootOS in Moot's real life and work.
 2. Identify a repeated, expensive problem.
 3. Build the smallest reliable workflow that solves it.
-4. Prove it in the studio or content workflow.
+4. Prove it internally.
 5. Document the result.
-6. Package it for similar customers only after it works internally.
+6. Package it only after it works.
 
-Possible commercial paths include a studio operating assistant, content-production support, implementation services, or a focused software product. The right path should emerge from demonstrated use rather than forcing monetization before the core system is reliable.
+Possible commercial paths include a studio operating assistant, content-production support, implementation services, or a focused software product.
 
 ---
 
@@ -418,8 +389,9 @@ Possible commercial paths include a studio operating assistant, content-producti
 
 - Planned features must not be documented as implemented.
 - One focused branch and PR at a time.
+- Tests and documentation are part of completion.
 - Reliability before scale.
-- Backups before major storage migration.
+- Backups before destructive storage migration.
 - Permissions before automation.
 - Real internal use before commercial promises.
 - Moot approves major changes and remains the final authority.

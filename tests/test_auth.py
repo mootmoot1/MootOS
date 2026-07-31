@@ -11,6 +11,7 @@ from backend.main import app
 def private_client(monkeypatch):
     monkeypatch.setenv("MOOTOS_PASSWORD", "correct-horse")
     monkeypatch.setenv("MOOTOS_SESSION_SECRET", "test-secret-that-is-long-enough")
+    monkeypatch.delenv("MOOTOS_ALLOW_PUBLIC", raising=False)
     monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
     monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN", raising=False)
     return TestClient(app)
@@ -64,6 +65,11 @@ def test_logout_clears_private_session(private_client):
 def test_auth_can_remain_disabled_for_local_development(monkeypatch):
     monkeypatch.delenv("MOOTOS_PASSWORD", raising=False)
     monkeypatch.delenv("MOOTOS_SESSION_SECRET", raising=False)
+    monkeypatch.delenv("MOOTOS_ALLOW_PUBLIC", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN", raising=False)
+
+    validate_auth_configuration()
     client = TestClient(app)
 
     assert client.get("/chat").status_code == 200
@@ -73,6 +79,26 @@ def test_auth_can_remain_disabled_for_local_development(monkeypatch):
 def test_partial_auth_configuration_fails_closed(monkeypatch):
     monkeypatch.setenv("MOOTOS_PASSWORD", "configured")
     monkeypatch.delenv("MOOTOS_SESSION_SECRET", raising=False)
+    monkeypatch.delenv("MOOTOS_ALLOW_PUBLIC", raising=False)
 
     with pytest.raises(RuntimeError, match="must be configured together"):
         validate_auth_configuration()
+
+
+def test_railway_without_auth_configuration_fails_closed(monkeypatch):
+    monkeypatch.delenv("MOOTOS_PASSWORD", raising=False)
+    monkeypatch.delenv("MOOTOS_SESSION_SECRET", raising=False)
+    monkeypatch.delenv("MOOTOS_ALLOW_PUBLIC", raising=False)
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+
+    with pytest.raises(RuntimeError, match="Railway deployments require"):
+        validate_auth_configuration()
+
+
+def test_railway_public_override_must_be_explicit(monkeypatch):
+    monkeypatch.delenv("MOOTOS_PASSWORD", raising=False)
+    monkeypatch.delenv("MOOTOS_SESSION_SECRET", raising=False)
+    monkeypatch.setenv("MOOTOS_ALLOW_PUBLIC", "true")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+
+    validate_auth_configuration()

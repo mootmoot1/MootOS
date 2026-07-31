@@ -4,8 +4,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from backend.db import resolve_database_path
 from backend.main import app
-from backend.memory import resolve_database_path
 
 
 ROOT = Path(__file__).resolve().parent.parent
