@@ -1,135 +1,230 @@
 # MootOS Current Checkpoint
 
-**Last updated:** July 29, 2026  
+**Last updated:** July 31, 2026  
 **Repository:** `mootmoot1/MootOS`  
-**Default branch:** `main`
+**Default branch:** `main`  
+**Current release:** Version 0.1 foundation
 
-## Connection status
+## Verified operating state
 
-ChatGPT is connected to GitHub through the official ChatGPT GitHub connector.
+MootOS is deployed on Railway and accessible through its private phone-friendly web interface.
 
-Verified capabilities:
+Verified production facts:
 
-- Read the MootOS repository
-- Create and update repository files
-- Create branches and commits
+- Railway deploys from `main`.
+- The FastAPI service is online.
+- Password login protects the application when production auth variables are configured.
+- The browser receives a signed HTTP-only session cookie after login.
+- The mobile chat interface works from the Railway domain.
+- The OpenAI provider returns real responses through the backend.
+- Conversations and messages are stored in SQLite.
+- Project memories are stored in SQLite and supplied to the model.
+- The Railway volume `mootos-volume` is attached at `/data`.
+- The production database resolves to `/data/mootos.db`.
+- Saved conversations and memories survived three consecutive Railway deployments on July 31, 2026.
+- The service remains limited to one Railway replica while SQLite is in use.
+
+The volume test proves persistence across normal deployments. Automatic off-volume backups and tested disaster recovery are not implemented yet.
+
+## GitHub working agreement
+
+ChatGPT is connected to the repository through the GitHub connector.
+
+Verified repository capabilities include:
+
+- Read repository files
+- Read pull requests and issues
+- Create branches
+- Create and update files
+- Prepare commits
 - Open pull requests
-- Read GitHub Actions results
-- Merge only after Moot gives explicit approval
+- Review GitHub Actions results
 
-## Completed work
+Operating rule:
+
+- AI coding agents may prepare work.
+- Moot receives a plain-language explanation.
+- Major changes are not merged without Moot's explicit approval.
+
+## Completed milestones
 
 ### PR #2 — Persistent SQLite memory
 
-Merged into `main`.
-
 Implemented:
 
-- Persistent SQLite memory storage
+- Persistent memory storage
 - Create, list, retrieve, filter, and delete memory endpoints
-- UUID memory IDs and UTC timestamps
-- Validation and missing-record handling
+- UUID memory IDs
+- UTC timestamps
+- Validation and missing-record behavior
 
 ### PR #3 — Minimal project system
-
-Merged into `main`.
 
 Implemented:
 
 - Five default projects: MootOS, Studio, Social Media, Cars, and Personal
 - Project creation and listing
-- Project validation and duplicate protection
-- Memory filtering by project
+- Project validation
+- Case-insensitive duplicate protection
+- Project-filtered memories
 - ADR-011
 
-### PR #5 — Conversation engine and replaceable model router
-
-Merged into `main`.
+### PR #5 — Conversation engine and model-provider boundary
 
 Implemented:
 
 - Persistent conversations and messages
 - Conversation and chat endpoints
 - Recent conversation history supplied to the model
-- Relevant project memories supplied to the model
-- Replaceable provider interface
+- Relevant memories supplied to the model
+- Replaceable provider protocol
 - OpenAI Responses API provider
-- Provider and model metadata
-- Environment-based secret configuration
-- ADR-012 accepted
+- Provider and model metadata stored with assistant responses
+- Fake provider tests that avoid spending API credits
+- ADR-012
 
 ### PR #7 — Mobile-friendly chat interface
 
-Merged into `main` on July 29, 2026.
-
 Implemented and manually verified:
 
-- Normal message bubbles and text composer
+- Message bubbles
+- Text composer
 - New Chat control
 - Project selector
 - Saved conversation history
-- Reopening old conversations with restored messages
+- Reopening old conversations
 - Loading and readable error states
-- Responsive phone and desktop layouts
+- Responsive phone and desktop layout
 - Automatic conversation-ID handling
-- Successful project-memory recall through the normal interface
+- Project-memory recall through the normal interface
 - Automated interface tests
-- ADR-013 accepted
+- ADR-013
 
-## Current work
+### PR #9 — Secure Railway phone deployment
 
-### Issue #8 — Secure phone deployment
+Implemented and verified:
 
-Approved and in development on:
-
-`feature/phone-deployment-v0.1`
-
-Planned and implemented on the branch:
-
-- Railway config-as-code start command and `/health` check
-- Password login before public access
-- Signed HTTP-only session cookies
-- Protected chat, Swagger, memory, project, and conversation APIs
-- Public health endpoint for Railway
+- Railway config-as-code
+- Uvicorn bound to Railway's `PORT`
+- Public `/health` check
+- Password login
+- Signed 30-day HTTP-only sessions
+- Secure cookies on Railway
+- Protected application and API routes
 - Logout controls
-- Installable phone web-app metadata
-- Automatic SQLite storage on an attached Railway volume
-- Railway setup guide
-- Authentication and deployment tests
-- ADR-014 proposed
+- Installable web-app manifest
+- Railway volume path support
+- Deployment and authentication tests
+- Phone deployment checklist
+- ADR-014
 
-The feature must pass GitHub Actions, be reviewed in plain English, and receive Moot's explicit merge approval.
+Production setup completed:
 
-## Production setup still required in Railway
+- Repository connected to Railway
+- Required variables configured
+- Public Railway domain generated
+- Volume attached at `/data`
+- Login and chat verified
+- Persistence verified across three deployments
 
-After the deployment pull request is merged:
+### PR #10 — Comprehensive documentation baseline
 
-- Connect `mootmoot1/MootOS` to Railway from GitHub
-- Deploy from `main`
-- Add `OPENAI_API_KEY`
-- Add `MOOTOS_PASSWORD`
-- Add `MOOTOS_SESSION_SECRET`
-- Attach one volume at `/data`
-- Generate the public Railway domain
-- Verify login, chat, memory persistence, and Home Screen installation
+Established:
 
-## Current operating rules
+- A complete repository README and system overview
+- A documentation index and recommended reading order
+- Exact current-implementation documentation separated from future vision
+- A full current API reference
+- SQLite, Railway volume, backup, redundancy, and migration guidance
+- A production operations and incident-response runbook
+- A documentation maintenance policy
+- Updated deployment, requirements, checkpoint, and roadmap documents
 
-- Work uses a feature branch and pull request
-- ChatGPT explains changes in plain English before merge
-- Merges require Moot's explicit approval
-- Secrets must never be committed
-- Major architecture decisions use numbered ADRs
-- Keep v0.1 simple, local-first, modular, and model-provider independent
-- Keep the Railway service at one replica while SQLite is the database
+Runtime impact:
 
-## Next milestone
+- Documentation only
+- No application, database, frontend, dependency, authentication, provider, or Railway configuration behavior changed
 
-Complete the secure Railway deployment so MootOS remains available from Moot's phone without a running Codespace.
+## Current implementation boundaries
 
-After deployment is stable, return to natural memory management:
+MootOS Version 0.1 is currently:
 
-- "Remember this"
-- "Forget that"
-- "Update that"
-- Memory review and correction controls
+- Single user
+- Text chat only
+- One Railway service
+- One Railway replica
+- One SQLite database
+- One implemented model provider
+- No background task queue
+- No local model
+- No tool integrations
+- No multi-agent system
+- No natural-language memory commands
+- No automated database backups
+- No schema migration runner
+
+These limits are documented so planned features are not confused with existing behavior.
+
+## Next engineering milestone
+
+Prepare a focused foundation-hardening PR.
+
+Recommended scope:
+
+- Centralize SQLite connection configuration
+- Enable foreign-key enforcement
+- Enable WAL mode
+- Add a deliberate busy timeout
+- Add a lightweight versioned migration runner
+- Add concurrency and migration tests
+- Make production authentication fail closed when required variables are missing
+- Pin tested production dependency versions
+
+Do not mix natural-language memory features into the hardening PR.
+
+## Following product milestone
+
+After foundation hardening:
+
+- Add natural-language memory commands:
+  - “Remember this”
+  - “Forget that”
+  - “Update that”
+- Add memory review and correction controls
+- Improve retrieval with simple keyword search before considering embeddings
+- Improve chat behavior so short statements are treated as notes or updates rather than automatically expanded into plans
+- Refine the interface without copying another product's identity
+
+## Preserved future ideas
+
+The following ideas remain part of the long-term plan but are not immediate build targets:
+
+### Model independence
+
+MootOS should own its memories, projects, permissions, and operating logic while treating AI providers as replaceable engines. Future providers may include additional cloud models and local models.
+
+### Reviewable engineering learning
+
+MootOS may record what changed, why it changed, which patterns repeatedly worked, and propose new engineering standards for Moot's approval. It should not silently rewrite its own permanent rules.
+
+### Board of directors
+
+A future advisory system may use multiple specialist AI roles, such as business, technical, creative, and risk reviewers, followed by a synthesizer that presents one recommendation, disagreements, risks, and assumptions.
+
+This system should begin small, remain reviewable, and avoid wasting API credits on agents that merely agree with each other.
+
+## Operating rules
+
+- One focused purpose per branch and PR
+- No secrets committed to GitHub
+- Documentation updated with behavior changes
+- Tests required for important behavior changes
+- Major architecture changes require an ADR
+- Keep Railway at one replica while SQLite is the live database
+- Back up data before storage migration
+- Never claim an action, test, deployment, or backup succeeded without verification
+- Moot remains the final authority over merges and high-risk actions
+
+## Immediate decision
+
+Proceed with foundation hardening before expanding memory behavior or adding major features.
