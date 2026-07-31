@@ -2,9 +2,9 @@
 
 MootOS is Moot's private, mobile-friendly personal AI foundation.
 
-Version 0.1 currently provides a working chat interface, persistent conversations, project-organized memories, a replaceable model-provider boundary, private password access, and Railway deployment with hardened persistent SQLite storage.
+Version 0.1 provides a working chat interface, persistent conversations, explicit long-term-memory saves through normal chat, project-organized memory context, a replaceable model-provider boundary, private password access, and Railway deployment with hardened persistent SQLite storage.
 
-MootOS is built in small, reviewable steps. The immediate goal is a reliable system that Moot controls and can expand without rebuilding the foundation.
+MootOS is built in small, reviewable steps. The goal is a reliable system that Moot controls and can expand without rebuilding the foundation.
 
 ## Current status
 
@@ -13,7 +13,6 @@ MootOS is built in small, reviewable steps. The immediate goal is a reliable sys
 **Deployment:** Railway, one service and one replica  
 **Production database:** SQLite on a Railway volume mounted at `/data`  
 **Current schema version:** `1 — initial_schema`  
-**Persistence verification:** Conversations and memories survived three consecutive Railway deployments on July 31, 2026  
 **Current model provider:** OpenAI through a replaceable provider interface
 
 See [`docs/CURRENT_CHECKPOINT.md`](docs/CURRENT_CHECKPOINT.md) for the latest verified project state.
@@ -22,46 +21,78 @@ See [`docs/CURRENT_CHECKPOINT.md`](docs/CURRENT_CHECKPOINT.md) for the latest ve
 
 - Private password login for the deployed application
 - Railway startup that fails closed when private auth variables are missing
-- Signed, HTTP-only browser sessions with a 30-day expiration
+- Signed, HTTP-only browser sessions
 - Mobile-friendly chat interface
 - Starting and reopening persistent conversations
-- Recent conversation history supplied to the model
+- Conversation history surviving Railway deployments
 - Five default projects: MootOS, Studio, Social Media, Cars, and Personal
-- Project-specific memories
-- Creating, listing, retrieving, filtering, and deleting memories through the API
+- Memory create, list, retrieve, filter, and delete APIs
+- Explicit chat commands beginning with `remember`, `save this`, or `save to memory`
+- Database-backed confirmation only after a memory write succeeds
+- Cross-chat recall from the `memories` table
+- Global memories available across project chats
+- Project memories isolated to their matching project
 - Relevant memory context supplied to the model
 - Replaceable model-provider boundary
 - OpenAI Responses API integration
 - Provider and model metadata stored with assistant messages
-- Installable web-app manifest for a phone Home Screen
-- Public minimal health check for Railway
+- Installable phone Home Screen manifest
+- Public minimal Railway health check
 - Persistent production data through an attached Railway volume
-- One centralized SQLite connection layer
-- Foreign-key enforcement on every application database connection
-- WAL mode, `NORMAL` synchronous mode, and a five-second busy timeout
-- Numbered schema migrations recorded in `schema_migrations`
-- Protection against running an older build on a newer unknown schema
+- Centralized SQLite connection configuration
+- Foreign-key enforcement, WAL mode, `NORMAL` synchronous mode, and busy timeout
+- Numbered schema migrations and schema compatibility checks
 - Exact direct-dependency pins
-- Automated tests for database configuration, migrations, concurrent writes, memory, projects, conversations, authentication, interface behavior, and deployment configuration
+- Automated tests for memory commands, cross-chat recall, database hardening, migrations, auth, conversations, interface behavior, and deployment configuration
+
+## Explicit long-term memory through chat
+
+Use direct wording at the beginning of a message:
+
+```text
+Remember that my favorite tea is jasmine.
+Save this to memory: I prefer plain explanations.
+Save to long-term memory: Studio block sessions cost $50 per hour.
+```
+
+For a recognized command, MootOS:
+
+1. Extracts the memory content.
+2. Writes it to SQLite.
+3. Stores it under the current conversation project, or globally when no project is selected.
+4. Confirms the save only after the write succeeds.
+5. Makes it available to later conversations according to project scope.
+
+The save operation is handled internally and does not call OpenAI or spend model credits.
+
+Questions such as:
+
+```text
+Do you remember that studio session?
+```
+
+remain ordinary model requests and are not interpreted as writes.
 
 ## What is not built yet
 
-The following items are planned but are not current capabilities:
+The following remain planned:
 
-- Natural-language memory commands such as “remember this,” “forget that,” and “update that”
-- Memory review and correction interface
+- Natural-language `forget` commands
+- Natural-language memory update and correction commands
+- Memory review and editing interface
+- Duplicate and conflict detection
 - Keyword or semantic memory search
-- Automatic database backups
-- Tested automated restore workflow
+- Automatic profile import
+- Automatic database backups and tested restore workflow
 - Voice conversations
-- Tool integrations such as calendar, email, or file access
+- Runtime tool integrations such as calendar, email, or file access
 - Local AI models
-- Multiple cooperating AI specialists or a “board of directors” system
+- Multiple cooperating AI specialists or a board-of-directors system
 - Reviewable self-learning from engineering work
 - Multi-user accounts
 - Native mobile application
 
-The roadmap is documented in [`ROADMAP.md`](ROADMAP.md).
+See [`ROADMAP.md`](ROADMAP.md).
 
 ## System overview
 
@@ -71,65 +102,84 @@ Phone or desktop browser
         v
 FastAPI application (backend/main.py)
         |
-        |-- Authentication and signed sessions (backend/auth.py)
+        |-- Authentication and sessions (backend/auth.py)
         |-- Central SQLite configuration (backend/db.py)
-        |-- Versioned schema migrations (backend/migrations.py)
+        |-- Versioned migrations (backend/migrations.py)
         |-- Conversation storage (backend/conversation.py)
         |-- Project and memory storage (backend/memory.py)
-        |-- Model selection and provider boundary (backend/model_router.py)
-        |-- Static mobile web interface (frontend/)
+        |-- Explicit memory-command parser (backend/memory_commands.py)
+        |-- Model provider boundary (backend/model_router.py)
+        |-- Static mobile interface (frontend/)
         |
         v
 SQLite database
         |
-        |-- Local development: data/mootos.db
-        `-- Railway production: /data/mootos.db
+        |-- Local: data/mootos.db
+        `-- Railway: /data/mootos.db
 
 OpenAI Responses API
         ^
         |
-Model provider boundary
+Normal conversation only
 ```
 
-For the exact current runtime behavior, read [`docs/CURRENT_IMPLEMENTATION.md`](docs/CURRENT_IMPLEMENTATION.md).
+## Chat request behavior
 
-## How a chat request works
+### Normal message
 
-1. The browser sends a message to `POST /chat`.
-2. FastAPI verifies the private session when authentication is enabled.
-3. MootOS validates or creates the conversation.
-4. The user message is stored through the central SQLite layer.
-5. Recent messages are loaded from the conversation.
-6. Relevant saved memories are added to model instructions.
-7. The configured model provider generates a response.
-8. The assistant response and provider metadata are stored.
-9. The response is returned to the browser.
+1. The browser sends `POST /chat`.
+2. FastAPI verifies the session.
+3. MootOS checks that the message is not an explicit save command.
+4. The provider configuration is validated.
+5. The conversation and user message are stored.
+6. Recent history and relevant memories are loaded.
+7. The provider generates a response.
+8. The assistant response is stored and returned.
 
-The browser never receives the OpenAI API key. The backend makes provider requests.
+### Explicit memory save
+
+1. MootOS recognizes the command deterministically.
+2. The conversation and user command are stored.
+3. The extracted memory is written to SQLite with type `explicit_chat`.
+4. A deterministic confirmation is stored and returned.
+5. The external model provider is not called.
+
+The browser never receives the OpenAI API key.
+
+## Memory scope
+
+- A memory saved without a project is global and can appear in any project chat.
+- A memory saved in `Cars` is available to later `Cars` chats.
+- A `Cars` memory is not supplied to `Studio` chats.
+- Conversations without a project can load all memories.
+- At most 20 newest relevant memories are supplied to the model.
+
+This is simple newest-first retrieval. Keyword ranking, embeddings, correction history, and deduplication are not implemented.
 
 ## Repository layout
 
 ```text
 MootOS/
 |-- backend/
-|   |-- main.py            FastAPI routes and chat orchestration
-|   |-- auth.py            Password checks and signed session cookies
-|   |-- db.py              Database path and SQLite connection policy
-|   |-- migrations.py      Ordered schema migrations and version tracking
-|   |-- conversation.py    Conversation and message persistence
-|   |-- memory.py          Project and memory persistence
-|   `-- model_router.py    Replaceable provider protocol and OpenAI provider
-|-- frontend/              Mobile web interface
-|-- tests/                 Automated behavior and hardening tests
-|-- docs/                  Checkpoints, runbooks, ADRs, and references
-|-- railway.toml           Railway build and start configuration
-|-- requirements.txt       Pinned production dependencies
-|-- requirements-dev.txt   Pinned test dependencies
-|-- ARCHITECTURE.md        Long-term architecture vision
-|-- ROADMAP.md             Version plan and future capabilities
-|-- V0.1_REQUIREMENTS.md   Version 0.1 success criteria
-|-- DECISIONS.md           Original high-level design decisions
-`-- CONTRIBUTING.md        Development and approval rules
+|   |-- main.py                FastAPI routes and chat orchestration
+|   |-- auth.py                Password and signed-session behavior
+|   |-- db.py                  SQLite path and connection policy
+|   |-- migrations.py          Ordered schema migrations
+|   |-- conversation.py        Conversation and message persistence
+|   |-- memory.py              Project and memory persistence
+|   |-- memory_commands.py     Explicit save-command parsing
+|   `-- model_router.py        Replaceable provider protocol
+|-- frontend/                  Mobile web interface
+|-- tests/                     Automated behavior and safety tests
+|-- docs/                      Current truth, runbooks, ADRs, and references
+|-- railway.toml               Railway start and health configuration
+|-- requirements.txt           Pinned production dependencies
+|-- requirements-dev.txt       Pinned test and lint dependencies
+|-- ARCHITECTURE.md            Long-term architecture vision
+|-- ROADMAP.md                 Version plan
+|-- V0.1_REQUIREMENTS.md       Version 0.1 criteria
+|-- DECISIONS.md               Original high-level decisions
+`-- CONTRIBUTING.md            Development and approval rules
 ```
 
 ## Local development
@@ -137,8 +187,8 @@ MootOS/
 ### Requirements
 
 - Python 3.9 or newer
-- A virtual environment is recommended
-- An OpenAI API key is required only for real model responses
+- Virtual environment recommended
+- OpenAI API key required only for real normal-chat responses
 
 ### Install
 
@@ -149,7 +199,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt
 ```
 
-On Windows PowerShell:
+Windows PowerShell:
 
 ```powershell
 .venv\Scripts\Activate.ps1
@@ -161,7 +211,7 @@ On Windows PowerShell:
 cp .env.example .env
 ```
 
-Set only the values needed for the environment. Never commit `.env` or real secrets.
+Never commit `.env` or real secrets.
 
 ### Run
 
@@ -175,32 +225,30 @@ Open:
 http://127.0.0.1:8000/chat
 ```
 
-Local authentication may remain disabled when Railway metadata is absent and both `MOOTOS_PASSWORD` and `MOOTOS_SESSION_SECRET` are absent.
-
 ### Test
 
 ```bash
 python -m pytest
 ```
 
-Tests use fake model providers where appropriate and do not need to spend API credits.
+Tests use fake model providers and do not need to spend API credits.
 
 ## Environment variables
 
 | Variable | Required | Purpose |
 |---|---:|---|
 | `AI_PROVIDER` | No | Current supported value: `openai`. |
-| `OPENAI_API_KEY` | For real OpenAI chat | Secret key used only by the backend. |
+| `OPENAI_API_KEY` | For real normal chat | Secret key used only by the backend. |
 | `OPENAI_MODEL` | No | Model name. Defaults to `gpt-5-mini`. |
-| `MOOTOS_PASSWORD` | Required for private Railway access | Login password. Must be configured with `MOOTOS_SESSION_SECRET`. |
-| `MOOTOS_SESSION_SECRET` | Required for private Railway access | Long random secret used to sign browser sessions. |
-| `MOOTOS_ALLOW_PUBLIC` | No | High-risk override. `true` explicitly allows Railway startup without private auth. Do not set for normal MootOS production. |
-| `MOOTOS_SECURE_COOKIES` | No | Explicit secure-cookie override. Railway enables secure cookies automatically. |
-| `MOOTOS_DATABASE_PATH` | No | Exact SQLite file path. Overrides automatic path selection. |
-| `RAILWAY_VOLUME_MOUNT_PATH` | Supplied by Railway | MootOS stores the database at `<mount>/mootos.db`. |
-| `RAILWAY_ENVIRONMENT` | Supplied by Railway | Identifies Railway and activates fail-closed production behavior. |
-| `RAILWAY_PUBLIC_DOMAIN` | Supplied by Railway | Also identifies Railway for production behavior. |
-| `PORT` | Supplied by Railway | Port used by Uvicorn. |
+| `MOOTOS_PASSWORD` | Required for private Railway access | Login password. |
+| `MOOTOS_SESSION_SECRET` | Required for private Railway access | Long random session-signing secret. |
+| `MOOTOS_ALLOW_PUBLIC` | No | High-risk explicit Railway public-access override. |
+| `MOOTOS_SECURE_COOKIES` | No | Secure-cookie override. Railway enables them automatically. |
+| `MOOTOS_DATABASE_PATH` | No | Exact SQLite path override. |
+| `RAILWAY_VOLUME_MOUNT_PATH` | Supplied by Railway | Volume location used for `mootos.db`. |
+| `RAILWAY_ENVIRONMENT` | Supplied by Railway | Activates production safety behavior. |
+| `RAILWAY_PUBLIC_DOMAIN` | Supplied by Railway | Also identifies Railway. |
+| `PORT` | Supplied by Railway | Uvicorn port. |
 
 ## Data and persistence
 
@@ -216,19 +264,17 @@ Production uses:
 /data/mootos.db
 ```
 
-Every application connection enables foreign keys, WAL, `NORMAL` synchronous mode, and a five-second busy timeout. Schema versions are recorded in `schema_migrations`.
-
-Keep Railway at **one replica** while SQLite is the live database. WAL improves local concurrency but does not turn one SQLite file into a multi-replica database.
+Keep Railway at **one replica** while SQLite is live. WAL improves local concurrency but does not make multiple replicas safe.
 
 Read:
 
 - [`docs/DATA_AND_PERSISTENCE.md`](docs/DATA_AND_PERSISTENCE.md)
 - [`docs/FOUNDATION_HARDENING.md`](docs/FOUNDATION_HARDENING.md)
-- [`docs/ADR-015-foundation-hardening.md`](docs/ADR-015-foundation-hardening.md)
+- [`docs/CURRENT_IMPLEMENTATION.md`](docs/CURRENT_IMPLEMENTATION.md)
 
 ## Railway deployment
 
-Railway runs:
+Start command:
 
 ```text
 python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT
@@ -240,9 +286,7 @@ Health check:
 /health
 ```
 
-Railway refuses to start without both private auth values unless `MOOTOS_ALLOW_PUBLIC=true` is deliberately set.
-
-Deployment and recovery guides:
+Guides:
 
 - [`docs/PHONE_DEPLOYMENT.md`](docs/PHONE_DEPLOYMENT.md)
 - [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md)
@@ -255,62 +299,51 @@ Public routes:
 - `GET /login`
 - `POST /auth/login`
 - `POST /auth/logout`
-- Static files and the web-app manifest
+- Static files and manifest
 
-Authenticated application routes when private access is enabled:
+Protected application routes:
 
 - `GET /chat`
 - `POST /chat`
-- `GET /projects`
-- `POST /projects`
-- `GET /memories`
-- `POST /memories`
-- `GET /memories/{memory_id}`
-- `DELETE /memories/{memory_id}`
-- `GET /conversations`
-- `POST /conversations`
-- `GET /conversations/{conversation_id}`
+- Project, memory, and conversation APIs
 
 See [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md).
 
-## Security boundary
+## Security and control boundaries
 
-MootOS Version 0.1 is a private, single-user application.
+Current protections:
 
-Current protections include:
-
-- Railway auth that fails closed by default
-- Password-gated application access
-- Signed browser session tokens
-- HTTP-only cookies
+- Railway auth fails closed by default
+- Signed HTTP-only sessions
 - Secure cookies on Railway
-- SameSite `lax` cookies
 - Environment-based secrets
-- Protected application and API routes
+- Protected application and APIs
+- Verified write-before-confirm memory behavior
 - Explicit approval before merges
 
-Current limitations include:
+Current limitations:
 
-- No multi-user account isolation
+- Single user
 - No login rate limiting
 - No MootOS-managed database encryption at rest
-- Public minimal `/health` endpoint
-- No automatic off-volume backup or tested restore automation
+- Public minimal `/health`
+- No automatic off-volume backup
+- No destructive natural-language memory actions yet
 
 ## Development workflow
 
-1. Start from the latest `main`.
+1. Start from current `main`.
 2. Create one focused branch.
-3. Change only the intended system.
-4. Add tests for behavior changes.
-5. Update relevant documentation in the same PR.
-6. Open a draft pull request.
-7. Explain the change in plain language.
-8. Wait for GitHub Actions.
-9. Moot reviews and explicitly approves the merge.
-10. Railway deploys merged `main` automatically.
+3. Add tests for behavior changes.
+4. Update documentation in the same PR.
+5. Open a draft PR.
+6. Wait for GitHub Actions.
+7. Review in plain language.
+8. Moot explicitly approves the merge.
+9. Railway deploys merged `main`.
+10. Verify the feature and old data in production.
 
-Documentation is part of the definition of done. A feature is not ready to merge while the repository still describes the previous behavior.
+Documentation is part of the definition of done.
 
 ## Documentation map
 
@@ -322,13 +355,9 @@ Key documents:
 - [`docs/CURRENT_IMPLEMENTATION.md`](docs/CURRENT_IMPLEMENTATION.md)
 - [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md)
 - [`docs/DATA_AND_PERSISTENCE.md`](docs/DATA_AND_PERSISTENCE.md)
-- [`docs/FOUNDATION_HARDENING.md`](docs/FOUNDATION_HARDENING.md)
 - [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md)
-- [`docs/PHONE_DEPLOYMENT.md`](docs/PHONE_DEPLOYMENT.md)
-- [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - [`ROADMAP.md`](ROADMAP.md)
 - [`V0.1_REQUIREMENTS.md`](V0.1_REQUIREMENTS.md)
-- [`DECISIONS.md`](DECISIONS.md) and `docs/ADR-*`
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
 ## Core rule

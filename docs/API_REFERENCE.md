@@ -1,17 +1,15 @@
 # MootOS API Reference
 
 **Version:** 0.1  
-**Base URL:** The Railway service domain in production or `http://127.0.0.1:8000` locally
+**Base URL:** Railway service domain in production or `http://127.0.0.1:8000` locally
 
-This reference documents the current FastAPI routes. It does not describe planned endpoints.
+This reference documents current FastAPI behavior. Planned endpoints are not included.
 
 ## Authentication behavior
 
-When `MOOTOS_PASSWORD` and `MOOTOS_SESSION_SECRET` are configured, most routes require the signed `mootos_session` cookie.
+When `MOOTOS_PASSWORD` and `MOOTOS_SESSION_SECRET` are configured, application routes require the signed `mootos_session` cookie.
 
-Browser requests for protected HTML routes are redirected to `/login`.
-
-Protected JSON API requests without a valid session return:
+Unauthenticated protected JSON requests return HTTP `401`:
 
 ```json
 {
@@ -19,9 +17,9 @@ Protected JSON API requests without a valid session return:
 }
 ```
 
-with HTTP `401`.
+Browser requests for protected HTML redirect to `/login`.
 
-During local development, authentication is disabled when both auth variables are absent.
+Railway refuses to start without private auth unless `MOOTOS_ALLOW_PUBLIC=true` is deliberately configured.
 
 ## Common response pattern
 
@@ -34,7 +32,7 @@ Most application APIs return:
 }
 ```
 
-FastAPI validation errors use FastAPI's normal HTTP `422` response format.
+FastAPI request validation errors normally return HTTP `422`.
 
 ## Interface and health
 
@@ -46,23 +44,17 @@ Redirects to `/chat` with HTTP `307`.
 
 Serves the main chat interface.
 
-Authentication: protected when auth is enabled.
-
 ### `GET /login`
 
-Serves the private login page.
-
-When authentication is disabled or the request is already authenticated, redirects to `/chat`.
+Serves the private login page. Redirects to `/chat` when auth is disabled or the request is already authenticated.
 
 ### `GET /manifest.webmanifest`
 
-Returns the web-app manifest used for phone Home Screen installation.
+Returns the phone Home Screen web-app manifest.
 
 ### `GET /health`
 
 Public Railway health check.
-
-Response:
 
 ```json
 {
@@ -70,13 +62,11 @@ Response:
 }
 ```
 
-This endpoint intentionally does not expose the database path, secrets, provider configuration, or private data.
+The health response intentionally excludes secrets, database paths, provider settings, and private content.
 
 ## Authentication
 
 ### `POST /auth/login`
-
-Creates a signed browser session after a correct password.
 
 Request:
 
@@ -88,10 +78,10 @@ Request:
 
 Validation:
 
-- Minimum length: 1
-- Maximum length: 1,000
+- Minimum: 1 character
+- Maximum: 1,000 characters
 
-Successful response:
+Success:
 
 ```json
 {
@@ -99,11 +89,7 @@ Successful response:
 }
 ```
 
-The response sets the `mootos_session` cookie when auth is enabled.
-
-Incorrect password:
-
-- HTTP `401`
+Incorrect password returns HTTP `401`:
 
 ```json
 {
@@ -123,34 +109,16 @@ Deletes the session cookie and redirects to `/login` with HTTP `303`.
 {
   "id": "uuid",
   "name": "Studio",
-  "description": "Studio sessions, clients, engineering work, and business operations.",
+  "description": "Studio sessions and business operations.",
   "created_at": "2026-07-31T00:00:00+00:00"
 }
 ```
 
 ### `GET /projects`
 
-Lists all projects alphabetically.
-
-Successful response:
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "uuid",
-      "name": "Cars",
-      "description": "Vehicle maintenance, repairs, and automotive projects.",
-      "created_at": "2026-07-31T00:00:00+00:00"
-    }
-  ]
-}
-```
+Lists projects alphabetically.
 
 ### `POST /projects`
-
-Creates a project.
 
 Request:
 
@@ -163,29 +131,13 @@ Request:
 
 Validation:
 
-- `name`: required, 1–100 characters
+- `name`: 1–100 characters
 - `description`: optional, maximum 500 characters
-- Project names are unique case-insensitively
+- Names are unique case-insensitively
 
-Successful response:
+Success: HTTP `201`.
 
-- HTTP `201`
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "name": "New Project",
-    "description": "Optional description",
-    "created_at": "2026-07-31T00:00:00+00:00"
-  }
-}
-```
-
-Duplicate project:
-
-- HTTP `409`
+Duplicate project: HTTP `409`.
 
 ```json
 {
@@ -193,7 +145,7 @@ Duplicate project:
 }
 ```
 
-Current limitation: There are no project rename, update, or delete endpoints.
+There are no project update, rename, or delete endpoints.
 
 ## Memories
 
@@ -202,16 +154,18 @@ Current limitation: There are no project rename, update, or delete endpoints.
 ```json
 {
   "id": "uuid",
-  "content": "Studio block sessions cost $50 per hour.",
-  "project": "Studio",
-  "memory_type": "project",
+  "content": "My favorite tea is jasmine.",
+  "project": "Personal",
+  "memory_type": "explicit_chat",
   "created_at": "2026-07-31T00:00:00+00:00"
 }
 ```
 
+`project: null` means the memory is global.
+
 ### `POST /memories`
 
-Creates a memory.
+Creates a memory directly through the API.
 
 Request:
 
@@ -226,29 +180,12 @@ Request:
 Fields:
 
 - `content`: required, 1–10,000 characters
-- `project`: optional; must match an existing project, case-insensitively
+- `project`: optional existing project
 - `memory_type`: optional free-text category
 
-Successful response:
+Success: HTTP `201`.
 
-- HTTP `201`
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "content": "Studio block sessions cost $50 per hour.",
-    "project": "Studio",
-    "memory_type": "project",
-    "created_at": "2026-07-31T00:00:00+00:00"
-  }
-}
-```
-
-Unknown project:
-
-- HTTP `422`
+Unknown project: HTTP `422`.
 
 ```json
 {
@@ -258,84 +195,27 @@ Unknown project:
 
 ### `GET /memories`
 
-Lists memories newest first.
+Lists all memories newest first.
 
-Optional query parameter:
-
-```text
-project=Studio
-```
-
-Examples:
+Optional filter:
 
 ```text
-GET /memories
 GET /memories?project=Studio
 ```
 
-Successful response:
+The project filter returns only memories assigned to that project. It does not include global memories.
 
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "uuid",
-      "content": "Studio block sessions cost $50 per hour.",
-      "project": "Studio",
-      "memory_type": "project",
-      "created_at": "2026-07-31T00:00:00+00:00"
-    }
-  ]
-}
-```
-
-Unknown project filter:
-
-- HTTP `404`
-
-```json
-{
-  "detail": "Project does not exist"
-}
-```
-
-Current limitation: The endpoint does not yet support full-text search, pagination, tags, confidence, or semantic ranking.
+Unknown project filter returns HTTP `404`.
 
 ### `GET /memories/{memory_id}`
 
-Returns one memory.
-
-Successful response:
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "content": "Saved memory",
-    "project": "Personal",
-    "memory_type": "preference",
-    "created_at": "2026-07-31T00:00:00+00:00"
-  }
-}
-```
-
-Missing memory:
-
-- HTTP `404`
-
-```json
-{
-  "detail": "Memory not found"
-}
-```
+Returns one memory. Missing records return HTTP `404`.
 
 ### `DELETE /memories/{memory_id}`
 
 Deletes one memory.
 
-Successful response:
+Success:
 
 ```json
 {
@@ -347,21 +227,11 @@ Successful response:
 }
 ```
 
-Missing memory:
-
-- HTTP `404`
-
-```json
-{
-  "detail": "Memory not found"
-}
-```
-
-Current limitation: There is no update endpoint. Correcting a memory currently requires deleting the old record and creating a new one through the API.
+There is no memory update endpoint yet.
 
 ## Conversations
 
-### Conversation summary object
+### Conversation object
 
 ```json
 {
@@ -389,11 +259,16 @@ Current limitation: There is no update endpoint. Correcting a memory currently r
 
 User messages normally have `provider` and `model` set to `null`.
 
+Verified internal memory confirmations use:
+
+```text
+provider = mootos
+model = memory-command-v1
+```
+
 ### `POST /conversations`
 
 Creates an empty conversation.
-
-Request:
 
 ```json
 {
@@ -402,108 +277,26 @@ Request:
 }
 ```
 
-Fields:
-
-- `project`: optional; must match an existing project
+- `project`: optional existing project
 - `title`: optional, 1–100 characters; defaults to `New conversation`
 
-Successful response:
-
-- HTTP `201`
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "title": "Build session",
-    "project": "MootOS",
-    "created_at": "2026-07-31T00:00:00+00:00",
-    "updated_at": "2026-07-31T00:00:00+00:00"
-  }
-}
-```
-
-Unknown project:
-
-- HTTP `422`
-
-```json
-{
-  "detail": "Project does not exist"
-}
-```
+Success: HTTP `201`.
 
 ### `GET /conversations`
 
 Lists conversations newest first by `updated_at`.
 
-Optional query parameter:
+Optional filter:
 
 ```text
-project=MootOS
-```
-
-Successful response:
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "uuid",
-      "title": "Build session",
-      "project": "MootOS",
-      "created_at": "2026-07-31T00:00:00+00:00",
-      "updated_at": "2026-07-31T00:05:00+00:00"
-    }
-  ]
-}
-```
-
-Unknown project filter:
-
-- HTTP `404`
-
-```json
-{
-  "detail": "Project does not exist"
-}
+GET /conversations?project=MootOS
 ```
 
 ### `GET /conversations/{conversation_id}`
 
-Returns the conversation and complete message history.
+Returns one conversation with its complete message history.
 
-Successful response:
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "title": "Build session",
-    "project": "MootOS",
-    "created_at": "2026-07-31T00:00:00+00:00",
-    "updated_at": "2026-07-31T00:05:00+00:00",
-    "messages": [
-      {
-        "id": "uuid",
-        "conversation_id": "uuid",
-        "role": "user",
-        "content": "What are we building?",
-        "provider": null,
-        "model": null,
-        "created_at": "2026-07-31T00:01:00+00:00"
-      }
-    ]
-  }
-}
-```
-
-Missing conversation:
-
-- HTTP `404`
+Missing conversation returns HTTP `404`:
 
 ```json
 {
@@ -515,9 +308,9 @@ Missing conversation:
 
 ### `POST /chat`
 
-Runs the current MootOS conversation loop.
+Handles either normal model conversation or an explicit long-term-memory save command.
 
-Request for a new conversation:
+New conversation request:
 
 ```json
 {
@@ -526,7 +319,7 @@ Request for a new conversation:
 }
 ```
 
-Request for an existing conversation:
+Existing conversation request:
 
 ```json
 {
@@ -541,17 +334,92 @@ Fields:
 - `conversation_id`: optional
 - `project`: optional
 
-New-conversation behavior:
+When both `conversation_id` and `project` are supplied, the project must match the existing conversation.
 
-- The model provider is checked before the new conversation is created.
-- A conversation title is generated from the first 80 trimmed characters of the message.
+### Normal conversation behavior
 
-Existing-conversation behavior:
+When the message is not an explicit save command:
 
-- The conversation must exist.
-- When `project` is supplied, it must match the existing conversation's project case-insensitively.
+1. The provider configuration is checked.
+2. The conversation is validated or created.
+3. The user message is stored.
+4. Up to 20 recent messages are loaded.
+5. Relevant global and matching-project memories are added to instructions.
+6. The configured model provider generates a response.
+7. The assistant response is stored and returned.
 
-Successful response:
+Missing provider configuration returns HTTP `503` before a new normal conversation is created.
+
+Provider request failure returns HTTP `502`.
+
+### Explicit memory-save behavior
+
+Recognized command families include:
+
+```text
+Remember that <memory>
+Remember <memory>
+Save this <memory>
+Save this to memory: <memory>
+Save to long-term memory: <memory>
+```
+
+The parser is case-insensitive and requires the command at the beginning of the message. Ordinary questions such as `Do you remember that session?` are not treated as writes.
+
+For a recognized save command:
+
+1. The memory content is extracted.
+2. Content over 10,000 characters is rejected with HTTP `422`.
+3. The conversation is validated or created.
+4. The original user command is stored as a message.
+5. The extracted content is inserted into the `memories` table.
+6. The conversation project is used when present; otherwise the memory is global.
+7. `memory_type` is set to `explicit_chat`.
+8. A confirmation is stored and returned only after the database write succeeds.
+
+This path does not call OpenAI.
+
+Example request:
+
+```json
+{
+  "message": "Remember that my favorite tea is jasmine.",
+  "project": "Personal"
+}
+```
+
+Example response fields:
+
+```json
+{
+  "success": true,
+  "data": {
+    "conversation_id": "uuid",
+    "project": "Personal",
+    "user_message": {
+      "role": "user",
+      "content": "Remember that my favorite tea is jasmine."
+    },
+    "assistant_message": {
+      "role": "assistant",
+      "content": "Saved to Personal long-term memory: my favorite tea is jasmine.",
+      "provider": "mootos",
+      "model": "memory-command-v1"
+    },
+    "provider": "mootos",
+    "model": "memory-command-v1"
+  }
+}
+```
+
+### Cross-chat recall rules
+
+- Global memories are supplied to all project conversations.
+- Project memories are supplied only to their matching project.
+- A conversation without a project can load all memories.
+- At most 20 newest relevant memories are supplied.
+
+### Standard successful chat response
 
 ```json
 {
@@ -559,45 +427,19 @@ Successful response:
   "data": {
     "conversation_id": "uuid",
     "project": "MootOS",
-    "user_message": {
-      "id": "uuid",
-      "conversation_id": "uuid",
-      "role": "user",
-      "content": "What should we work on next?",
-      "provider": null,
-      "model": null,
-      "created_at": "2026-07-31T00:00:00+00:00"
-    },
-    "assistant_message": {
-      "id": "uuid",
-      "conversation_id": "uuid",
-      "role": "assistant",
-      "content": "Assistant response",
-      "provider": "openai",
-      "model": "gpt-5-mini",
-      "created_at": "2026-07-31T00:00:02+00:00"
-    },
+    "user_message": {},
+    "assistant_message": {},
     "provider": "openai",
     "model": "gpt-5-mini"
   }
 }
 ```
 
-Possible errors:
+### Chat errors
 
-### Missing conversation
+Missing conversation: HTTP `404`.
 
-- HTTP `404`
-
-```json
-{
-  "detail": "Conversation not found"
-}
-```
-
-### Project mismatch
-
-- HTTP `409`
+Project mismatch: HTTP `409`.
 
 ```json
 {
@@ -605,35 +447,40 @@ Possible errors:
 }
 ```
 
-### Provider not configured
+Oversized extracted memory: HTTP `422`.
 
-- HTTP `503`
+```json
+{
+  "detail": "Memory content must be 10,000 characters or fewer"
+}
+```
 
-The detail explains the missing or unknown provider configuration.
+## Current memory-command limitations
 
-### Provider request failed
+Not implemented:
 
-- HTTP `502`
-
-The detail contains the normalized model-provider error.
+- `Forget that ...`
+- `Update that ...`
+- Automatic memory extraction from normal conversation
+- Duplicate detection
+- Conflict resolution
+- Keyword or semantic search
+- Memory review UI
 
 ## FastAPI-generated documentation
 
-When authentication is enabled, the standard FastAPI documentation routes are protected:
+When authentication is enabled, `/docs` and `/redoc` are protected.
 
-- `/docs`
-- `/redoc`
-
-These routes are useful during controlled development but should not be treated as the project documentation source of truth.
+Repository documentation remains the source of truth.
 
 ## API stability
 
 The API is Version 0.1 and may evolve.
 
-Before changing route names, request fields, response fields, authentication requirements, or status codes:
+Before changing routes, request fields, response fields, auth requirements, or status codes:
 
 - Update tests
-- Update this file
+- Update this reference
 - Explain compatibility impact
 - Use a focused pull request
-- Add an ADR for a major public API redesign
+- Add an ADR for a major API redesign
