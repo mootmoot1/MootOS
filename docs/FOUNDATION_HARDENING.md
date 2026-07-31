@@ -51,13 +51,16 @@ The first hardened deployment does not replace the Railway database.
 At startup, MootOS:
 
 1. Opens the existing `/data/mootos.db` file.
-2. Creates `schema_migrations` if it does not exist.
+2. Creates `schema_migrations` inside the migration transaction if it does not exist.
 3. Runs migration 1 using `CREATE TABLE IF NOT EXISTS`.
-4. Keeps existing projects, memories, conversations, and messages.
-5. Records schema version 1.
-6. Starts the application normally.
+4. Verifies the required tables, columns, and message-to-conversation foreign key.
+5. Keeps existing projects, memories, conversations, and messages.
+6. Records schema version 1 only after compatibility verification succeeds.
+7. Starts the application normally.
 
 The migration does not drop tables, rename columns, or delete records.
+
+If an existing table has an incompatible shape, startup fails and the migration transaction rolls back instead of falsely recording success.
 
 ## Startup serialization
 
@@ -70,6 +73,20 @@ BEGIN IMMEDIATE
 This prevents two startup processes from applying schema changes at the same time.
 
 MootOS still remains a one-replica Railway service while SQLite is the live database.
+
+## Schema compatibility verification
+
+Migration history is not trusted by itself. During startup, MootOS verifies that the current database contains the required columns for:
+
+- `projects`
+- `memories`
+- `conversations`
+- `messages`
+- `schema_migrations`
+
+It also verifies that `messages.conversation_id` references `conversations.id`.
+
+This protects against partially created, manually altered, or otherwise incompatible databases being marked as healthy merely because their table names exist.
 
 ## Newer-schema protection
 
@@ -141,7 +158,7 @@ Local development may continue without authentication when Railway metadata is a
 
 ## Dependency pins
 
-Direct production and test dependencies are pinned to exact versions.
+Direct production and development dependencies are pinned to exact versions, including the lint tool used by GitHub Actions.
 
 This makes future Railway and GitHub Actions installs more repeatable. Dependency updates should use a focused PR, run the complete test suite, and document any compatibility change.
 
@@ -152,6 +169,7 @@ The hardening tests cover:
 - Required SQLite PRAGMAs
 - Clean database creation
 - Existing database adoption without data loss
+- Rejection of an incompatible existing schema without recording migration success
 - Repeated migration safety
 - Refusal of a newer unknown schema
 - Foreign-key enforcement
