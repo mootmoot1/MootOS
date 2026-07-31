@@ -25,14 +25,14 @@ Already working:
 - Replaceable model-provider boundary
 - OpenAI provider
 - Persistent Railway volume verified across three deployments
+- Comprehensive repository, implementation, API, persistence, and operations documentation
 
 Immediate priorities:
 
-1. Comprehensive documentation
-2. Database and production foundation hardening
-3. Natural-language memory commands
-4. Memory review, correction, and keyword retrieval
-5. Better chat behavior and a more distinct interface
+1. Database and production foundation hardening
+2. Natural-language memory commands
+3. Memory review, correction, and keyword retrieval
+4. Better chat behavior and a more distinct interface
 
 ---
 
@@ -59,6 +59,7 @@ Create a private personal AI that can hold useful ongoing conversations, deliber
 - Installable phone web-app manifest
 - Persistent SQLite volume
 - Automated tests and ADR-based development workflow
+- Comprehensive documentation baseline
 
 ## Remaining Version 0.1 work
 
