@@ -12,37 +12,41 @@ Each version should improve one major capability while protecting what already w
 
 MootOS is in Version 0.1 foundation development.
 
-Already merged and working:
+Merged and working:
 
 - Private Railway deployment
 - Phone-friendly chat interface
 - Persistent conversations
 - Project organization
-- Basic persistent memories
+- Persistent SQLite memories and memory APIs
 - Relevant memory context in model prompts
 - Replaceable model-provider boundary
 - OpenAI provider
-- Railway volume persistence verified across three deployments
-- Comprehensive repository and operations documentation
-
-Implemented on the current hardening branch, pending review and production verification:
-
+- Railway volume persistence
+- Comprehensive documentation
 - Central SQLite connection policy
 - Foreign-key enforcement
-- WAL mode and five-second busy timeout
+- WAL mode and busy timeout
 - Versioned schema migrations
-- Existing database adoption
-- Concurrent-write and migration tests
 - Railway auth fail-closed behavior
-- Exact direct dependency pins
+- Exact dependency pins
 
-Immediate priorities after hardening is merged and verified:
+Current draft milestone:
 
-1. Natural-language memory commands
-2. Memory review, correction, and keyword retrieval
-3. Better chat behavior for notes and status statements
-4. Curated Moot bootstrap profile import
-5. A more distinct interface without unnecessary complexity
+- Explicit `remember` and `save this` commands that write long-term memory through chat
+- Write-before-confirm behavior
+- Cross-chat recall from SQLite
+- Global and project memory scope
+- End-to-end tests proving recall in a brand-new conversation
+
+Immediate priorities after the chat-memory PR is merged and verified:
+
+1. Memory review and correction controls
+2. Safe `forget` and `update` commands
+3. Basic keyword retrieval
+4. Better behavior for notes and status statements
+5. Curated Moot bootstrap profile import
+6. More distinct interface design
 
 ---
 
@@ -57,50 +61,52 @@ Create a private personal AI that can hold useful ongoing conversations, deliber
 - Mobile-friendly web interface
 - Persistent conversation history
 - New and reopened conversations
-- Project selector
-- Five default projects
-- Basic memory CRUD APIs
-- Project memory supplied to the model
+- Project selector and five default projects
+- Memory CRUD APIs
+- Project and global memory context
 - Replaceable model-provider boundary
 - OpenAI Responses API provider
-- Private password login
-- Signed HTTP-only sessions
-- Railway deployment
-- Installable phone web-app manifest
+- Private password login and signed sessions
+- Railway deployment and Home Screen manifest
 - Persistent SQLite volume
-- Automated tests and ADR-based development workflow
+- Centralized hardened SQLite connections
+- Versioned migrations and schema checks
+- Automated tests and ADR-based workflow
 - Comprehensive documentation baseline
 
-## Foundation hardening checkpoint
+## Current chat-memory checkpoint
 
-The current hardening branch adds:
+The current draft PR adds:
 
-- One database connection layer
-- Consistent commit, rollback, and close behavior
-- Foreign-key enforcement
-- WAL mode
-- `NORMAL` synchronous mode
-- Five-second connection and busy timeouts
-- Numbered migration history
-- Refusal to use a newer unknown schema
-- Railway startup that is private by default
-- Exact direct dependency pins
+- Deterministic command parsing for `remember`, `save this`, and `save to memory`
+- SQLite writes before confirmation
+- No model-provider call for explicit saves
+- `explicit_chat` memory type
+- Global memories available across projects
+- Project memories isolated from unrelated projects
+- Internal action metadata using `mootos` and `memory-command-v1`
+- Parser, validation, isolation, and cross-chat recall tests
 
-This checkpoint is not considered complete until GitHub Actions pass, the PR is reviewed and approved, Railway starts successfully, and pre-existing data is manually verified.
+This checkpoint is complete only after:
 
-Automatic backups and restore testing remain separate work.
+- GitHub Actions passes
+- The PR is reviewed and approved
+- Railway deploys successfully
+- A fact is saved through normal chat
+- A brand-new chat recalls the fact
+- The memory survives another redeploy
 
 ## Remaining Version 0.1 work
 
-### Natural memory management
+### Controlled memory management
 
-- “Remember this”
-- “Forget that”
-- “Update that”
 - Memory review interface
-- Memory correction workflow
-- Basic keyword search
+- Memory edit or replacement workflow
+- `Forget that ...` command with confirmation
+- `Update that ...` command with correction history
 - Duplicate and conflict handling
+- Basic keyword search
+- Clear handling of sensitive memories
 
 ### Conversation refinement
 
@@ -128,7 +134,7 @@ Automatic backups and restore testing remain separate work.
 
 ## Version 0.1 completion rule
 
-Version 0.1 is complete when Moot can deliberately control memory through the normal interface and use the system daily without undocumented setup, avoidable data-loss risk, or misleading capability claims.
+Version 0.1 is complete when Moot can deliberately save, find, review, correct, and remove important memories through the normal interface while continuing to use the system through deployments without losing data or depending on undocumented steps.
 
 ---
 
@@ -143,7 +149,7 @@ Possible features:
 - Project dashboards
 - Goals and tasks
 - Deadlines and notes
-- Decisions and project status
+- Decisions and status
 - Conversation summaries
 - Related files and repositories
 - People connected to a project
@@ -161,7 +167,7 @@ Improve what MootOS remembers, why it remembers it, and how it finds the right i
 
 Possible features:
 
-- Semantic memory search after keyword search is proven
+- Semantic search after keyword search is proven
 - Memory confidence and source tracking
 - Correction history
 - Related memories
@@ -217,13 +223,7 @@ Possible features:
 - Security and performance review roles
 - Engineering decision history
 
-## Reviewable engineering learning
-
-MootOS may observe repeated patterns and propose standards, for example:
-
-> “We always add a migration test when changing the schema. Should this become a permanent project rule?”
-
-It should not silently rewrite its own engineering rules. Proposed learning must remain visible, explainable, and subject to Moot's approval.
+MootOS may propose repeated engineering patterns as standards, but it must not silently rewrite permanent rules.
 
 ---
 
@@ -343,28 +343,19 @@ Local AI is strategic, but it should not block useful development before suitabl
 
 # Future advisory system — Board of Directors
 
-A future MootOS feature may use specialist AI roles to evaluate important decisions.
+A future feature may use specialist business, technical, creative, operations, and risk perspectives followed by a synthesizer.
 
-Possible roles:
+It should show recommendations, disagreements, assumptions, risks, missing information, and one final recommendation while leaving authority with Moot.
 
-- Business and revenue director
-- Technical director
-- Creative director
-- Risk and security director
-- Operations director
-- Final synthesizer or chairman
-
-A board response should show each recommendation, important disagreement, risks, assumptions, missing information, one synthesized recommendation, and the decision that still belongs to Moot.
-
-The first version should be small—likely three specialists and one synthesizer—not a swarm that repeats itself and wastes API credits. It remains advisory, not autonomous authority.
+The first version should be small, not a swarm that repeats itself and wastes API credits.
 
 ---
 
 # Database scaling direction
 
-SQLite remains the live database while MootOS is single-user and runs one replica.
+SQLite remains live while MootOS is single-user and runs one replica.
 
-Before commercial multi-user deployment, evaluate PostgreSQL for multiple users, multiple application replicas, concurrent writers, managed recovery, stronger server-side controls, and commercial reliability requirements.
+Before commercial multi-user deployment, evaluate PostgreSQL for multiple users, multiple replicas, concurrent writers, managed recovery, stronger server-side controls, and commercial reliability requirements.
 
 Do not dual-write every record to unrelated databases merely for the appearance of redundancy. Prefer one source of truth, verified backups, and a tested migration path.
 
@@ -390,6 +381,7 @@ Possible commercial paths include a studio operating assistant, content-producti
 - Planned features must not be documented as implemented.
 - One focused branch and PR at a time.
 - Tests and documentation are part of completion.
+- Never claim a memory was saved before the database write succeeds.
 - Reliability before scale.
 - Backups before destructive storage migration.
 - Permissions before automation.
