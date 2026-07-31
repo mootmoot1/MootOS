@@ -35,6 +35,8 @@ The migration system will:
 - Apply migrations in strict numeric order
 - Serialize startup migration work with `BEGIN IMMEDIATE`
 - Preserve an existing Version 0.1 database while adopting it as schema version 1
+- Verify required tables, columns, and the message-to-conversation foreign key before recording migration success
+- Roll back rather than falsely adopting an incompatible existing schema
 - Refuse to start an older MootOS build against a database with a newer unknown schema
 - Run automatically during application startup
 
@@ -48,7 +50,7 @@ MOOTOS_ALLOW_PUBLIC=true
 
 Local development may continue without authentication when Railway metadata is absent and both auth variables are absent.
 
-Direct production and development dependencies will be pinned to exact versions tested by GitHub Actions.
+Direct production and development dependencies, including CI lint tooling, will be pinned to exact versions tested by GitHub Actions.
 
 ## Why this decision
 
@@ -57,6 +59,8 @@ The goal is not to make SQLite pretend to be a distributed database. The goal is
 Central connection rules prevent different modules from silently using different safety settings.
 
 Versioned migrations create a permanent record of schema evolution and make future upgrades testable.
+
+Schema verification prevents a partially compatible or manually altered database from being marked migrated merely because its table names exist.
 
 Fail-closed Railway authentication prevents an accidental missing-variable deployment from exposing the private application.
 
@@ -71,6 +75,7 @@ Pinned direct dependencies make rebuilds more repeatable and reduce surprise cha
 - Temporary write contention waits for a defined period instead of failing immediately.
 - Every connection commits, rolls back, and closes consistently.
 - Existing production data is adopted without deletion or table replacement.
+- Incompatible existing schemas fail safely instead of being falsely recorded as current.
 - Future schema changes have a numbered path.
 - An older application build cannot silently use a newer unknown schema.
 - Railway is private by default.
@@ -78,7 +83,7 @@ Pinned direct dependencies make rebuilds more repeatable and reduce surprise cha
 
 ### Tradeoffs
 
-- Startup now performs a migration check.
+- Startup now performs migration and schema-compatibility checks.
 - WAL may create `mootos.db-wal` and `mootos.db-shm` beside the main database while the application is active.
 - WAL and busy timeout improve concurrency but do not make multiple Railway replicas safe.
 - Exact dependency pins require deliberate update PRs.
@@ -89,6 +94,10 @@ Pinned direct dependencies make rebuilds more repeatable and reduce surprise cha
 ### Keep `CREATE TABLE IF NOT EXISTS` without versions
 
 Rejected because it cannot reliably describe or test future schema changes.
+
+### Trust table names without validating their structure
+
+Rejected because a partially created or manually changed table could be recorded as successfully migrated even when required columns or relationships were missing.
 
 ### Add Alembic immediately
 
@@ -113,6 +122,7 @@ This decision is covered by automated tests for:
 - SQLite connection PRAGMAs
 - Clean database initialization
 - Adoption of an existing schema without losing data
+- Rejection of an incompatible existing schema without migration-history success
 - Idempotent migration execution
 - Rejection of a newer unknown schema
 - Foreign-key enforcement
