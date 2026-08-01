@@ -318,11 +318,12 @@ Before volume or destructive database changes:
 Current state:
 
 - Redeployment persistence is verified.
-- Automatic backup is not implemented.
-- Automatic restore is not implemented.
-- Point-in-time recovery is not implemented.
+- One WAL-safe production snapshot was downloaded off-volume with a matching SHA-256.
+- A separate restore copy passed integrity, application startup, conversation-read, and memory-read checks on August 1, 2026.
+- Automatic backup, retention, and recurring restore verification are not implemented.
+- Automatic production restore and point-in-time recovery are not implemented.
 
-A future backup feature must include restore testing. A backup that has never been restored is not fully verified.
+See [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md) and [`BACKUP_RESTORE_VERIFICATION_2026-08-01.md`](BACKUP_RESTORE_VERIFICATION_2026-08-01.md). A future backup feature must continue to include restore testing.
 
 ## 14. Security incident response
 

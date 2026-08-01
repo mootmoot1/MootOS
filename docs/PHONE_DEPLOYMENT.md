@@ -14,7 +14,7 @@ As of July 31, 2026:
 - Production data is stored at `/data/mootos.db`.
 - Saved conversations and memories survived three consecutive deployments.
 
-Those checks verify normal deployment persistence. Automatic backups and disaster-recovery restores are not implemented yet.
+Those checks verify normal deployment persistence. A manual off-volume backup and isolated restore drill were completed on August 1, 2026, but automatic backups, retention, and production disaster-recovery automation are not implemented.
 
 ## Repository requirements
 
