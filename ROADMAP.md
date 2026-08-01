@@ -1,6 +1,6 @@
 # MootOS Roadmap
 
-**Last reviewed:** July 31, 2026
+**Last reviewed:** August 1, 2026
 
 ## Vision
 
@@ -35,21 +35,23 @@ Merged and production-verified:
 - Cross-chat recall from SQLite
 - Global and project memory scope
 - Long-term memory persistence through a Railway rebuild
+- Read-only memory review UI and production filter verification
+- Manual off-volume backup and isolated restore drill
 
 PR #12 is merged and production-verified. MootOS saved a unique fact through the normal chat interface, recalled it in a brand-new conversation, survived another Railway rebuild, and recalled it again afterward.
 
 ## Immediate sequence
 
-Before product work:
+Completed safety work:
 
-1. Record PR #12 production verification in the repository.
-2. Document a safe manual backup and restore procedure.
-3. Complete a consistent off-volume backup and non-production restore drill before migration 2 reaches production.
+1. PR #12 production verification recorded.
+2. WAL-safe manual backup and restore procedure documented.
+3. Consistent off-volume backup and isolated restore drill completed before migration 2 development.
 
-Next five product branches:
+Product branch sequence:
 
-1. `feature/memory-review-ui-v0.1`
-2. `feature/memory-correction-v0.1`
+1. `feature/memory-review-ui-v0.1` — merged and production-verified
+2. `feature/memory-correction-v0.1` — current branch
 3. `feature/memory-forget-v0.1`
 4. `feature/memory-keyword-retrieval-v0.1`
 5. `feature/conversation-refinement-v0.1`
@@ -115,9 +117,9 @@ PR #12 delivered and verified:
 - Save in one chat and recall in a brand-new chat
 - Recall again after another Railway rebuild
 
-## Remaining Version 0.1 work
+## Version 0.1 product sequence
 
-### Memory visibility
+### Memory visibility — completed
 
 First product branch:
 
@@ -147,7 +149,7 @@ Out of scope for the first branch:
 
 Correction and forgetting should share one lifecycle model rather than introducing separate incompatible schema changes.
 
-Planned conceptual states:
+Migration 2 lifecycle states:
 
 ```text
 active
@@ -155,7 +157,7 @@ superseded
 archived
 ```
 
-The exact migration design must be reviewed before implementation.
+Migration 2 and UI-selected correction are implemented on `feature/memory-correction-v0.1` and documented in ADR-016. They remain unmerged and require review, explicit approval, deployment, and production verification.
 
 Correction should:
 
@@ -226,15 +228,19 @@ It must not be a raw dump of prior conversations.
 
 ### Backup and recovery
 
-Current direction:
+Verified manual checkpoint:
 
-- Manual consistent SQLite backup procedure
+- Consistent SQLite online backup
 - Off-volume private copy
-- SHA-256 and integrity verification
-- Non-production restore drill before migration 2 reaches production
-- Later automated encrypted backups
+- Matching SHA-256 and integrity verification
+- Non-production restore drill before migration 2 development
+
+Still planned:
+
+- Automated encrypted backups
 - Retention rules
-- Tested production recovery flow
+- Scheduled restore verification
+- Tested production recovery procedure
 
 See [`docs/MANUAL_BACKUP_AND_RESTORE.md`](docs/MANUAL_BACKUP_AND_RESTORE.md).
 

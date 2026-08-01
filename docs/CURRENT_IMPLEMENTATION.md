@@ -1,6 +1,6 @@
 # MootOS Current Implementation
 
-**Applies to:** Version 0.1 with foundation hardening, production-verified explicit chat memory, and the read-only memory review UI  
+**Applies to:** Version 0.1 with foundation hardening, production-verified explicit chat memory and review UI, plus the memory-correction feature branch  
 **Purpose:** Describe what the code actually does, separate from future plans.
 
 ## 1. Runtime shape
@@ -9,7 +9,7 @@ MootOS runs as one FastAPI application process.
 
 Production uses one Railway service and one replica. The same process:
 
-- Serves the mobile chat and memory review interfaces
+- Serves the mobile chat and memory review/correction interfaces
 - Handles login and session validation
 - Exposes JSON APIs
 - Runs schema migrations during startup
@@ -100,30 +100,36 @@ Responsibilities:
 - Rejects an incompatible or newer unknown schema
 - Seeds the five default projects during the initial migration
 
-Current migration:
+Current migrations on this branch:
 
 ```text
 1 — initial_schema
+2 — memory_lifecycle
 ```
 
-The memory review UI does not change the database schema.
+Migration 2 adds memory status, update timestamps, and correction-chain links. Existing rows remain in place and become active with `updated_at = created_at`. The migration has automated upgrade coverage but is not production-verified until this branch is reviewed, merged, and deployed.
 
 ### `backend/memory.py`
 
 Responsibilities:
 
 - Creates and lists projects
-- Creates, lists, retrieves, filters, and deletes memories
+- Creates, lists, retrieves, filters, and deletes standalone memories
+- Corrects one active memory through an atomic append-and-supersede transaction
+- Returns an ordered correction history chain
+- Protects correction-linked rows from hard deletion
 - Validates projects within the same connection used for the operation
-- Supplies context memories to the chat system
+- Supplies active context memories to the chat system
 
-Memory context rules:
+Memory context rules on this branch:
 
+- Only `active` memories are supplied to normal model context.
 - An unassigned memory is global.
-- Global memories are available in every conversation.
-- A project-assigned memory is available only in conversations for that project.
-- A conversation without a project can load all memories.
-- Memories are ordered newest first.
+- A conversation without a project can load all active memories.
+- A project conversation currently loads active global memories plus active memories assigned to that project.
+- Active memories are ordered newest first.
+
+Product intent is that projects are focus lenses, not secrecy walls. Cross-project relevance ranking belongs to the later retrieval branch and is not added here.
 
 Default projects:
 
@@ -230,22 +236,25 @@ The chat interface provides:
 - Installable web-app metadata
 - A Memories control linking to `/memory`
 
-The memory review interface provides:
+The memory interface provides:
 
-- A protected read-only page at `/memory`
-- Newest-first memory cards loaded from `GET /memories`
+- A protected page at `/memory`
+- Newest-first active memory cards loaded from `GET /memories`
 - Memory content
-- Global or project scope
+- Global or project focus
 - Project name
 - Memory type or source label
+- Original or corrected version label
 - Creation date
 - All-memory, global-only, and exact-project filters
-- Refresh, loading, empty, and error states
+- Refresh, loading, empty, success, and error states
 - A direct return link to chat
+- A per-memory **Correct** control
+- A confirmation dialog showing the current content and proposed replacement
 
-The memory page creates DOM nodes and assigns memory data through `textContent`. It does not render saved memory content as HTML.
+The page creates DOM nodes and assigns stored content through `textContent`. It does not render saved memory content as HTML.
 
-The browser memory script contains no `DELETE`, `PATCH`, or `PUT` request. It cannot edit, archive, restore, or permanently delete a memory. The existing administrative delete API still exists, but this interface does not expose it.
+The browser performs one explicit `POST /memories/{memory_id}/corrections` mutation after confirmation. It contains no `DELETE`, `PATCH`, or `PUT` request and exposes no archive, restore, or permanent-delete control.
 
 The frontend does not contain special memory-save controls. Explicit save commands are typed into the normal chat composer.
 
@@ -275,10 +284,16 @@ MootOS uses one SQLite file.
 | Column | Meaning |
 |---|---|
 | `id` | UUID text primary key |
-| `content` | Memory text |
+| `content` | Memory text for this version |
 | `project` | Optional project name; `NULL` means global |
 | `memory_type` | Optional category; chat saves use `explicit_chat` |
-| `created_at` | UTC timestamp text |
+| `created_at` | UTC creation timestamp for this version |
+| `status` | `active`, `superseded`, or `archived` |
+| `updated_at` | UTC timestamp of the latest lifecycle change |
+| `replaces_memory_id` | Prior version replaced by this row |
+| `superseded_by_id` | Newer version that replaced this row |
+
+Existing production rows receive `status = active`, `updated_at = created_at`, and null history links during migration 2.
 
 ### `conversations`
 
@@ -327,7 +342,7 @@ The messages table has an enforced foreign key to conversations.
 4. MootOS validates or creates the conversation.
 5. The user message is stored.
 6. Up to 20 recent messages are loaded chronologically.
-7. Relevant global and project memories are added to model instructions.
+7. Up to 20 newest active global and project-relevant memories are added to model instructions.
 8. The provider generates a response.
 9. The assistant response is saved with provider metadata.
 10. The API returns both stored messages and the conversation ID.
@@ -355,7 +370,7 @@ MootOS performs this flow:
 5. Stores the user's original command.
 6. Writes the extracted content to `memories`.
 7. Uses the conversation project when one exists; otherwise stores a global memory.
-8. Sets `memory_type` to `explicit_chat`.
+8. Sets `memory_type` to `explicit_chat`, `status` to `active`, and `updated_at` to the creation time.
 9. Stores a deterministic assistant confirmation.
 10. Commits all records together and returns success.
 
@@ -390,22 +405,37 @@ Current retrieval limitations:
 - No semantic ranking
 - No embeddings
 - No confidence score
-- No correction chain
 - No duplicate detection
-- No source metadata beyond project, type, and timestamp
+- No cross-project relevance ranking for focused project chats
+- No source metadata beyond project, type, timestamps, and correction links
 
-## 8. Read-only memory review flow
+## 8. Memory review and correction flow
+
+Review:
 
 1. An authenticated browser opens `GET /memory`.
 2. FastAPI serves `frontend/memory.html`.
 3. The browser loads the current project list from `GET /projects`.
-4. The browser loads memories from `GET /memories`.
+4. The browser loads active memories from `GET /memories`.
 5. For an exact project filter, the browser requests `GET /memories?project=<name>`.
-6. For the global-only filter, the browser loads the complete list and displays rows whose project is `NULL`.
-7. Memory cards are rendered newest first with content, scope, project, source, and creation date.
-8. The interface performs no mutation request.
+6. For the global-only filter, the browser loads the active list and displays rows whose project is `NULL`.
+7. Memory cards are rendered with content, scope, project, source, version label, and creation date.
 
-The review screen displays the stored rows. It does not represent the exact 20-row subset sent to a particular model request, and it does not rank memories by relevance.
+Correction:
+
+1. Moot selects **Correct** on one active memory card.
+2. The dialog displays the current content through `textContent` and pre-fills an editable replacement.
+3. Blank and unchanged content are rejected in the browser and again by the backend.
+4. Confirmation sends `POST /memories/{memory_id}/corrections`.
+5. The backend starts `BEGIN IMMEDIATE` and rechecks that the selected row is still active.
+6. One new active row is inserted with the same project and memory type.
+7. The selected row becomes `superseded` and both rows receive forward/backward links.
+8. Both changes commit together or roll back together.
+9. The browser reloads the active list and shows a success message.
+
+`GET /memories/{memory_id}/history` returns the complete chain oldest first. The browser does not yet include a full history viewer.
+
+Normal listings and model context exclude superseded rows. The legacy hard-delete API rejects any row participating in correction history.
 
 ## 9. Authentication flow
 
@@ -451,7 +481,7 @@ Production verification completed on July 31, 2026:
 - Another Railway rebuild completed.
 - A new conversation recalled the same memory after the rebuild.
 
-The memory review UI still requires production verification after its PR is merged.
+The memory review UI is production-verified: the page loaded on Railway, displayed global and project memories, and the All, Global only, and Cars filters returned the expected records. Chat remained functional and recalled the Cars memory in both a Cars-focused chat and the main no-project chat. Migration 2 and correction are not yet deployed.
 
 ## 11. Test coverage
 
@@ -475,19 +505,22 @@ Tests cover:
 - Protected `/memory` routing
 - Memory page, JavaScript, and responsive stylesheet availability
 - Presence of memory and project API reads in the browser script
-- Absence of browser-side `DELETE`, `PATCH`, and `PUT` requests
+- Explicit browser correction POST plus absence of browser-side `DELETE`, `PATCH`, and `PUT` requests
+- Migration 2 clean install, schema-1 upgrade, and existing-row preservation
+- Atomic correction, competing-correction serialization, ordered history, active-only context, conflict handling, rollback, and history-delete protection
 
 Known missing areas:
 
-- Memory correction, archive, restore, and search controls
+- Archive, restore, and search controls
 - Natural-language forget and update workflows
+- Full browser correction-history viewer
 - Duplicate and conflict handling
-- Automated backup and restore
+- Automated backup scheduling, encryption, retention, and recurring restore verification
 - Provider timeout recovery after saving a user message
 - Login rate limiting
 - Browser end-to-end tests against Railway
 
-A manual backup and restore procedure is documented in [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md), but an off-volume backup and restore drill have not yet been recorded as complete.
+The manual pre-migration safety gate in [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md) is complete. A consistent Railway snapshot was moved off-volume with a matching SHA-256, and an isolated restore copy passed integrity, startup, conversation-read, and memory-read checks. Automated encrypted backups and retention are still not implemented.
 
 ## 12. Intentional boundaries
 
@@ -505,7 +538,7 @@ Version 0.1 remains:
 
 Explicit chat saves are deliberately narrow. MootOS does not silently convert ordinary conversation into permanent memory.
 
-The memory review interface is deliberately read-only. Database lifecycle fields, correction history, and recoverable archival remain planned for migration 2 and later focused branches.
+The memory interface exposes only selected, confirmed correction. Migration 2 lifecycle fields and correction history are implemented on this branch. Recoverable archive, restore, natural-language update, and search remain later focused branches.
 
 ## 13. Source of truth
 
