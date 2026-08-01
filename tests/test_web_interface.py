@@ -26,12 +26,14 @@ def test_memory_review_interface_is_served():
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "Long-term memories" in response.text
-    assert "correct outdated information" in response.text
+    assert "safely forget" in response.text
+    assert 'id="memoryStatusFilter"' in response.text
     assert 'id="memoryProjectFilter"' in response.text
     assert 'id="memoryList"' in response.text
     assert 'id="memoryCorrectionDialog"' in response.text
     assert 'id="memoryCorrectionContent"' in response.text
-    assert "Corrections preserve history" in response.text
+    assert 'id="memoryLifecycleDialog"' in response.text
+    assert "Forget is recoverable" in response.text
     assert "/static/memory.js" in response.text
     assert "/static/memory.css" in response.text
 
@@ -49,10 +51,12 @@ def test_interface_assets_are_served():
     assert 'apiRequest("/chat"' in chat_script.text
     assert "conversation_id" in chat_script.text
     assert 'apiRequest("/projects")' in memory_script.text
-    assert 'let path = "/memories"' in memory_script.text
+    assert 'apiRequest(`/memories?${params.toString()}`)' in memory_script.text
     assert "memoryRequestGeneration" in memory_script.text
     assert "requestGeneration !== memoryRequestGeneration" in memory_script.text
     assert '/corrections`' in memory_script.text
+    assert "`/memories/${encodeURIComponent(memoryId)}/${action}`" in memory_script.text
+    assert 'action === "restore"' in memory_script.text
     assert 'method: "POST"' in memory_script.text
     assert "textContent = memory.content" in memory_script.text
     assert 'method: "DELETE"' not in memory_script.text
@@ -93,9 +97,23 @@ def test_existing_chat_and_memory_api_routes_remain_available():
         if route.path == "/memories/{memory_id}/history"
         for method in route.methods
     }
+    archive_methods = {
+        method
+        for route in app.routes
+        if route.path == "/memories/{memory_id}/archive"
+        for method in route.methods
+    }
+    restore_methods = {
+        method
+        for route in app.routes
+        if route.path == "/memories/{memory_id}/restore"
+        for method in route.methods
+    }
 
     assert chat_methods == {"GET", "POST"}
     assert memory_page_methods == {"GET"}
     assert memory_api_methods == {"GET", "POST"}
     assert correction_methods == {"POST"}
     assert history_methods == {"GET"}
+    assert archive_methods == {"POST"}
+    assert restore_methods == {"POST"}
