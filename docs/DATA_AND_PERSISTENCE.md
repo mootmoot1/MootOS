@@ -1,8 +1,8 @@
 # MootOS Data and Persistence
 
-**Applies to:** MootOS Version 0.1 foundation hardening and memory lifecycle migration 2
+**Applies to:** MootOS Version 0.1 with memory lifecycle migration 2 and the recoverable-forget branch
 
-This document explains where MootOS stores data, how SQLite is configured, how schema migrations work, what the Railway volume protects, what is still not backed up, and when the database design should change.
+This document explains where MootOS stores data, how SQLite is configured, how schema migrations work, how memory lifecycle states persist, what the Railway volume protects, what is still not backed up, and when the database design should change.
 
 ## 1. Current database choice
 
@@ -25,7 +25,8 @@ The SQLite database contains:
 
 - Applied schema migration history
 - Projects
-- Long-term memories
+- Long-term memories and lifecycle status
+- Preserved memory-correction versions
 - Conversations
 - User messages
 - Assistant messages
@@ -82,7 +83,9 @@ This avoids separate modules silently using different SQLite behavior.
 
 SQLite does not enforce foreign keys merely because they are declared in a table. Enforcement must be enabled per connection.
 
-MootOS now enables it every time. A message cannot be inserted for a nonexistent conversation through a correctly configured application connection.
+MootOS enables it every time. A message cannot be inserted for a nonexistent conversation through a correctly configured application connection.
+
+Memory correction links are application-managed rather than SQLite foreign keys because migration 2 added them to an existing table through `ALTER TABLE`.
 
 ### WAL mode
 
@@ -116,7 +119,7 @@ Applied migrations are stored in:
 schema_migrations
 ```
 
-Current migrations on this branch:
+Current migrations:
 
 ```text
 1 — initial_schema
@@ -132,15 +135,18 @@ The migration runner:
 5. Refuses a version newer than the application understands.
 6. Applies missing migrations in numeric order.
 7. Records each applied migration.
-8. Commits or rolls back as one startup operation.
+8. Verifies required tables, columns, status values, and foreign keys.
+9. Commits or rolls back as one startup operation.
+
+The recoverable-forget branch reuses schema 2. It does not add migration 3.
 
 ## 7. Existing production database adoption
 
-The first hardened deployment adopts the existing Railway database.
+The first hardened deployment adopted the existing Railway database.
 
 Migration 1 uses `CREATE TABLE IF NOT EXISTS` and `INSERT OR IGNORE` for default projects. It does not drop tables, replace the database, or delete records.
 
-The expected first hardened startup is:
+The expected first hardened startup was:
 
 ```text
 Existing /data/mootos.db
@@ -158,13 +164,11 @@ Record migration 1
 Start MootOS
 ```
 
-Automated tests verify adoption of an existing database while preserving a saved memory.
-
-Production must still be manually verified after merge.
+Automated tests verified adoption of an existing database while preserving saved data. Production deployment also preserved older conversations.
 
 ## 8. Memory lifecycle migration 2
 
-Migration 2 alters the existing `memories` table in place. It adds:
+Migration 2 altered the existing `memories` table in place. It added:
 
 ```text
 status
@@ -173,7 +177,7 @@ replaces_memory_id
 superseded_by_id
 ```
 
-Existing rows are preserved and backfilled as active:
+Existing rows were preserved and backfilled as active:
 
 ```text
 status = active
@@ -186,11 +190,87 @@ Two indexes support active-memory listing and correction-chain traversal.
 
 Correction uses `BEGIN IMMEDIATE` so the selected row is rechecked under a serialized write transaction. The new active row and the old superseded row commit together or roll back together.
 
-Migration 2 is covered by clean-install, schema-1 upgrade, data-preservation, rollback, history, and active-context tests. It is not production-verified until the branch is reviewed, merged, and deployed.
+Migration 2 was covered by clean-install, schema-1 upgrade, data-preservation, rollback, history, concurrency, and active-context tests.
 
 The pre-migration snapshot and isolated restore drill were completed before implementation. See [`BACKUP_RESTORE_VERIFICATION_2026-08-01.md`](BACKUP_RESTORE_VERIFICATION_2026-08-01.md).
 
-## 9. Newer-schema protection
+Migration 2 was subsequently deployed to production. Existing data remained available, a selected memory was corrected through the UI, only the corrected active value was recalled, and the correction survived another Railway rebuild. See [`MEMORY_CORRECTION_PRODUCTION_VERIFICATION_2026-08-01.md`](MEMORY_CORRECTION_PRODUCTION_VERIFICATION_2026-08-01.md).
+
+## 9. Memory lifecycle persistence
+
+Memory rows use these lifecycle states:
+
+```text
+active
+superseded
+archived
+```
+
+### Active
+
+Active rows are the only rows included in normal memory listings and model context.
+
+### Superseded
+
+A correction inserts a new active row and marks the selected prior row superseded. The two rows are linked through `replaces_memory_id` and `superseded_by_id`.
+
+Superseded rows remain durable history. They are excluded from normal recall and available through direct retrieval and the correction-history API.
+
+### Archived
+
+The recoverable-forget branch changes one latest active row to archived after exact selection and confirmation.
+
+An archived row:
+
+- Remains in the same `memories` table
+- Keeps the same ID, content, project, type, timestamps, and correction links
+- Is excluded from active lists and model context
+- Appears in `GET /memories?status=archived`
+- Can return to active through the restore endpoint
+- Cannot be hard-deleted through the legacy API
+
+Forget is therefore recoverable archival, not secure erasure or permanent deletion.
+
+## 10. Atomic archive and restore
+
+### Archive
+
+`archive_memory`:
+
+1. Starts `BEGIN IMMEDIATE`.
+2. Reloads the selected row.
+3. Requires it to exist, remain active, and have no newer replacement.
+4. Changes status to archived.
+5. Updates `updated_at`.
+6. Commits or rolls back.
+
+### Restore
+
+`restore_memory`:
+
+1. Starts `BEGIN IMMEDIATE`.
+2. Reloads the selected row.
+3. Requires it to exist, remain archived, and have no newer replacement.
+4. Changes status to active.
+5. Updates `updated_at`.
+6. Commits or rolls back.
+
+Correction links do not change during archive or restore. A correction chain may end with either an active or archived latest version.
+
+## 11. Normal recall boundary
+
+Only active rows enter model instructions.
+
+Current retrieval rules:
+
+- A no-project conversation can load all active memories.
+- A project conversation currently loads active global memory plus active memory assigned to that project.
+- Archived and superseded rows are always excluded.
+- At most twenty newest relevant active rows are supplied.
+
+Projects are focus lenses, not permanent secrecy walls. Later keyword retrieval may rank relevant other-project memories without changing lifecycle filtering.
+
+## 12. Newer-schema protection
 
 An older MootOS build refuses to start against a database with a newer unknown migration version.
 
@@ -198,17 +278,23 @@ This prevents an accidental code rollback from silently using a schema it does n
 
 The correct response is to deploy a compatible application version or follow a documented data rollback. Do not edit `schema_migrations` merely to force startup.
 
-## 10. Verified production persistence
+Schema-1-only code must not be pointed at a schema-2 production database.
 
-On July 31, 2026:
+## 13. Verified production persistence
 
-- Railway volume `mootos-volume` was attached.
-- It was mounted at `/data`.
-- A saved conversation and memory survived three consecutive deployments.
+Verified production persistence includes:
 
-That verifies persistence across normal rebuilds. It does not prove backup recovery or protection from volume deletion, corruption, or account loss.
+- Railway volume `mootos-volume` attached at `/data`
+- Conversations and memories surviving normal deployments
+- Explicit memory saves surviving Railway rebuilds
+- Migration 2 preserving existing records
+- A corrected active memory surviving another rebuild
 
-## 11. One-replica rule
+That verifies persistence across normal rebuilds. It does not prove protection from volume deletion, corruption, account loss, or every operational mistake.
+
+Archive and restore still require production verification after PR #16 is reviewed, approved, merged, and deployed.
+
+## 14. One-replica rule
 
 Keep Railway at **one replica** while SQLite remains the live database.
 
@@ -216,7 +302,7 @@ WAL improves concurrency between connections using the same local database file.
 
 A move to multiple replicas requires a planned database architecture decision, likely including PostgreSQL.
 
-## 12. Redundancy versus dual writing
+## 15. Redundancy versus dual writing
 
 MootOS should not write every record to SQLite and an unrelated second live database merely for redundancy.
 
@@ -240,7 +326,7 @@ Verified backup copies
 Documented restore testing
 ```
 
-## 13. Current backup status
+## 16. Current backup status
 
 The Railway volume protects against normal redeployments. One manual WAL-safe snapshot was downloaded off-volume, matched by SHA-256, and opened through an isolated application restore drill on August 1, 2026.
 
@@ -255,7 +341,7 @@ MootOS still does not implement:
 
 The volume is persistent storage, not a complete disaster-recovery system.
 
-## 14. Safe backup direction
+## 17. Safe backup direction
 
 A future backup feature should:
 
@@ -269,23 +355,26 @@ A future backup feature should:
 
 The August 1 manual backup was restored and read successfully in isolation. Future backups still require the same verification discipline.
 
-## 15. Manual persistence verification
+## 18. Manual persistence verification
 
 After database, migration, or deployment changes:
 
 1. Log in.
 2. Open an older conversation.
 3. Confirm old messages are present.
-4. Confirm saved memories are present.
-5. Create a uniquely named test conversation or memory.
-6. Redeploy.
-7. Wait for Railway to return online.
-8. Log in again.
-9. Confirm both old and new data remain.
+4. Confirm saved active memories are present.
+5. Complete the feature-specific lifecycle check.
+6. Create or use a uniquely identifiable test fact when needed.
+7. Redeploy.
+8. Wait for Railway to return online.
+9. Log in again.
+10. Confirm both old and new state remain.
+
+For PR #16, production verification must prove archive exclusion from recall, archived visibility, restoration, renewed recall, and persistence through a rebuild.
 
 Do not detach or replace the existing volume because a new deployment merely appears healthy.
 
-## 16. Migration development rules
+## 19. Migration development rules
 
 Every future schema change must:
 
@@ -300,7 +389,9 @@ Every future schema change must:
 
 Do not silently edit an already-applied migration. Add a new migration instead.
 
-## 17. When to keep SQLite
+No new migration is needed merely to use an already-defined lifecycle state.
+
+## 20. When to keep SQLite
 
 Keep SQLite while most of these remain true:
 
@@ -312,7 +403,7 @@ Keep SQLite while most of these remain true:
 - Local-first portability matters
 - Simplicity matters more than horizontal scaling
 
-## 18. When to consider PostgreSQL
+## 21. When to consider PostgreSQL
 
 Consider PostgreSQL when real requirements include:
 
@@ -327,7 +418,7 @@ Consider PostgreSQL when real requirements include:
 
 The central database layer and migration history make a future planned migration easier, but they do not perform that migration automatically.
 
-## 19. DynamoDB and MongoDB
+## 22. DynamoDB and MongoDB
 
 DynamoDB and MongoDB are valid databases, but larger-scale or newer branding does not automatically make them a better fit.
 
@@ -343,7 +434,7 @@ Useful for document-shaped data that varies heavily. MootOS currently has clear 
 
 The most likely future hosted upgrade because it preserves relational modeling, constraints, transactions, and SQL while supporting multiple users and replicas.
 
-## 20. Source of truth
+## 23. Source of truth
 
 The live SQLite database on the Railway volume is the production source of truth.
 
@@ -351,7 +442,7 @@ GitHub stores code and documentation, not production conversations or memories.
 
 OpenAI generates responses but is not MootOS's history database. Provider-side response storage is disabled, and MootOS stores its own history.
 
-## 21. Rules before storage changes
+## 24. Rules before storage changes
 
 Before changing storage:
 
@@ -366,4 +457,4 @@ Before changing storage:
 - Keep one replica while SQLite is live
 - Receive Moot's explicit approval
 
-See [`FOUNDATION_HARDENING.md`](FOUNDATION_HARDENING.md), [`ADR-015-foundation-hardening.md`](ADR-015-foundation-hardening.md), and [`ADR-016-memory-lifecycle-and-correction.md`](ADR-016-memory-lifecycle-and-correction.md).
+See [`FOUNDATION_HARDENING.md`](FOUNDATION_HARDENING.md), [`ADR-015-foundation-hardening.md`](ADR-015-foundation-hardening.md), [`ADR-016-memory-lifecycle-and-correction.md`](ADR-016-memory-lifecycle-and-correction.md), and [`ADR-017-recoverable-memory-forget-and-restore.md`](ADR-017-recoverable-memory-forget-and-restore.md).

@@ -1,6 +1,8 @@
 # MootOS Current Implementation
 
-**Applies to:** Version 0.1 with foundation hardening, production-verified explicit chat memory and review UI, plus the memory-correction feature branch  
+**Applies to:** Version 0.1 on `feature/memory-forget-v0.1`  
+**Production base:** PR #15 merged and production-verified  
+**Schema:** `2 — memory_lifecycle`  
 **Purpose:** Describe what the code actually does, separate from future plans.
 
 ## 1. Runtime shape
@@ -9,14 +11,15 @@ MootOS runs as one FastAPI application process.
 
 Production uses one Railway service and one replica. The same process:
 
-- Serves the mobile chat and memory review/correction interfaces
+- Serves the mobile chat and memory interfaces
 - Handles login and session validation
 - Exposes JSON APIs
 - Runs schema migrations during startup
 - Reads and writes SQLite
 - Detects explicit memory-save commands
-- Builds model context
+- Builds model instructions from active memories
 - Calls the configured AI provider for normal conversation
+- Handles correction, archive, and restore internally without a model call
 - Returns responses to the browser
 
 There are no microservices, background workers, task queues, cache servers, vector databases, or multiple application replicas.
@@ -35,8 +38,10 @@ Responsibilities:
 - Applies authentication middleware
 - Serves the protected `/chat` and `/memory` interfaces
 - Resolves normal conversations and stores normal chat messages
-- Routes explicit memory-save commands to the atomic chat-memory storage operation
-- Builds model instructions from identity rules and saved memories
+- Routes explicit memory-save commands to the atomic chat-memory operation
+- Exposes memory correction, history, archive, and restore APIs
+- Validates active or archived list status
+- Builds model instructions from identity rules and active saved memories
 - Sends ordinary chat requests to the configured model provider
 
 ### `backend/auth.py`
@@ -96,40 +101,57 @@ Responsibilities:
 - Creates and reads `schema_migrations`
 - Serializes migration work with `BEGIN IMMEDIATE`
 - Applies unapplied migrations in order
-- Verifies required tables, columns, and foreign keys
+- Verifies required tables, columns, status values, and foreign keys
 - Rejects an incompatible or newer unknown schema
 - Seeds the five default projects during the initial migration
 
-Current migrations on this branch:
+Current migrations:
 
 ```text
 1 — initial_schema
 2 — memory_lifecycle
 ```
 
-Migration 2 adds memory status, update timestamps, and correction-chain links. Existing rows remain in place and become active with `updated_at = created_at`. The migration has automated upgrade coverage but is not production-verified until this branch is reviewed, merged, and deployed.
+Migration 2 adds:
+
+```text
+status
+updated_at
+replaces_memory_id
+superseded_by_id
+```
+
+Existing memories are preserved, set active, and receive `updated_at = created_at`. The forget branch reuses schema 2 and adds no migration 3.
 
 ### `backend/memory.py`
 
 Responsibilities:
 
 - Creates and lists projects
-- Creates, lists, retrieves, filters, and deletes standalone memories
-- Corrects one active memory through an atomic append-and-supersede transaction
-- Returns an ordered correction history chain
-- Protects correction-linked rows from hard deletion
-- Validates projects within the same connection used for the operation
+- Creates, lists, retrieves, filters, and protects memories
+- Validates projects inside the same connection used for the operation
 - Supplies active context memories to the chat system
+- Corrects an active memory through append-and-supersede
+- Traverses correction history
+- Archives one exact latest active memory
+- Restores one exact latest archived memory
+- Prevents hard deletion from breaking history or recoverability
 
-Memory context rules on this branch:
+Memory lifecycle values:
 
-- Only `active` memories are supplied to normal model context.
+- `active`
+- `superseded`
+- `archived`
+
+Normal active-memory context rules:
+
 - An unassigned memory is global.
+- Global active memories are available in every project conversation.
+- A project conversation currently loads active global memory plus active memory assigned to that project.
 - A conversation without a project can load all active memories.
-- A project conversation currently loads active global memories plus active memories assigned to that project.
-- Active memories are ordered newest first.
-
-Product intent is that projects are focus lenses, not secrecy walls. Cross-project relevance ranking belongs to the later retrieval branch and is not added here.
+- Projects are intended as focus lenses, not permanent secrecy walls.
+- Active context is ordered newest first.
+- Archived and superseded rows never enter ordinary model context.
 
 Default projects:
 
@@ -160,10 +182,10 @@ Save to long-term memory: ...
 
 The parser is deterministic. It does not ask the model to decide whether a write occurred.
 
-Not supported yet:
+Not supported:
 
-- `Forget that ...`
-- `Update that ...`
+- Natural-language `Forget that ...`
+- Natural-language `Update that ...`
 - Vague phrases such as `keep that in mind`
 - Automatic extraction of memories from normal conversation
 
@@ -173,9 +195,9 @@ Responsibilities:
 
 - Handles the complete explicit-memory chat turn in one SQLite transaction
 - Loads or creates the target conversation
-- Validates project scope
+- Validates project focus
 - Stores the user command
-- Stores the `explicit_chat` memory row
+- Stores the active `explicit_chat` memory row
 - Stores the deterministic assistant confirmation
 - Rolls back the complete turn when any insert fails
 
@@ -236,27 +258,27 @@ The chat interface provides:
 - Installable web-app metadata
 - A Memories control linking to `/memory`
 
-The memory interface provides:
+The Memory interface provides:
 
 - A protected page at `/memory`
-- Newest-first active memory cards loaded from `GET /memories`
+- Active and Archived views
+- All, Global-only, and exact-project scope filters
 - Memory content
-- Global or project focus
+- Global or project scope
 - Project name
 - Memory type or source label
 - Original or corrected version label
+- Active or archived status
 - Creation date
-- All-memory, global-only, and exact-project filters
+- **Correct** and **Forget** on active memory cards
+- **Restore** on archived memory cards
+- Explicit dialogs displaying the selected memory
 - Refresh, loading, empty, success, and error states
 - A direct return link to chat
-- A per-memory **Correct** control
-- A confirmation dialog showing the current content and proposed replacement
 
-The page creates DOM nodes and assigns stored content through `textContent`. It does not render saved memory content as HTML.
+The browser creates DOM nodes and assigns database values through `textContent`. It does not render saved memory content as HTML.
 
-The browser performs one explicit `POST /memories/{memory_id}/corrections` mutation after confirmation. It contains no `DELETE`, `PATCH`, or `PUT` request and exposes no archive, restore, or permanent-delete control.
-
-The frontend does not contain special memory-save controls. Explicit save commands are typed into the normal chat composer.
+The browser can send only explicit `POST` mutations for correction, archive, and restore. It contains no memory `DELETE`, `PATCH`, or `PUT` request.
 
 ## 3. Database schema
 
@@ -284,16 +306,16 @@ MootOS uses one SQLite file.
 | Column | Meaning |
 |---|---|
 | `id` | UUID text primary key |
-| `content` | Memory text for this version |
+| `content` | Memory text |
 | `project` | Optional project name; `NULL` means global |
 | `memory_type` | Optional category; chat saves use `explicit_chat` |
-| `created_at` | UTC creation timestamp for this version |
+| `created_at` | Original version timestamp |
 | `status` | `active`, `superseded`, or `archived` |
-| `updated_at` | UTC timestamp of the latest lifecycle change |
+| `updated_at` | Latest lifecycle-change timestamp |
 | `replaces_memory_id` | Prior version replaced by this row |
 | `superseded_by_id` | Newer version that replaced this row |
 
-Existing production rows receive `status = active`, `updated_at = created_at`, and null history links during migration 2.
+The correction self-links are application-managed. SQLite cannot add those self-referential constraints to the existing table through a simple `ALTER TABLE` migration.
 
 ### `conversations`
 
@@ -331,8 +353,9 @@ The messages table has an enforced foreign key to conversations.
 8. It creates or reads `schema_migrations`.
 9. It rejects incompatible or newer unknown schemas.
 10. It applies each missing migration in order.
-11. It commits and closes the connection.
-12. The application becomes available.
+11. It verifies schema 2.
+12. It commits and closes the connection.
+13. The application becomes available.
 
 ## 5. Normal chat request flow
 
@@ -342,7 +365,7 @@ The messages table has an enforced foreign key to conversations.
 4. MootOS validates or creates the conversation.
 5. The user message is stored.
 6. Up to 20 recent messages are loaded chronologically.
-7. Up to 20 newest active global and project-relevant memories are added to model instructions.
+7. Up to 20 active relevant memories are added to model instructions.
 8. The provider generates a response.
 9. The assistant response is saved with provider metadata.
 10. The API returns both stored messages and the conversation ID.
@@ -363,14 +386,14 @@ Remember that my favorite tea is jasmine.
 
 MootOS performs this flow:
 
-1. Extracts `my favorite tea is jasmine.` from the command.
+1. Extracts the memory content.
 2. Rejects incomplete, punctuation-only, or longer-than-10,000-character content.
 3. Opens one SQLite transaction.
 4. Validates or creates the conversation inside that transaction.
 5. Stores the user's original command.
-6. Writes the extracted content to `memories`.
+6. Writes the extracted content to `memories` as active.
 7. Uses the conversation project when one exists; otherwise stores a global memory.
-8. Sets `memory_type` to `explicit_chat`, `status` to `active`, and `updated_at` to the creation time.
+8. Sets `memory_type` to `explicit_chat`.
 9. Stores a deterministic assistant confirmation.
 10. Commits all records together and returns success.
 
@@ -385,59 +408,77 @@ provider = mootos
 model = memory-command-v1
 ```
 
-This metadata distinguishes an internal verified action from a model-generated response.
+## 7. Correction flow
 
-## 7. Cross-chat recall
+Correction is not an in-place edit.
 
-A memory is not recalled from the old conversation. It is loaded from the `memories` table into the new conversation's model instructions.
+1. Moot selects one active memory and confirms corrected content.
+2. The backend starts `BEGIN IMMEDIATE`.
+3. It reloads the selected row inside the transaction.
+4. It rejects a missing, inactive, blank, or unchanged correction.
+5. It inserts a new active row preserving project and memory type.
+6. It links the new row backward through `replaces_memory_id`.
+7. It marks the old row superseded and links it forward through `superseded_by_id`.
+8. Both changes commit or both roll back.
 
-Examples:
+Normal lists and model context use only the active replacement. `GET /memories/{id}/history` returns the complete chain oldest first and detects cycles or broken links.
 
-- A global memory saved in an unassigned chat is available in a later MootOS, Studio, Cars, or Personal chat.
-- A memory saved in the Cars project is available in later Cars chats.
-- A Cars memory is not supplied to a Studio chat.
+## 8. Recoverable forget flow
 
-At most 20 newest relevant memories are supplied.
+1. Moot selects one active memory and presses **Forget**.
+2. The dialog displays the exact selected content and explains recoverability.
+3. After confirmation, the browser posts to `/memories/{id}/archive`.
+4. The backend starts `BEGIN IMMEDIATE`.
+5. It reloads the row and requires it to remain the latest active version.
+6. It changes status to archived and updates `updated_at`.
+7. The transaction commits or rolls back.
+8. The browser reloads the active list.
 
-Current retrieval limitations:
+Archived rows immediately leave active lists and model context. The row is not deleted, and correction links remain unchanged.
 
-- No keyword ranking
-- No semantic ranking
-- No embeddings
-- No confidence score
-- No duplicate detection
-- No cross-project relevance ranking for focused project chats
-- No source metadata beyond project, type, timestamps, and correction links
+## 9. Restore flow
 
-## 8. Memory review and correction flow
+1. Moot switches the Memory page to Archived.
+2. Moot selects one archived row and presses **Restore**.
+3. The dialog displays the exact selected content.
+4. After confirmation, the browser posts to `/memories/{id}/restore`.
+5. The backend starts `BEGIN IMMEDIATE`.
+6. It reloads the row and requires it to remain the latest archived version.
+7. It changes status to active and updates `updated_at`.
+8. The transaction commits or rolls back.
+9. The browser reloads the archived list.
 
-Review:
+The same row returns to normal active listings and model context.
 
-1. An authenticated browser opens `GET /memory`.
-2. FastAPI serves `frontend/memory.html`.
-3. The browser loads the current project list from `GET /projects`.
-4. The browser loads active memories from `GET /memories`.
-5. For an exact project filter, the browser requests `GET /memories?project=<name>`.
-6. For the global-only filter, the browser loads the active list and displays rows whose project is `NULL`.
-7. Memory cards are rendered with content, scope, project, source, version label, and creation date.
+## 10. Listing behavior
 
-Correction:
+`GET /memories` defaults to active rows.
 
-1. Moot selects **Correct** on one active memory card.
-2. The dialog displays the current content through `textContent` and pre-fills an editable replacement.
-3. Blank and unchanged content are rejected in the browser and again by the backend.
-4. Confirmation sends `POST /memories/{memory_id}/corrections`.
-5. The backend starts `BEGIN IMMEDIATE` and rechecks that the selected row is still active.
-6. One new active row is inserted with the same project and memory type.
-7. The selected row becomes `superseded` and both rows receive forward/backward links.
-8. Both changes commit together or roll back together.
-9. The browser reloads the active list and shows a success message.
+Supported status values:
 
-`GET /memories/{memory_id}/history` returns the complete chain oldest first. The browser does not yet include a full history viewer.
+```text
+active
+archived
+```
 
-Normal listings and model context exclude superseded rows. The legacy hard-delete API rejects any row participating in correction history.
+Superseded rows are intentionally available only through direct retrieval and correction history.
 
-## 9. Authentication flow
+For an exact project filter, the API returns only rows assigned to that project. The browser's Global-only filter loads the selected lifecycle list and displays rows whose project is `NULL`.
+
+## 11. Hard-delete boundary
+
+The legacy `DELETE /memories/{id}` endpoint is not exposed in the browser.
+
+It can delete only a standalone unlinked active row. It rejects:
+
+- Archived rows
+- Superseded rows
+- Rows with `replaces_memory_id`
+- Rows with `superseded_by_id`
+
+This prevents permanent deletion from breaking correction history or recoverability.
+
+## 12. Authentication flow
 
 ### Local development
 
@@ -460,7 +501,7 @@ When Railway metadata is present:
 - Missing both values causes startup failure.
 - Public startup requires `MOOTOS_ALLOW_PUBLIC=true`.
 
-## 10. Production deployment
+## 13. Production deployment
 
 - Builder: Railpack
 - Server: Uvicorn
@@ -472,18 +513,18 @@ When Railway metadata is present:
 - Volume mount: `/data`
 - Database: `/data/mootos.db`
 
-Production verification completed on July 31, 2026:
+Production verification completed for correction on August 1, 2026:
 
-- PR #12 deployed from merged `main`.
-- Login and normal chat remained functional.
-- An explicit memory command created a durable global memory.
-- A brand-new conversation recalled that memory.
+- Migration 2 deployed.
+- Existing data remained available.
+- A selected active memory was corrected.
+- A new conversation recalled only the corrected active value.
 - Another Railway rebuild completed.
-- A new conversation recalled the same memory after the rebuild.
+- A new conversation recalled the corrected value again.
 
-The memory review UI is production-verified: the page loaded on Railway, displayed global and project memories, and the All, Global only, and Cars filters returned the expected records. Chat remained functional and recalled the Cars memory in both a Cars-focused chat and the main no-project chat. Migration 2 and correction are not yet deployed.
+Forget and restore remain branch-only until PR #16 is reviewed, merged, deployed, and manually tested.
 
-## 11. Test coverage
+## 14. Test coverage
 
 Tests cover:
 
@@ -494,35 +535,46 @@ Tests cover:
 - Project validation and filtering
 - Conversation creation and continuation
 - Explicit memory-command parsing and boundary variants
-- Rejection of incomplete and punctuation-only memory content
-- Atomic rollback after forced memory or confirmation write failures
+- Atomic explicit-save rollback
 - Save in one chat and recall in a brand-new chat
-- Global memory availability and project isolation
-- Project-filtered listing behavior
-- Model routing for ordinary memory questions
-- Memory size validation for new and existing conversations
-- Auth, Railway configuration, and mobile chat assets
-- Protected `/memory` routing
-- Memory page, JavaScript, and responsive stylesheet availability
-- Presence of memory and project API reads in the browser script
-- Explicit browser correction POST plus absence of browser-side `DELETE`, `PATCH`, and `PUT` requests
-- Migration 2 clean install, schema-1 upgrade, and existing-row preservation
-- Atomic correction, competing-correction serialization, ordered history, active-only context, conflict handling, rollback, and history-delete protection
+- Active-only model context
+- Migration 2 existing-row preservation
+- Atomic append-and-supersede correction
+- Correction history and multi-step chains
+- Competing corrections and forced rollback
+- Hard-delete protection for correction chains
+- Archive exclusion from active listings and model context
+- Archived listing with project filtering
+- Restore returning the same row to active
+- Correction history preservation through archive and restore
+- Missing and wrong-state archive/restore conflicts
+- Forced archive and restore rollback
+- Competing archive and restore requests
+- Hard-delete protection for archived rows
+- Endpoint authentication
+- Protected memory routing
+- Browser request shapes and safe rendering
+- Absence of browser memory `DELETE`, `PATCH`, and `PUT`
+
+Local branch result:
+
+- 83 tests passed.
+- Python bytecode compilation passed.
+- JavaScript syntax validation passed.
 
 Known missing areas:
 
-- Archive, restore, and search controls
-- Natural-language forget and update workflows
+- Natural-language forget and update
+- Permanent-delete or secure-erasure UI
+- Keyword or semantic retrieval
+- Duplicate detection
 - Full browser correction-history viewer
-- Duplicate and conflict handling
-- Automated backup scheduling, encryption, retention, and recurring restore verification
+- Automated backup and restore scheduling
 - Provider timeout recovery after saving a user message
 - Login rate limiting
 - Browser end-to-end tests against Railway
 
-The manual pre-migration safety gate in [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md) is complete. A consistent Railway snapshot was moved off-volume with a matching SHA-256, and an isolated restore copy passed integrity, startup, conversation-read, and memory-read checks. Automated encrypted backups and retention are still not implemented.
-
-## 12. Intentional boundaries
+## 15. Intentional boundaries
 
 Version 0.1 remains:
 
@@ -538,9 +590,9 @@ Version 0.1 remains:
 
 Explicit chat saves are deliberately narrow. MootOS does not silently convert ordinary conversation into permanent memory.
 
-The memory interface exposes only selected, confirmed correction. Migration 2 lifecycle fields and correction history are implemented on this branch. Recoverable archive, restore, natural-language update, and search remain later focused branches.
+Correction, archive, and restore are deliberately UI-selected and confirmed. The browser does not offer permanent deletion, and archived data still exists in SQLite.
 
-## 13. Source of truth
+## 16. Source of truth
 
 When code and documentation disagree:
 
@@ -548,3 +600,4 @@ When code and documentation disagree:
 2. Documentation must be corrected in the same PR that changes behavior.
 3. Planned features must remain labeled as planned.
 4. A memory is not considered saved until the complete explicit-memory transaction commits.
+5. A memory is not considered forgotten until the archive transaction commits.

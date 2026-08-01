@@ -3,7 +3,7 @@
 **Version:** 0.1  
 **Base URL:** Railway service domain in production or `http://127.0.0.1:8000` locally
 
-This reference documents current FastAPI behavior. Planned endpoints are not included.
+This reference documents current FastAPI behavior on `feature/memory-forget-v0.1`. Planned endpoints are not included.
 
 ## Authentication behavior
 
@@ -46,9 +46,9 @@ Serves the main chat interface.
 
 ### `GET /memory`
 
-Serves the protected memory review and confirmed-correction interface.
+Serves the protected memory review, correction, recoverable-forget, and restore interface.
 
-The browser page reads from `GET /projects` and `GET /memories`. On the correction branch it can send one explicit `POST /memories/{memory_id}/corrections` request after confirmation. It does not expose archive, restore, hard-delete, `PATCH`, or `PUT` controls.
+The browser page reads from `GET /projects` and `GET /memories`. It can send explicit confirmed `POST` requests for correction, archive, and restore. It does not expose permanent-delete, `PATCH`, or `PUT` controls.
 
 ### `GET /login`
 
@@ -176,8 +176,8 @@ There are no project update, rename, or delete endpoints.
 Lifecycle values:
 
 - `active`: current version used by normal listings and model context
-- `superseded`: preserved older version replaced by a correction
-- `archived`: reserved for the later recoverable-forget branch
+- `superseded`: preserved older version replaced by correction
+- `archived`: recoverably forgotten and excluded from normal recall
 
 ### `POST /memories`
 
@@ -211,23 +211,38 @@ Unknown project: HTTP `422`.
 
 ### `GET /memories`
 
-Lists active memories newest first. Superseded and archived rows are excluded.
+Lists active memories newest first by default.
 
-Optional filter:
+Optional query parameters:
 
 ```text
-GET /memories?project=Studio
+status=active|archived
+project=<exact project name>
 ```
 
-The project filter returns only active memories assigned to that project. It does not include global memories.
+Examples:
 
-Unknown project filter returns HTTP `404`.
+```text
+GET /memories
+GET /memories?status=active
+GET /memories?status=archived
+GET /memories?status=archived&project=Cars
+```
 
-The `/memory` browser interface uses this endpoint. Its global-only option loads the active list and displays rows whose `project` value is `null`.
+Rules:
+
+- `active` is the default status.
+- `archived` returns recoverably forgotten rows ordered by latest lifecycle update.
+- Superseded rows are intentionally unavailable through the normal list endpoint.
+- The project filter returns only rows assigned to that exact project. It does not automatically add global rows.
+- Unsupported status returns HTTP `422`.
+- Unknown project returns HTTP `404`.
+
+The `/memory` browser interface uses this endpoint. Its Global-only option filters rows whose `project` value is `null`.
 
 ### `GET /memories/{memory_id}`
 
-Returns one memory version by ID, including superseded versions. Missing records return HTTP `404`.
+Returns one exact memory version by ID, including superseded or archived versions. Missing records return HTTP `404`.
 
 ### `GET /memories/{memory_id}/history`
 
@@ -255,7 +270,7 @@ Example:
 }
 ```
 
-Missing records return HTTP `404`.
+The newest row may be `active` or `archived`. Missing records return HTTP `404`.
 
 ### `POST /memories/{memory_id}/corrections`
 
@@ -301,11 +316,71 @@ Missing memory returns HTTP `404`. An inactive or unchanged target returns HTTP 
 
 The replacement preserves the selected memory's project and memory type. The endpoint does not call the external model provider.
 
+### `POST /memories/{memory_id}/archive`
+
+Recoverably forgets one exact latest active memory version.
+
+Behavior:
+
+1. Starts a serialized SQLite write transaction.
+2. Reloads the selected row.
+3. Requires it to remain active and have no newer replacement.
+4. Changes `status` to `archived` and updates `updated_at`.
+5. Commits the change or rolls back.
+
+The row disappears from active listings and model context but remains available through `status=archived`, direct retrieval, and correction history.
+
+Success: HTTP `200`.
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "status": "archived"
+  }
+}
+```
+
+Missing memory returns HTTP `404`. An already archived, superseded, or stale target returns HTTP `409`.
+
+### `POST /memories/{memory_id}/restore`
+
+Restores one exact latest archived memory version.
+
+Behavior:
+
+1. Starts a serialized SQLite write transaction.
+2. Reloads the selected row.
+3. Requires it to remain archived and have no newer replacement.
+4. Changes `status` to `active` and updates `updated_at`.
+5. Commits the change or rolls back.
+
+The same row returns to active listings and model context. Correction links remain unchanged.
+
+Success: HTTP `200`.
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "status": "active"
+  }
+}
+```
+
+Missing memory returns HTTP `404`. An active, superseded, or stale target returns HTTP `409`.
+
 ### `DELETE /memories/{memory_id}`
 
-Legacy administrative hard delete for one standalone memory. It is not exposed in the browser.
+Legacy administrative hard delete for one unlinked active standalone memory. It is not exposed in the browser and is not the user-facing forget workflow.
 
-A row that participates in correction history cannot be permanently deleted and returns HTTP `409`. User-facing recoverable forgetting remains planned for a later archive branch.
+The endpoint returns HTTP `409` for:
+
+- Archived rows
+- Superseded rows
+- Any row linked into correction history
 
 Missing records return HTTP `404`.
 
@@ -424,7 +499,7 @@ When the message is not an explicit save command:
 2. The conversation is validated or created.
 3. The user message is stored.
 4. Up to 20 recent messages are loaded.
-5. Relevant global and matching-project memories are added to instructions.
+5. Up to 20 newest active relevant memories are added to instructions.
 6. The configured model provider generates a response.
 7. The assistant response is stored and returned.
 
@@ -452,7 +527,7 @@ For a recognized save command:
 2. Content over 10,000 characters is rejected with HTTP `422`.
 3. The conversation is validated or created.
 4. The original user command is stored as a message.
-5. The extracted content is inserted into the `memories` table.
+5. The extracted content is inserted into the `memories` table as active.
 6. The conversation project is used when present; otherwise the memory is global.
 7. `memory_type` is set to `explicit_chat`.
 8. A confirmation is stored and returned only after the database write succeeds.
@@ -494,10 +569,12 @@ Example response fields:
 
 ### Cross-chat recall rules
 
-- Global memories are supplied to all project conversations.
-- Project memories are supplied only to their matching project.
-- A conversation without a project can load all memories.
-- At most 20 newest relevant memories are supplied.
+- Only active memories are supplied to ordinary model context.
+- Global memories are supplied to project conversations.
+- A project conversation currently loads active global memory plus active memory assigned to that project.
+- A conversation without a project can load all active memories.
+- Projects are focus lenses, not permanent secrecy walls; broader cross-project relevance ranking is planned for the retrieval branch.
+- At most 20 newest relevant active memories are supplied.
 
 ### Standard successful chat response
 
@@ -535,17 +612,31 @@ Oversized extracted memory: HTTP `422`.
 }
 ```
 
+## Browser mutation boundary
+
+The Memory page can send only these memory mutations:
+
+```text
+POST /memories/{id}/corrections
+POST /memories/{id}/archive
+POST /memories/{id}/restore
+```
+
+It sends no memory `DELETE`, `PATCH`, or `PUT` request. Stored content and project values are rendered through DOM `textContent`.
+
 ## Current memory-command limitations
 
 Not implemented:
 
-- `Forget that ...`
-- `Update that ...`
+- Natural-language `Forget that ...`
+- Natural-language `Update that ...`
 - Automatic memory extraction from normal conversation
+- Permanent-delete or secure-erasure UI
+- Bulk archive or restore
 - Duplicate detection
-- Conflict resolution
+- Conflict resolution beyond exact lifecycle state checks
 - Keyword or semantic search
-- Memory archive and restore UI
+- Full browser correction-history viewer
 
 ## FastAPI-generated documentation
 

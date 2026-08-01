@@ -20,7 +20,7 @@
         <p class="eyebrow">MootOS v0.1</p>
         <h1>Long-term memories</h1>
         <p class="memory-intro">
-          Review active memories and correct outdated information without erasing its history.
+          Review, correct, and safely forget memories. Forgotten memories stay recoverable.
         </p>
       </div>
 
@@ -33,12 +33,22 @@
     </header>
 
     <section class="memory-toolbar" aria-label="Memory filters">
-      <div class="memory-filter-group">
-        <label class="memory-field-label" for="memoryProjectFilter">Scope</label>
-        <select id="memoryProjectFilter" class="project-select">
-          <option value="all">All memories</option>
-          <option value="global">Global only</option>
-        </select>
+      <div class="memory-filter-row">
+        <div class="memory-filter-group">
+          <label class="memory-field-label" for="memoryStatusFilter">View</label>
+          <select id="memoryStatusFilter" class="project-select">
+            <option value="active">Active memories</option>
+            <option value="archived">Archived memories</option>
+          </select>
+        </div>
+
+        <div class="memory-filter-group">
+          <label class="memory-field-label" for="memoryProjectFilter">Scope</label>
+          <select id="memoryProjectFilter" class="project-select">
+            <option value="all">All memories</option>
+            <option value="global">Global only</option>
+          </select>
+        </div>
       </div>
 
       <button class="secondary-button" id="refreshMemoriesButton" type="button">
@@ -64,9 +74,9 @@
     </main>
 
     <section class="memory-readonly-note" aria-label="Memory safety notice">
-      <strong>Corrections preserve history.</strong>
+      <strong>Forget is recoverable.</strong>
       <span>
-        The previous version is superseded, not erased. Archive, restore, and search controls remain in later reviewed branches.
+        Forget moves a selected active memory to Archived, where it can be restored. Correction history remains preserved, and the browser never permanently deletes memories.
       </span>
     </section>
   </div>
@@ -124,6 +134,53 @@
         </button>
         <button class="primary-button" id="saveMemoryCorrectionButton" type="submit">
           Save correction
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog
+    class="memory-correction-dialog memory-lifecycle-dialog"
+    id="memoryLifecycleDialog"
+    aria-labelledby="memoryLifecycleTitle"
+  >
+    <form class="memory-correction-form" id="memoryLifecycleForm">
+      <div class="memory-dialog-header">
+        <div>
+          <p class="eyebrow" id="memoryLifecycleEyebrow">Recoverable forget</p>
+          <h2 id="memoryLifecycleTitle">Forget this memory?</h2>
+        </div>
+        <button
+          class="memory-dialog-close"
+          id="cancelMemoryLifecycleButton"
+          type="button"
+          aria-label="Cancel memory action"
+        >
+          ×
+        </button>
+      </div>
+
+      <div class="memory-current-version">
+        <span class="memory-field-label">Selected memory</span>
+        <p id="memoryLifecycleCurrent"></p>
+      </div>
+
+      <p class="memory-correction-explainer" id="memoryLifecycleExplainer">
+        Forget removes this memory from normal recall and moves it to Archived. It can be restored later.
+      </p>
+      <div
+        class="error-banner memory-dialog-error"
+        id="memoryLifecycleError"
+        role="alert"
+        hidden
+      ></div>
+
+      <div class="memory-dialog-actions">
+        <button class="secondary-button" id="dismissMemoryLifecycleButton" type="button">
+          Cancel
+        </button>
+        <button class="primary-button" id="confirmMemoryLifecycleButton" type="submit">
+          Forget memory
         </button>
       </div>
     </form>

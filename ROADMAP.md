@@ -33,32 +33,30 @@ Merged and production-verified:
 - Explicit `remember` and `save` commands through normal chat
 - Atomic write-before-confirm memory storage
 - Cross-chat recall from SQLite
-- Global and project memory scope
-- Long-term memory persistence through a Railway rebuild
-- Read-only memory review UI and production filter verification
+- Global and project-focused memory context
+- Long-term memory persistence through Railway rebuilds
+- Memory review UI and production filter verification
 - Manual off-volume backup and isolated restore drill
-
-PR #12 is merged and production-verified. MootOS saved a unique fact through the normal chat interface, recalled it in a brand-new conversation, survived another Railway rebuild, and recalled it again afterward.
+- Migration 2 memory lifecycle
+- UI-selected correction with preserved history
+- Corrected active-memory recall after another Railway rebuild
 
 ## Immediate sequence
 
-Completed safety work:
+Completed safety and lifecycle work:
 
 1. PR #12 production verification recorded.
 2. WAL-safe manual backup and restore procedure documented.
 3. Consistent off-volume backup and isolated restore drill completed before migration 2 development.
+4. `feature/memory-review-ui-v0.1` merged and production-verified.
+5. `feature/memory-correction-v0.1` merged and production-verified.
 
-Product branch sequence:
+Current product branch sequence:
 
-1. `feature/memory-review-ui-v0.1` — merged and production-verified
-2. `feature/memory-correction-v0.1` — current branch
-3. `feature/memory-forget-v0.1`
-4. `feature/memory-keyword-retrieval-v0.1`
-5. `feature/conversation-refinement-v0.1`
-
-Then:
-
-6. `feature/moot-bootstrap-profile-v0.1`
+1. `feature/memory-forget-v0.1` — current branch
+2. `feature/memory-keyword-retrieval-v0.1`
+3. `feature/conversation-refinement-v0.1`
+4. `feature/moot-bootstrap-profile-v0.1`
 
 This order follows the control loop:
 
@@ -96,7 +94,8 @@ Create a private personal AI that can hold useful ongoing conversations, deliber
 - Explicit chat memory commands
 - Atomic memory write and confirmation transaction
 - Cross-chat memory recall
-- Production persistence through a rebuild
+- Production persistence through rebuilds
+- Memory review and confirmed correction
 
 ## Verified chat-memory checkpoint
 
@@ -109,9 +108,10 @@ PR #12 delivered and verified:
 - No model-provider call for explicit saves
 - `explicit_chat` memory type
 - Global memories available across projects
-- Project memories isolated from unrelated projects
+- Main/no-project chat can use all active memory
+- Project chats currently use global plus matching-project memory
 - Internal action metadata using `mootos` and `memory-command-v1`
-- Parser, validation, isolation, rollback, and cross-chat recall tests
+- Parser, validation, rollback, and cross-chat recall tests
 - GitHub Actions on Python 3.9, 3.10, and 3.11
 - Successful Railway deployment
 - Save in one chat and recall in a brand-new chat
@@ -121,7 +121,7 @@ PR #12 delivered and verified:
 
 ### Memory visibility — completed
 
-First product branch:
+Delivered by:
 
 ```text
 feature/memory-review-ui-v0.1
@@ -129,25 +129,17 @@ feature/memory-review-ui-v0.1
 
 Scope:
 
-- Read-only mobile memory list
+- Mobile memory list
 - Memory content
 - Global or project scope
 - Memory type or source
 - Creation date
 - Project filtering
-
-Out of scope for the first branch:
-
-- Editing
-- Deleting
-- Archiving
-- Keyword search
-- Pagination redesign
-- Full settings redesign
+- Safe rendering and stale-request protection
 
 ### Controlled memory lifecycle
 
-Correction and forgetting should share one lifecycle model rather than introducing separate incompatible schema changes.
+Correction and forgetting share one lifecycle model rather than introducing separate incompatible schema changes.
 
 Migration 2 lifecycle states:
 
@@ -157,16 +149,22 @@ superseded
 archived
 ```
 
-Migration 2 and UI-selected correction are implemented on `feature/memory-correction-v0.1` and documented in ADR-016. They remain unmerged and require review, explicit approval, deployment, and production verification.
+Migration 2 and UI-selected correction were merged in PR #15 and production-verified. The corrected active value survived a Railway rebuild while the superseded value stayed out of normal recall.
 
-Correction should:
+Correction:
 
-- Be selected from the review interface
-- Preserve the old value as history
-- Create or mark one current active value
-- Exclude superseded values from model context
-- Commit atomically
-- Be verified in a brand-new conversation
+- Is selected from the review interface
+- Preserves the old value as history
+- Creates one current active value
+- Excludes superseded values from model context
+- Commits atomically
+- Is verified in brand-new conversations
+
+Current forget branch:
+
+```text
+feature/memory-forget-v0.1
+```
 
 Forgetting should:
 
@@ -174,8 +172,10 @@ Forgetting should:
 - Show the exact memory affected
 - Require confirmation
 - Archive rather than immediately hard-delete
-- Exclude archived values from all model context and default lists
-- Optionally support restoration
+- Exclude archived values from model context and default lists
+- Support restoration through an Archived view
+- Preserve correction history
+- Reuse schema 2 without an unnecessary migration
 
 Natural-language `update that` and `forget that` commands remain later thin branches because ambiguous matching is riskier than UI-selected actions.
 
@@ -186,10 +186,12 @@ After review, correction, and archival:
 - Tokenize the current request
 - Use understandable keyword or `LIKE` matching
 - Rank active memories by term matches and recency
-- Respect global and project scope
+- Prioritize matching-project memory, then global memory, then relevant other-project memory when useful
 - Merge keyword matches with recent memories
 - Cap the final context set
 - Add search to the memory review interface when practical
+
+Projects are focus lenses, not permanent memory walls.
 
 Do not add embeddings, a vector database, or FTS5 until the simple approach proves inadequate.
 
@@ -214,7 +216,7 @@ It should contain:
 - Selected high-confidence facts
 - Useful preferences
 - Important ongoing context
-- Clear project scope
+- Clear project focus
 - User-reviewable entries
 
 It must not be a raw dump of prior conversations.
