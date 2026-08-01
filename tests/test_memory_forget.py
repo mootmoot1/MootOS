@@ -10,8 +10,10 @@ from backend.main import app
 from backend.memory import (
     DATABASE_PATH,
     MemoryArchiveConflictError,
+    MemoryNotActiveError,
     MemoryRestoreConflictError,
     archive_memory,
+    correct_memory,
     init_db,
     list_context_memories,
     restore_memory,
@@ -206,6 +208,52 @@ def test_competing_archive_and_restore_requests_serialize(clean_db, client):
 
     assert len([item for item in restore_results if item is not None]) == 1
     assert client.get(f"/memories/{created['id']}").json()["data"]["status"] == "active"
+
+
+def test_competing_correction_and_forget_leave_one_valid_outcome(clean_db, client):
+    created = client.post(
+        "/memories",
+        json={"content": "Original concurrent value"},
+    ).json()["data"]
+
+    def attempt_correction():
+        try:
+            result = correct_memory(created["id"], "Corrected concurrent value")
+            return ("corrected", result)
+        except MemoryNotActiveError:
+            return ("conflict", None)
+
+    def attempt_archive():
+        try:
+            result = archive_memory(created["id"])
+            return ("archived", result)
+        except MemoryArchiveConflictError:
+            return ("conflict", None)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        correction_future = executor.submit(attempt_correction)
+        archive_future = executor.submit(attempt_archive)
+        results = [correction_future.result(), archive_future.result()]
+
+    winners = [name for name, result in results if result is not None]
+    assert len(winners) == 1
+
+    active_rows = client.get("/memories").json()["data"]
+    archived_rows = client.get(
+        "/memories", params={"status": "archived"}
+    ).json()["data"]
+    history = client.get(f"/memories/{created['id']}/history").json()["data"]
+
+    if winners == ["corrected"]:
+        assert archived_rows == []
+        assert len(active_rows) == 1
+        assert active_rows[0]["content"] == "Corrected concurrent value"
+        assert [row["status"] for row in history] == ["superseded", "active"]
+    else:
+        assert active_rows == []
+        assert len(archived_rows) == 1
+        assert archived_rows[0]["id"] == created["id"]
+        assert [row["status"] for row in history] == ["archived"]
 
 
 def test_forget_and_restore_endpoints_require_authentication(monkeypatch):
