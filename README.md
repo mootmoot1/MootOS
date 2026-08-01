@@ -1,51 +1,73 @@
 # MootOS
 
-MootOS is Moot’s private, mobile-friendly personal AI foundation.
+MootOS is Moot's private, mobile-friendly personal AI foundation.
 
-Version 0.1 provides persistent conversations, deliberate long-term-memory saves, reviewable memory correction, a recoverable forget-and-restore branch, project-focused context, private Railway access, hardened SQLite storage, and a replaceable model-provider boundary.
+Version 0.1 provides a working chat interface, persistent conversations, explicit long-term-memory saves through normal chat, production-verified memory review and correction, and a current feature branch for recoverable forgetting and restoration. It also includes project-focused context, a replaceable model-provider boundary, private password access, and hardened persistent SQLite storage on Railway.
+
+MootOS is built in small, reviewable steps. The goal is a reliable system that Moot controls and can expand without rebuilding the foundation.
 
 ## Current status
 
 **Version:** `0.1.0`  
-**Production branch:** `main`  
+**Primary branch:** `main`  
 **Current feature branch:** `feature/memory-forget-v0.1`  
 **Deployment:** Railway, one service and one replica  
-**Production database:** `/data/mootos.db`  
-**Schema:** `2 — memory_lifecycle`  
-**Model provider:** OpenAI through a replaceable interface
+**Production database:** SQLite on a Railway volume mounted at `/data`  
+**Current schema:** `2 — memory_lifecycle`  
+**Current model provider:** OpenAI through a replaceable provider interface
 
-See [`docs/CURRENT_CHECKPOINT.md`](docs/CURRENT_CHECKPOINT.md) for the exact verified state.
+See [`docs/CURRENT_CHECKPOINT.md`](docs/CURRENT_CHECKPOINT.md) for the latest verified project state.
 
-## What works in production
+## What works today
 
-- Private password login and signed browser sessions
-- Mobile chat interface
-- Persistent projects, conversations, and messages
-- Explicit `remember` and `save` commands
-- Atomic database-backed memory confirmation
-- Cross-chat recall that survives Railway rebuilds
-- Protected Memory page with All, Global, and project filters
-- UI-selected memory correction with preserved history
-- Active-only model context after correction
+Production-verified on `main`:
+
+- Private password login for the deployed application
+- Railway startup that fails closed when private auth variables are missing
+- Signed, HTTP-only browser sessions
+- Mobile-friendly chat interface
+- Starting and reopening persistent conversations
+- Conversation history surviving Railway deployments
+- Five default projects: MootOS, Studio, Social Media, Cars, and Personal
+- Memory create, list, retrieve, filter, and legacy delete APIs
+- Explicit chat commands beginning with `remember`, `save this`, or `save to memory`
+- Database-backed confirmation only after a memory write succeeds
+- Cross-chat recall from the `memories` table
+- Global memories available across project chats
+- Main/no-project chat can use all active saved memory
+- Project chats currently use active global plus matching-project memory
+- Protected memory review at `/memory`
+- All-memory, global-only, and exact-project memory filters
+- Memory content, scope, project, source, and creation date display
+- UI-selected correction with preserved history
+- Superseded values excluded from normal recall
+- Corrected active value surviving another Railway rebuild
+- Relevant active memory context supplied to the model
+- Replaceable model-provider boundary
+- OpenAI Responses API integration
+- Provider and model metadata stored with assistant messages
+- Installable phone Home Screen manifest
+- Public minimal Railway health check
+- Persistent production data through an attached Railway volume
+- Centralized SQLite connection configuration
+- Foreign-key enforcement, WAL mode, `NORMAL` synchronous mode, and busy timeout
+- Numbered schema migrations and schema compatibility checks
+- Exact direct-dependency pins
 - Manual off-volume backup and isolated restore verification
-- Centralized SQLite configuration, WAL mode, foreign keys, timeouts, and numbered migrations
+- Automated tests for memory commands, cross-chat recall, database hardening, migrations, auth, conversations, interface behavior, and deployment configuration
 
-## Current branch: recoverable forgetting
+Implemented on the current feature branch:
 
-The Memory page adds:
+- Active and Archived memory views
+- UI-selected **Forget** with exact confirmation
+- UI-selected **Restore** with exact confirmation
+- Archived-memory exclusion from normal lists and model context
+- Correction-history preservation through archive and restore
+- Archived-memory protection from permanent deletion
 
-- Active and Archived views
-- **Forget** on active memories
-- **Restore** on archived memories
-- Explicit confirmation before either action
+## Explicit long-term memory through chat
 
-“Forget” means archive, not permanent delete. An archived memory stops appearing in normal lists and model context but remains available for restoration. Correction history stays intact.
-
-The branch does **not** add natural-language forget, permanent-delete UI, bulk archive, retention rules, or search.
-
-## Explicit memory saves
-
-Use direct wording:
+Use direct wording at the beginning of a message:
 
 ```text
 Remember that my favorite tea is jasmine.
@@ -53,34 +75,214 @@ Save this to memory: I prefer plain explanations.
 Save to long-term memory: Studio block sessions cost $50 per hour.
 ```
 
-MootOS parses these commands deterministically, writes the memory to SQLite, and confirms only after the complete transaction commits. The external model is not called for this path.
+For a recognized command, MootOS:
+
+1. Extracts the memory content.
+2. Writes it to SQLite.
+3. Stores it under the current conversation project, or globally when no project is selected.
+4. Confirms the save only after the write succeeds.
+5. Makes it available to later conversations according to active-memory retrieval rules.
+
+The save operation is handled internally and does not call OpenAI or spend model credits.
+
+Questions such as:
+
+```text
+Do you remember that studio session?
+```
+
+remain ordinary model requests and are not interpreted as writes.
+
+## Review and control saved memories
+
+Open the protected memory page:
+
+```text
+/memory
+```
+
+Or tap **Memories** from the chat interface.
+
+The screen shows saved rows, including:
+
+- Memory content
+- Global or project scope
+- Project name
+- Memory type or source
+- Original or corrected version label
+- Lifecycle status
+- Creation date
+
+Available controls on the current branch:
+
+- Active or Archived view
+- All memories
+- Global only
+- One exact project
+- **Correct** on active memories
+- **Forget** on active memories
+- **Restore** on archived memories
+
+Correction creates a new active version and marks the selected version superseded in one transaction. The prior value remains available through the history API.
+
+Forget is recoverable archival, not permanent deletion. The selected row becomes archived, leaves normal recall, and remains available for restoration. Restore returns that same row to active status.
+
+## What is not built yet
+
+The following remain planned:
+
+- Natural-language `forget` commands
+- Natural-language memory update and correction commands
+- Permanent-delete or secure-erasure UI
+- Bulk archive and restore
+- Duplicate and conflict detection
+- Keyword or semantic memory search
+- Automatic profile import
+- Automatic encrypted database backups and scheduled restore testing
+- Voice conversations
+- Runtime tool integrations such as calendar, email, or file access
+- Local AI models
+- Multiple cooperating AI specialists or a board-of-directors system
+- Reviewable self-learning from engineering work
+- Multi-user accounts
+- Native mobile application
+
+See [`ROADMAP.md`](ROADMAP.md).
+
+## System overview
+
+```text
+Phone or desktop browser
+        |
+        v
+FastAPI application (backend/main.py)
+        |
+        |-- Authentication and sessions (backend/auth.py)
+        |-- Central SQLite configuration (backend/db.py)
+        |-- Versioned migrations (backend/migrations.py)
+        |-- Conversation storage (backend/conversation.py)
+        |-- Project and memory lifecycle storage (backend/memory.py)
+        |-- Explicit memory-command parser (backend/memory_commands.py)
+        |-- Model provider boundary (backend/model_router.py)
+        |-- Static chat and memory interfaces (frontend/)
+        |
+        v
+SQLite database
+        |
+        |-- Local: data/mootos.db
+        `-- Railway: /data/mootos.db
+
+OpenAI Responses API
+        ^
+        |
+Normal conversation only
+```
+
+## Chat request behavior
+
+### Normal message
+
+1. The browser sends `POST /chat`.
+2. FastAPI verifies the session.
+3. MootOS checks that the message is not an explicit save command.
+4. The provider configuration is validated.
+5. The conversation and user message are stored.
+6. Recent history and active relevant memories are loaded.
+7. The provider generates a response.
+8. The assistant response is stored and returned.
+
+### Explicit memory save
+
+1. MootOS recognizes the command deterministically.
+2. The conversation and user command are stored.
+3. The extracted memory is written to SQLite with type `explicit_chat` and status `active`.
+4. A deterministic confirmation is stored and returned.
+5. The external model provider is not called.
+
+The browser never receives the OpenAI API key.
 
 ## Memory lifecycle
 
-Memory rows use these states:
-
-- `active` — included in normal listing and recall
+- `active` — included in normal lists and model context
 - `superseded` — preserved older version replaced by correction
 - `archived` — recoverably forgotten and excluded from normal recall
 
-Correction creates a new active row and preserves the old row as superseded. Forget changes only the latest active row to archived. Restore returns that same row to active.
+Correction is append-and-supersede. Archive and restore change the status of the latest version without changing correction links.
 
-## Project behavior
+The browser does not expose permanent delete. The legacy administrative delete API refuses to delete archived, superseded, or correction-linked rows.
 
-- Global memories are available across projects.
-- Main/no-project chat can load all active saved memory.
-- A project chat currently loads active global memory plus active memory assigned to that project.
-- Projects are focus lenses, not permanent secrecy walls.
-- Cross-project relevance ranking belongs to the later retrieval branch.
+## Memory scope
+
+- A memory saved without a project is global and can appear in any project chat.
+- Conversations without a project can load all active memories.
+- A project chat currently loads active global memory plus active memory for that project.
+- Projects are intended as focus lenses, not permanent secrecy walls; cross-project relevance ranking is planned for the retrieval branch.
+- At most 20 newest active relevant memories are supplied to the model.
+
+The review page can display active or archived rows, but archived and superseded rows are never supplied to ordinary model context.
+
+This remains simple newest-first retrieval. Keyword ranking, embeddings, and deduplication are not implemented.
+
+## Repository layout
+
+```text
+MootOS/
+|-- backend/
+|   |-- main.py                FastAPI routes and chat orchestration
+|   |-- auth.py                Password and signed-session behavior
+|   |-- db.py                  SQLite path and connection policy
+|   |-- migrations.py          Ordered schema migrations
+|   |-- conversation.py        Conversation and message persistence
+|   |-- memory.py              Project and memory lifecycle persistence
+|   |-- memory_commands.py     Explicit save-command parsing
+|   `-- model_router.py        Replaceable provider protocol
+|-- frontend/                  Mobile chat and memory interfaces
+|-- tests/                     Automated behavior and safety tests
+|-- docs/                      Current truth, runbooks, ADRs, and references
+|-- railway.toml               Railway start and health configuration
+|-- requirements.txt           Pinned production dependencies
+|-- requirements-dev.txt       Pinned test and lint dependencies
+|-- ARCHITECTURE.md            Long-term architecture vision
+|-- ROADMAP.md                 Version plan
+|-- V0.1_REQUIREMENTS.md       Version 0.1 criteria
+|-- DECISIONS.md               Original high-level decisions
+`-- CONTRIBUTING.md            Development and approval rules
+```
 
 ## Local development
+
+### Requirements
+
+- Python 3.9 or newer
+- Virtual environment recommended
+- OpenAI API key required only for real normal-chat responses
+
+### Install
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt
+```
+
+Windows PowerShell:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+### Configure
+
+```bash
 cp .env.example .env
+```
+
+Never commit `.env` or real secrets.
+
+### Run
+
+```bash
 python -m uvicorn backend.main:app --reload
 ```
 
@@ -91,64 +293,145 @@ http://127.0.0.1:8000/chat
 http://127.0.0.1:8000/memory
 ```
 
-Run tests:
+### Test
 
 ```bash
 python -m pytest
 ```
 
-Tests use fake model providers and do not require paid model calls.
+Tests use fake model providers and do not need to spend API credits.
 
 ## Environment variables
 
-| Variable | Purpose |
-|---|---|
-| `AI_PROVIDER` | Current supported value: `openai` |
-| `OPENAI_API_KEY` | Required only for real normal-chat responses |
-| `OPENAI_MODEL` | Model name; defaults to `gpt-5-mini` |
-| `MOOTOS_PASSWORD` | Private deployment password |
-| `MOOTOS_SESSION_SECRET` | Signed-session secret |
-| `MOOTOS_ALLOW_PUBLIC` | Explicit high-risk Railway public override |
-| `MOOTOS_SECURE_COOKIES` | Secure-cookie override |
-| `MOOTOS_DATABASE_PATH` | Exact SQLite path override |
-| `RAILWAY_VOLUME_MOUNT_PATH` | Railway volume path |
-| `PORT` | Railway server port |
+| Variable | Required | Purpose |
+|---|---:|---|
+| `AI_PROVIDER` | No | Current supported value: `openai`. |
+| `OPENAI_API_KEY` | For real normal chat | Secret key used only by the backend. |
+| `OPENAI_MODEL` | No | Model name. Defaults to `gpt-5-mini`. |
+| `MOOTOS_PASSWORD` | Required for private Railway access | Login password. |
+| `MOOTOS_SESSION_SECRET` | Required for private Railway access | Long random session-signing secret. |
+| `MOOTOS_ALLOW_PUBLIC` | No | High-risk explicit Railway public-access override. |
+| `MOOTOS_SECURE_COOKIES` | No | Secure-cookie override. Railway enables them automatically. |
+| `MOOTOS_DATABASE_PATH` | No | Exact SQLite path override. |
+| `RAILWAY_VOLUME_MOUNT_PATH` | Supplied by Railway | Volume location used for `mootos.db`. |
+| `RAILWAY_ENVIRONMENT` | Supplied by Railway | Activates production safety behavior. |
+| `RAILWAY_PUBLIC_DOMAIN` | Supplied by Railway | Also identifies Railway. |
+| `PORT` | Supplied by Railway | Uvicorn port. |
 
-Never commit `.env`, credentials, production databases, or memory contents.
+## Data and persistence
 
-## Repository layout
+Database path priority:
+
+1. `MOOTOS_DATABASE_PATH`
+2. `<RAILWAY_VOLUME_MOUNT_PATH>/mootos.db`
+3. `data/mootos.db`
+
+Production uses:
 
 ```text
-backend/        FastAPI, auth, SQLite, migrations, memory, chat, providers
-frontend/       Mobile chat and memory interfaces
-tests/          Automated behavior and safety coverage
-docs/           Current truth, ADRs, operations, and verification records
-railway.toml    Railway start and health configuration
+/data/mootos.db
 ```
+
+Keep Railway at **one replica** while SQLite is live. WAL improves local concurrency but does not make multiple replicas safe.
+
+Read:
+
+- [`docs/DATA_AND_PERSISTENCE.md`](docs/DATA_AND_PERSISTENCE.md)
+- [`docs/FOUNDATION_HARDENING.md`](docs/FOUNDATION_HARDENING.md)
+- [`docs/CURRENT_IMPLEMENTATION.md`](docs/CURRENT_IMPLEMENTATION.md)
+
+## Railway deployment
+
+Start command:
+
+```text
+python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+```
+
+Health check:
+
+```text
+/health
+```
+
+Guides:
+
+- [`docs/PHONE_DEPLOYMENT.md`](docs/PHONE_DEPLOYMENT.md)
+- [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md)
+
+## API summary
+
+Public routes:
+
+- `GET /health`
+- `GET /login`
+- `POST /auth/login`
+- `POST /auth/logout`
+- Static files and manifest
+
+Protected application routes include:
+
+- `GET /chat`
+- `POST /chat`
+- `GET /memory`
+- Project, memory, and conversation APIs
+- Memory correction, history, archive, and restore APIs
+
+See [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md).
+
+## Security and control boundaries
+
+Current protections:
+
+- Railway auth fails closed by default
+- Signed HTTP-only sessions
+- Secure cookies on Railway
+- Environment-based secrets
+- Protected chat, memory interface, and APIs
+- Verified write-before-confirm memory behavior
+- Exact selected-memory confirmation for correction, forget, and restore
+- No browser permanent-delete request
+- Explicit approval before merges
+
+Current limitations:
+
+- Single user
+- No login rate limiting
+- No MootOS-managed database encryption at rest
+- Public minimal `/health`
+- One manual off-volume backup/restore drill; no automatic backup or retention
+- No natural-language destructive memory actions
 
 ## Development workflow
 
 1. Start from current `main`.
 2. Create one focused branch.
-3. Add behavior and regression tests.
+3. Add tests for behavior changes.
 4. Update documentation in the same PR.
 5. Open a draft PR.
-6. Wait for CI.
-7. Complete internal and external read-only review.
-8. Explain the result in plain language.
-9. Merge only after Moot explicitly approves the exact PR.
-10. Verify Railway and existing data after deployment.
+6. Wait for GitHub Actions.
+7. Review in plain language.
+8. Complete external read-only review when useful.
+9. Moot explicitly approves the exact merge.
+10. Railway deploys merged `main`.
+11. Verify the feature and old data in production.
 
-## Current limitations
+Documentation is part of the definition of done.
 
-- Single user
-- Text chat only
-- One external provider implemented
-- One SQLite replica
-- No automatic encrypted backup or retention
-- No natural-language correction or forget
-- No keyword or semantic retrieval
-- No runtime tools, local model, or multi-agent system
+## Documentation map
+
+Start with [`docs/README.md`](docs/README.md).
+
+Key documents:
+
+- [`docs/CURRENT_CHECKPOINT.md`](docs/CURRENT_CHECKPOINT.md)
+- [`docs/CURRENT_IMPLEMENTATION.md`](docs/CURRENT_IMPLEMENTATION.md)
+- [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md)
+- [`docs/DATA_AND_PERSISTENCE.md`](docs/DATA_AND_PERSISTENCE.md)
+- [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md)
+- [`ROADMAP.md`](ROADMAP.md)
+- [`V0.1_REQUIREMENTS.md`](V0.1_REQUIREMENTS.md)
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
 ## Core rule
 
