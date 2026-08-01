@@ -94,12 +94,102 @@ def test_migration_adopts_existing_schema_without_losing_data(tmp_path):
 
     with database_connection(database_path) as connection:
         saved = connection.execute(
-            "SELECT content FROM memories WHERE id = ?",
+            """
+            SELECT content, status, created_at, updated_at,
+                   replaces_memory_id, superseded_by_id
+            FROM memories
+            WHERE id = ?
+            """,
             (memory_id,),
         ).fetchone()
 
     assert saved["content"] == "Existing production memory"
+    assert saved["status"] == "active"
+    assert saved["updated_at"] == saved["created_at"]
+    assert saved["replaces_memory_id"] is None
+    assert saved["superseded_by_id"] is None
     assert get_schema_version(database_path) == LATEST_SCHEMA_VERSION
+
+
+def test_memory_lifecycle_migration_preserves_existing_rows(tmp_path):
+    database_path = tmp_path / "schema-one.db"
+    memory_id = str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc).isoformat()
+
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            );
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                description TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE memories (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                project TEXT,
+                memory_type TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                project TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                provider TEXT,
+                model TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+            );
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO schema_migrations (version, name, applied_at)
+            VALUES (1, 'initial_schema', ?)
+            """,
+            (created_at,),
+        )
+        connection.execute(
+            """
+            INSERT INTO memories (id, content, project, memory_type, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (memory_id, "Keep this row", None, "test", created_at),
+        )
+
+    assert initialize_database(database_path) == 2
+
+    with database_connection(database_path) as connection:
+        row = connection.execute(
+            "SELECT * FROM memories WHERE id = ?",
+            (memory_id,),
+        ).fetchone()
+        indexes = {
+            item["name"]
+            for item in connection.execute("PRAGMA index_list(memories)").fetchall()
+        }
+
+    assert row["content"] == "Keep this row"
+    assert row["status"] == "active"
+    assert row["updated_at"] == created_at
+    assert row["replaces_memory_id"] is None
+    assert row["superseded_by_id"] is None
+    assert "idx_memories_status_created_at" in indexes
+    assert "idx_memories_superseded_by_id" in indexes
 
 
 def test_incompatible_existing_schema_is_not_marked_migrated(tmp_path):

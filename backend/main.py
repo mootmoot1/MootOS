@@ -31,10 +31,16 @@ from backend.conversation import (
     list_messages as load_messages,
 )
 from backend.memory import (
+    MemoryCorrectionConflictError,
+    MemoryHistoryProtectedError,
+    MemoryNotActiveError,
+    MemoryNotFoundError,
+    correct_memory as replace_memory,
     create_project as store_project,
     create_memory as store_memory,
     delete_memory as remove_memory,
     get_memory as load_memory,
+    get_memory_history as load_memory_history,
     init_db,
     list_context_memories as load_context_memories,
     list_memories as load_memories,
@@ -93,6 +99,12 @@ class MemoryCreate(BaseModel):
     content: str = Field(min_length=1, max_length=MAX_MEMORY_CONTENT_LENGTH)
     project: Optional[str] = None
     memory_type: Optional[str] = None
+
+
+class MemoryCorrection(BaseModel):
+    """Input accepted when replacing one active memory version."""
+
+    content: str = Field(min_length=1, max_length=MAX_MEMORY_CONTENT_LENGTH)
 
 
 class ProjectCreate(BaseModel):
@@ -235,7 +247,7 @@ def chat_interface() -> FileResponse:
 
 @app.get("/memory", include_in_schema=False)
 def memory_interface() -> FileResponse:
-    """Serve the read-only long-term-memory review interface."""
+    """Serve the long-term-memory review and correction interface."""
     return FileResponse(FRONTEND_DIR / "memory.html")
 
 
@@ -281,9 +293,43 @@ def list_memories(project: Optional[str] = None) -> dict[str, Any]:
     return {"success": True, "data": memories}
 
 
+@app.get("/memories/{memory_id}/history")
+def get_memory_history(memory_id: str) -> dict[str, Any]:
+    """Return one preserved memory correction chain oldest first."""
+    history = load_memory_history(memory_id)
+    if history is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"success": True, "data": history}
+
+
+@app.post(
+    "/memories/{memory_id}/corrections",
+    status_code=status.HTTP_201_CREATED,
+)
+def correct_memory(
+    memory_id: str,
+    correction: MemoryCorrection,
+) -> dict[str, Any]:
+    """Create a corrected active version and supersede the selected memory."""
+    corrected_content = correction.content.strip()
+    if not corrected_content:
+        raise HTTPException(
+            status_code=422,
+            detail="Corrected memory content cannot be empty",
+        )
+
+    try:
+        result = replace_memory(memory_id, corrected_content)
+    except MemoryNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (MemoryNotActiveError, MemoryCorrectionConflictError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"success": True, "data": result}
+
+
 @app.get("/memories/{memory_id}")
 def get_memory(memory_id: str) -> dict[str, Any]:
-    """Retrieve a saved memory by ID."""
+    """Retrieve one saved memory version by ID."""
     memory = load_memory(memory_id)
     if memory is None:
         raise HTTPException(status_code=404, detail="Memory not found")
@@ -292,8 +338,12 @@ def get_memory(memory_id: str) -> dict[str, Any]:
 
 @app.delete("/memories/{memory_id}")
 def delete_memory(memory_id: str) -> dict[str, Any]:
-    """Delete a saved memory by ID."""
-    if not remove_memory(memory_id):
+    """Delete a standalone memory without breaking correction history."""
+    try:
+        removed = remove_memory(memory_id)
+    except MemoryHistoryProtectedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if not removed:
         raise HTTPException(status_code=404, detail="Memory not found")
     return {"success": True, "data": {"id": memory_id, "status": "deleted"}}
 

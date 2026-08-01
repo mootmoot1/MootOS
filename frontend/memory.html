@@ -20,7 +20,7 @@
         <p class="eyebrow">MootOS v0.1</p>
         <h1>Long-term memories</h1>
         <p class="memory-intro">
-          Review what MootOS has stored in SQLite. This first version is read-only.
+          Review active memories and correct outdated information without erasing its history.
         </p>
       </div>
 
@@ -47,6 +47,7 @@
     </section>
 
     <p class="memory-summary" id="memorySummary">Loading memories…</p>
+    <div class="success-banner memory-success" id="memorySuccess" role="status" hidden></div>
     <div class="error-banner memory-error" id="memoryError" role="alert" hidden></div>
 
     <main
@@ -62,13 +63,71 @@
       </div>
     </main>
 
-    <section class="memory-readonly-note" aria-label="Read-only notice">
-      <strong>Read-only for safety.</strong>
+    <section class="memory-readonly-note" aria-label="Memory safety notice">
+      <strong>Corrections preserve history.</strong>
       <span>
-        Correction, archive, restore, and search controls will be added in later reviewed branches.
+        The previous version is superseded, not erased. Archive, restore, and search controls remain in later reviewed branches.
       </span>
     </section>
   </div>
+
+  <dialog
+    class="memory-correction-dialog"
+    id="memoryCorrectionDialog"
+    aria-labelledby="memoryCorrectionTitle"
+  >
+    <form class="memory-correction-form" id="memoryCorrectionForm">
+      <div class="memory-dialog-header">
+        <div>
+          <p class="eyebrow">Preserved correction</p>
+          <h2 id="memoryCorrectionTitle">Correct this memory</h2>
+        </div>
+        <button
+          class="memory-dialog-close"
+          id="cancelMemoryCorrectionButton"
+          type="button"
+          aria-label="Cancel correction"
+        >
+          ×
+        </button>
+      </div>
+
+      <div class="memory-current-version">
+        <span class="memory-field-label">Current version</span>
+        <p id="memoryCorrectionCurrent"></p>
+      </div>
+
+      <label class="memory-field-label" for="memoryCorrectionContent">
+        Corrected version
+      </label>
+      <textarea
+        id="memoryCorrectionContent"
+        class="memory-correction-textarea"
+        rows="6"
+        maxlength="10000"
+        required
+      ></textarea>
+
+      <p class="memory-correction-explainer">
+        Saving creates a new active version and keeps the current version in correction history.
+      </p>
+      <div
+        class="error-banner memory-dialog-error"
+        id="memoryCorrectionError"
+        role="alert"
+        hidden
+      ></div>
+
+      <div class="memory-dialog-actions">
+        <button class="secondary-button" id="dismissMemoryCorrectionButton" type="button">
+          Keep current
+        </button>
+        <button class="primary-button" id="saveMemoryCorrectionButton" type="submit">
+          Save correction
+        </button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="/static/memory.js" defer></script>
 </body>
