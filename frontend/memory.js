@@ -1,4 +1,5 @@
 const elements = {
+  statusFilter: document.querySelector("#memoryStatusFilter"),
   projectFilter: document.querySelector("#memoryProjectFilter"),
   refreshButton: document.querySelector("#refreshMemoriesButton"),
   memoryList: document.querySelector("#memoryList"),
@@ -13,10 +14,22 @@ const elements = {
   cancelCorrectionButton: document.querySelector("#cancelMemoryCorrectionButton"),
   dismissCorrectionButton: document.querySelector("#dismissMemoryCorrectionButton"),
   saveCorrectionButton: document.querySelector("#saveMemoryCorrectionButton"),
+  lifecycleDialog: document.querySelector("#memoryLifecycleDialog"),
+  lifecycleForm: document.querySelector("#memoryLifecycleForm"),
+  lifecycleEyebrow: document.querySelector("#memoryLifecycleEyebrow"),
+  lifecycleTitle: document.querySelector("#memoryLifecycleTitle"),
+  lifecycleCurrent: document.querySelector("#memoryLifecycleCurrent"),
+  lifecycleExplainer: document.querySelector("#memoryLifecycleExplainer"),
+  lifecycleError: document.querySelector("#memoryLifecycleError"),
+  cancelLifecycleButton: document.querySelector("#cancelMemoryLifecycleButton"),
+  dismissLifecycleButton: document.querySelector("#dismissMemoryLifecycleButton"),
+  confirmLifecycleButton: document.querySelector("#confirmMemoryLifecycleButton"),
 };
 
 let memoryRequestGeneration = 0;
 let selectedMemory = null;
+let selectedLifecycleMemory = null;
+let selectedLifecycleAction = null;
 
 function normalizeError(detail, fallback) {
   if (typeof detail === "string" && detail.trim()) {
@@ -122,7 +135,18 @@ function clearCorrectionError() {
   elements.correctionError.hidden = true;
 }
 
+function showLifecycleError(message) {
+  elements.lifecycleError.textContent = message;
+  elements.lifecycleError.hidden = false;
+}
+
+function clearLifecycleError() {
+  elements.lifecycleError.textContent = "";
+  elements.lifecycleError.hidden = true;
+}
+
 function setLoading(loading) {
+  elements.statusFilter.disabled = loading;
   elements.projectFilter.disabled = loading;
   elements.refreshButton.disabled = loading;
   elements.memoryList.setAttribute("aria-busy", String(loading));
@@ -131,7 +155,8 @@ function setLoading(loading) {
     return;
   }
 
-  elements.memorySummary.textContent = "Loading memories…";
+  const statusLabel = elements.statusFilter.value === "archived" ? "archived" : "active";
+  elements.memorySummary.textContent = `Loading ${statusLabel} memories…`;
   const loadingState = document.createElement("div");
   loadingState.className = "memory-loading-state";
 
@@ -154,6 +179,21 @@ function setCorrectionSubmitting(submitting) {
   elements.saveCorrectionButton.textContent = submitting
     ? "Saving correction…"
     : "Save correction";
+}
+
+function setLifecycleSubmitting(submitting) {
+  elements.cancelLifecycleButton.disabled = submitting;
+  elements.dismissLifecycleButton.disabled = submitting;
+  elements.confirmLifecycleButton.disabled = submitting;
+
+  if (submitting) {
+    elements.confirmLifecycleButton.textContent =
+      selectedLifecycleAction === "restore" ? "Restoring…" : "Forgetting…";
+    return;
+  }
+
+  elements.confirmLifecycleButton.textContent =
+    selectedLifecycleAction === "restore" ? "Restore memory" : "Forget memory";
 }
 
 function createMetaItem(label, value) {
@@ -196,6 +236,44 @@ function closeCorrectionDialog() {
   setCorrectionSubmitting(false);
 }
 
+function openLifecycleDialog(memory, action) {
+  selectedLifecycleMemory = memory;
+  selectedLifecycleAction = action;
+  clearLifecycleError();
+  elements.lifecycleCurrent.textContent = memory.content;
+
+  if (action === "restore") {
+    elements.lifecycleEyebrow.textContent = "Recoverable memory";
+    elements.lifecycleTitle.textContent = "Restore this memory?";
+    elements.lifecycleExplainer.textContent =
+      "Restore returns this memory to active status so it can appear in normal recall again.";
+    elements.confirmLifecycleButton.classList.remove("danger-button");
+  } else {
+    elements.lifecycleEyebrow.textContent = "Recoverable forget";
+    elements.lifecycleTitle.textContent = "Forget this memory?";
+    elements.lifecycleExplainer.textContent =
+      "Forget removes this memory from normal recall and moves it to Archived. It can be restored later.";
+    elements.confirmLifecycleButton.classList.add("danger-button");
+  }
+
+  setLifecycleSubmitting(false);
+  if (!elements.lifecycleDialog.open) {
+    elements.lifecycleDialog.showModal();
+  }
+  elements.confirmLifecycleButton.focus();
+}
+
+function closeLifecycleDialog() {
+  if (elements.lifecycleDialog.open) {
+    elements.lifecycleDialog.close();
+  }
+  selectedLifecycleMemory = null;
+  selectedLifecycleAction = null;
+  clearLifecycleError();
+  elements.confirmLifecycleButton.classList.remove("danger-button");
+  setLifecycleSubmitting(false);
+}
+
 function renderMemory(memory) {
   const card = document.createElement("article");
   card.className = "memory-card";
@@ -224,18 +302,39 @@ function renderMemory(memory) {
     createMetaItem("Project", memory.project || "Global"),
     createMetaItem("Source", humanizeMemoryType(memory.memory_type)),
     createMetaItem("Version", memory.replaces_memory_id ? "Corrected" : "Original"),
+    createMetaItem("Status", memory.status === "archived" ? "Archived" : "Active"),
   );
 
   const actions = document.createElement("div");
   actions.className = "memory-card-actions";
 
-  const correctButton = document.createElement("button");
-  correctButton.className = "secondary-button memory-correct-button";
-  correctButton.type = "button";
-  correctButton.textContent = "Correct";
-  correctButton.addEventListener("click", () => openCorrectionDialog(memory));
+  if (memory.status === "archived") {
+    const restoreButton = document.createElement("button");
+    restoreButton.className = "secondary-button memory-restore-button";
+    restoreButton.type = "button";
+    restoreButton.textContent = "Restore";
+    restoreButton.addEventListener("click", () =>
+      openLifecycleDialog(memory, "restore")
+    );
+    actions.appendChild(restoreButton);
+  } else {
+    const correctButton = document.createElement("button");
+    correctButton.className = "secondary-button memory-correct-button";
+    correctButton.type = "button";
+    correctButton.textContent = "Correct";
+    correctButton.addEventListener("click", () => openCorrectionDialog(memory));
 
-  actions.appendChild(correctButton);
+    const forgetButton = document.createElement("button");
+    forgetButton.className = "secondary-button danger-button memory-forget-button";
+    forgetButton.type = "button";
+    forgetButton.textContent = "Forget";
+    forgetButton.addEventListener("click", () =>
+      openLifecycleDialog(memory, "archive")
+    );
+
+    actions.append(correctButton, forgetButton);
+  }
+
   header.append(scope, created);
   card.append(header, content, metadata, actions);
   return card;
@@ -246,16 +345,24 @@ function selectedFilterLabel() {
   return selected ? selected.textContent : "All memories";
 }
 
+function selectedStatusLabel() {
+  return elements.statusFilter.value === "archived" ? "archived" : "active";
+}
+
 function renderEmptyState() {
   const empty = document.createElement("section");
   empty.className = "memory-empty-state";
 
   const title = document.createElement("h2");
-  title.textContent = "No memories found";
+  const statusLabel = selectedStatusLabel();
+  title.textContent = statusLabel === "archived" ? "No archived memories" : "No memories found";
 
   const message = document.createElement("p");
   const filterValue = elements.projectFilter.value;
-  if (filterValue === "global") {
+  if (statusLabel === "archived") {
+    message.textContent =
+      "Forgotten memories will appear here and can be restored to normal recall.";
+  } else if (filterValue === "global") {
     message.textContent = "No active global memories have been saved yet.";
   } else if (filterValue.startsWith("project:")) {
     message.textContent = `No active memories have been saved in ${selectedFilterLabel()} yet.`;
@@ -269,7 +376,8 @@ function renderEmptyState() {
 
 function renderMemories(memories) {
   const count = memories.length;
-  elements.memorySummary.textContent = `${count} active ${count === 1 ? "memory" : "memories"} · ${selectedFilterLabel()}`;
+  const statusLabel = selectedStatusLabel();
+  elements.memorySummary.textContent = `${count} ${statusLabel} ${count === 1 ? "memory" : "memories"} · ${selectedFilterLabel()}`;
   elements.memoryList.replaceChildren();
 
   if (!count) {
@@ -293,23 +401,24 @@ async function loadProjects() {
   });
 }
 
-async function loadMemories() {
+async function loadMemories({ preserveSuccess = false, throwOnError = false } = {}) {
   const requestGeneration = ++memoryRequestGeneration;
   const filterValue = elements.projectFilter.value;
+  const memoryStatus = elements.statusFilter.value;
 
   setLoading(true);
   clearError();
-  clearSuccess();
+  if (!preserveSuccess) {
+    clearSuccess();
+  }
 
   try {
-    let path = "/memories";
-
+    const params = new URLSearchParams({ status: memoryStatus });
     if (filterValue.startsWith("project:")) {
-      const project = filterValue.slice("project:".length);
-      path += `?project=${encodeURIComponent(project)}`;
+      params.set("project", filterValue.slice("project:".length));
     }
 
-    let memories = await apiRequest(path);
+    let memories = await apiRequest(`/memories?${params.toString()}`);
     if (requestGeneration !== memoryRequestGeneration) {
       return;
     }
@@ -327,10 +436,24 @@ async function loadMemories() {
     elements.memorySummary.textContent = "Unable to load memories";
     elements.memoryList.replaceChildren();
     showError(error.message);
+    if (throwOnError) {
+      throw error;
+    }
   } finally {
     if (requestGeneration === memoryRequestGeneration) {
       setLoading(false);
     }
+  }
+}
+
+async function reloadAfterMutation(successMessage) {
+  clearSuccess();
+  try {
+    await loadMemories({ preserveSuccess: true, throwOnError: true });
+    showSuccess(successMessage);
+  } catch (error) {
+    clearSuccess();
+    showError("The change was saved, but the memory list could not be refreshed. Press Refresh to try again.");
   }
 }
 
@@ -360,11 +483,41 @@ async function submitCorrection(event) {
       body: JSON.stringify({ content: correctedContent }),
     });
     closeCorrectionDialog();
-    await loadMemories();
-    showSuccess("Correction saved. The previous version remains preserved in history.");
+    await reloadAfterMutation(
+      "Correction saved. The previous version remains preserved in history."
+    );
   } catch (error) {
     showCorrectionError(error.message);
     setCorrectionSubmitting(false);
+  }
+}
+
+async function submitLifecycle(event) {
+  event.preventDefault();
+  clearLifecycleError();
+
+  if (!selectedLifecycleMemory || !selectedLifecycleAction) {
+    showLifecycleError("Select a memory before continuing.");
+    return;
+  }
+
+  const memoryId = selectedLifecycleMemory.id;
+  const action = selectedLifecycleAction;
+  setLifecycleSubmitting(true);
+
+  try {
+    await apiRequest(`/memories/${encodeURIComponent(memoryId)}/${action}`, {
+      method: "POST",
+    });
+    closeLifecycleDialog();
+    await reloadAfterMutation(
+      action === "restore"
+        ? "Memory restored to active recall."
+        : "Memory moved to Archived and removed from normal recall."
+    );
+  } catch (error) {
+    showLifecycleError(error.message);
+    setLifecycleSubmitting(false);
   }
 }
 
@@ -384,6 +537,7 @@ async function initialize() {
   }
 }
 
+elements.statusFilter.addEventListener("change", loadMemories);
 elements.projectFilter.addEventListener("change", loadMemories);
 elements.refreshButton.addEventListener("click", loadMemories);
 elements.correctionForm.addEventListener("submit", submitCorrection);
@@ -392,6 +546,13 @@ elements.dismissCorrectionButton.addEventListener("click", closeCorrectionDialog
 elements.correctionDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
   closeCorrectionDialog();
+});
+elements.lifecycleForm.addEventListener("submit", submitLifecycle);
+elements.cancelLifecycleButton.addEventListener("click", closeLifecycleDialog);
+elements.dismissLifecycleButton.addEventListener("click", closeLifecycleDialog);
+elements.lifecycleDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeLifecycleDialog();
 });
 
 initialize();
