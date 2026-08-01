@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -31,10 +31,13 @@ from backend.conversation import (
     list_messages as load_messages,
 )
 from backend.memory import (
+    MemoryArchiveConflictError,
     MemoryCorrectionConflictError,
     MemoryHistoryProtectedError,
     MemoryNotActiveError,
     MemoryNotFoundError,
+    MemoryRestoreConflictError,
+    archive_memory as archive_saved_memory,
     correct_memory as replace_memory,
     create_project as store_project,
     create_memory as store_memory,
@@ -45,6 +48,7 @@ from backend.memory import (
     list_context_memories as load_context_memories,
     list_memories as load_memories,
     list_projects as load_projects,
+    restore_memory as restore_saved_memory,
 )
 from backend.memory_commands import parse_memory_save_command
 from backend.model_router import (
@@ -247,7 +251,7 @@ def chat_interface() -> FileResponse:
 
 @app.get("/memory", include_in_schema=False)
 def memory_interface() -> FileResponse:
-    """Serve the long-term-memory review and correction interface."""
+    """Serve the long-term-memory review and lifecycle interface."""
     return FileResponse(FRONTEND_DIR / "memory.html")
 
 
@@ -284,10 +288,18 @@ def create_memory(memory: MemoryCreate) -> dict[str, Any]:
 
 
 @app.get("/memories")
-def list_memories(project: Optional[str] = None) -> dict[str, Any]:
-    """List saved memories, optionally filtered by project."""
+def list_memories(
+    project: Optional[str] = None,
+    memory_status: str = Query(default="active", alias="status"),
+) -> dict[str, Any]:
+    """List active or archived memories, optionally filtered by project."""
+    if memory_status not in {"active", "archived"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Memory status must be active or archived",
+        )
     try:
-        memories = load_memories(project=project)
+        memories = load_memories(project=project, memory_status=memory_status)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return {"success": True, "data": memories}
@@ -327,6 +339,30 @@ def correct_memory(
     return {"success": True, "data": result}
 
 
+@app.post("/memories/{memory_id}/archive")
+def archive_memory(memory_id: str) -> dict[str, Any]:
+    """Recoverably forget one selected active memory."""
+    try:
+        archived = archive_saved_memory(memory_id)
+    except MemoryNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except MemoryArchiveConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"success": True, "data": archived}
+
+
+@app.post("/memories/{memory_id}/restore")
+def restore_memory(memory_id: str) -> dict[str, Any]:
+    """Restore one selected archived memory to normal recall."""
+    try:
+        restored = restore_saved_memory(memory_id)
+    except MemoryNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except MemoryRestoreConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"success": True, "data": restored}
+
+
 @app.get("/memories/{memory_id}")
 def get_memory(memory_id: str) -> dict[str, Any]:
     """Retrieve one saved memory version by ID."""
@@ -338,7 +374,7 @@ def get_memory(memory_id: str) -> dict[str, Any]:
 
 @app.delete("/memories/{memory_id}")
 def delete_memory(memory_id: str) -> dict[str, Any]:
-    """Delete a standalone memory without breaking correction history."""
+    """Delete a standalone active memory without breaking lifecycle history."""
     try:
         removed = remove_memory(memory_id)
     except MemoryHistoryProtectedError as error:
