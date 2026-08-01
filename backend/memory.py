@@ -12,6 +12,7 @@ from backend.migrations import initialize_database
 MEMORY_STATUS_ACTIVE = "active"
 MEMORY_STATUS_SUPERSEDED = "superseded"
 MEMORY_STATUS_ARCHIVED = "archived"
+MEMORY_LISTABLE_STATUSES = {MEMORY_STATUS_ACTIVE, MEMORY_STATUS_ARCHIVED}
 MEMORY_COLUMNS = """
     id,
     content,
@@ -37,8 +38,16 @@ class MemoryCorrectionConflictError(ValueError):
     """Raised when a correction would not change the stored memory."""
 
 
+class MemoryArchiveConflictError(ValueError):
+    """Raised when a memory cannot enter the archived state."""
+
+
+class MemoryRestoreConflictError(ValueError):
+    """Raised when a memory cannot return to the active state."""
+
+
 class MemoryHistoryProtectedError(ValueError):
-    """Raised when hard deletion would break correction history."""
+    """Raised when hard deletion would break correction or archive history."""
 
 
 def init_db() -> None:
@@ -172,8 +181,18 @@ def create_memory(
     return memory
 
 
-def list_memories(project: Optional[str] = None) -> list[dict[str, Any]]:
-    """Return active memories newest first, optionally filtered by project."""
+def list_memories(
+    project: Optional[str] = None,
+    memory_status: str = MEMORY_STATUS_ACTIVE,
+) -> list[dict[str, Any]]:
+    """Return active or archived memories, optionally filtered by project.
+
+    Superseded rows remain available only through direct retrieval and history.
+    """
+    if memory_status not in MEMORY_LISTABLE_STATUSES:
+        raise ValueError("Memory status must be active or archived")
+
+    order_column = "updated_at" if memory_status == MEMORY_STATUS_ARCHIVED else "created_at"
     with database_connection() as connection:
         if project is None:
             rows = connection.execute(
@@ -181,9 +200,9 @@ def list_memories(project: Optional[str] = None) -> list[dict[str, Any]]:
                 SELECT {MEMORY_COLUMNS}
                 FROM memories
                 WHERE status = ?
-                ORDER BY created_at DESC
+                ORDER BY {order_column} DESC
                 """,
-                (MEMORY_STATUS_ACTIVE,),
+                (memory_status,),
             ).fetchall()
         else:
             saved_project = _get_project(connection, project)
@@ -194,9 +213,9 @@ def list_memories(project: Optional[str] = None) -> list[dict[str, Any]]:
                 SELECT {MEMORY_COLUMNS}
                 FROM memories
                 WHERE status = ? AND project = ? COLLATE NOCASE
-                ORDER BY created_at DESC
+                ORDER BY {order_column} DESC
                 """,
-                (MEMORY_STATUS_ACTIVE, saved_project["name"]),
+                (memory_status, saved_project["name"]),
             ).fetchall()
     return [dict(row) for row in rows]
 
@@ -327,6 +346,80 @@ def correct_memory(memory_id: str, content: str) -> dict[str, dict[str, Any]]:
         }
 
 
+def archive_memory(memory_id: str) -> dict[str, Any]:
+    """Hide one active memory from normal recall without deleting it."""
+    with database_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        memory = _get_memory(connection, memory_id)
+        if memory is None:
+            raise MemoryNotFoundError("Memory not found")
+        if memory["status"] != MEMORY_STATUS_ACTIVE:
+            raise MemoryArchiveConflictError("Only an active memory can be forgotten")
+        if memory["superseded_by_id"] is not None:
+            raise MemoryArchiveConflictError(
+                "Only the latest active memory version can be forgotten"
+            )
+
+        now = datetime.now(timezone.utc).isoformat()
+        updated = connection.execute(
+            """
+            UPDATE memories
+            SET status = ?, updated_at = ?
+            WHERE id = ? AND status = ? AND superseded_by_id IS NULL
+            """,
+            (
+                MEMORY_STATUS_ARCHIVED,
+                now,
+                memory_id,
+                MEMORY_STATUS_ACTIVE,
+            ),
+        )
+        if updated.rowcount != 1:
+            raise MemoryArchiveConflictError("Only an active memory can be forgotten")
+
+        archived = _get_memory(connection, memory_id)
+        if archived is None or archived["status"] != MEMORY_STATUS_ARCHIVED:
+            raise RuntimeError("Memory archive did not persist completely")
+        return archived
+
+
+def restore_memory(memory_id: str) -> dict[str, Any]:
+    """Return one archived latest memory version to normal recall."""
+    with database_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        memory = _get_memory(connection, memory_id)
+        if memory is None:
+            raise MemoryNotFoundError("Memory not found")
+        if memory["status"] != MEMORY_STATUS_ARCHIVED:
+            raise MemoryRestoreConflictError("Only an archived memory can be restored")
+        if memory["superseded_by_id"] is not None:
+            raise MemoryRestoreConflictError(
+                "Only the latest archived memory version can be restored"
+            )
+
+        now = datetime.now(timezone.utc).isoformat()
+        updated = connection.execute(
+            """
+            UPDATE memories
+            SET status = ?, updated_at = ?
+            WHERE id = ? AND status = ? AND superseded_by_id IS NULL
+            """,
+            (
+                MEMORY_STATUS_ACTIVE,
+                now,
+                memory_id,
+                MEMORY_STATUS_ARCHIVED,
+            ),
+        )
+        if updated.rowcount != 1:
+            raise MemoryRestoreConflictError("Only an archived memory can be restored")
+
+        restored = _get_memory(connection, memory_id)
+        if restored is None or restored["status"] != MEMORY_STATUS_ACTIVE:
+            raise RuntimeError("Memory restore did not persist completely")
+        return restored
+
+
 def get_memory_history(memory_id: str) -> Optional[list[dict[str, Any]]]:
     """Return one correction chain from oldest to newest."""
     with database_connection() as connection:
@@ -358,11 +451,10 @@ def get_memory_history(memory_id: str) -> Optional[list[dict[str, Any]]]:
 
 
 def delete_memory(memory_id: str) -> bool:
-    """Delete one standalone memory while protecting correction history.
+    """Delete one standalone active memory while protecting lifecycle history.
 
-    This legacy administrative endpoint is not exposed in the browser. Any row
-    that participates in a correction chain is protected from hard deletion so
-    preserved history cannot be broken before recoverable archive is added.
+    This legacy administrative endpoint is not exposed in the browser. Archived
+    rows remain recoverable, and correction-linked rows remain preserved.
     """
     with database_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -372,10 +464,10 @@ def delete_memory(memory_id: str) -> bool:
         if (
             memory["replaces_memory_id"] is not None
             or memory["superseded_by_id"] is not None
-            or memory["status"] == MEMORY_STATUS_SUPERSEDED
+            or memory["status"] in {MEMORY_STATUS_SUPERSEDED, MEMORY_STATUS_ARCHIVED}
         ):
             raise MemoryHistoryProtectedError(
-                "Memory correction history cannot be permanently deleted"
+                "Memory history and archived memories cannot be permanently deleted"
             )
         cursor = connection.execute(
             "DELETE FROM memories WHERE id = ?",
