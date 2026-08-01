@@ -26,9 +26,12 @@ def test_memory_review_interface_is_served():
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "Long-term memories" in response.text
-    assert "This first version is read-only" in response.text
+    assert "correct outdated information" in response.text
     assert 'id="memoryProjectFilter"' in response.text
     assert 'id="memoryList"' in response.text
+    assert 'id="memoryCorrectionDialog"' in response.text
+    assert 'id="memoryCorrectionContent"' in response.text
+    assert "Corrections preserve history" in response.text
     assert "/static/memory.js" in response.text
     assert "/static/memory.css" in response.text
 
@@ -49,6 +52,9 @@ def test_interface_assets_are_served():
     assert 'let path = "/memories"' in memory_script.text
     assert "memoryRequestGeneration" in memory_script.text
     assert "requestGeneration !== memoryRequestGeneration" in memory_script.text
+    assert '/corrections`' in memory_script.text
+    assert 'method: "POST"' in memory_script.text
+    assert "textContent = memory.content" in memory_script.text
     assert 'method: "DELETE"' not in memory_script.text
     assert 'method: "PATCH"' not in memory_script.text
     assert 'method: "PUT"' not in memory_script.text
@@ -75,7 +81,21 @@ def test_existing_chat_and_memory_api_routes_remain_available():
         if route.path == "/memories"
         for method in route.methods
     }
+    correction_methods = {
+        method
+        for route in app.routes
+        if route.path == "/memories/{memory_id}/corrections"
+        for method in route.methods
+    }
+    history_methods = {
+        method
+        for route in app.routes
+        if route.path == "/memories/{memory_id}/history"
+        for method in route.methods
+    }
 
     assert chat_methods == {"GET", "POST"}
     assert memory_page_methods == {"GET"}
     assert memory_api_methods == {"GET", "POST"}
+    assert correction_methods == {"POST"}
+    assert history_methods == {"GET"}

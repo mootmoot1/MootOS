@@ -13,6 +13,7 @@ These documents describe the code and deployment that exist today.
 - [`API_REFERENCE.md`](API_REFERENCE.md) — current HTTP routes, request fields, response shapes, and errors
 - [`DATA_AND_PERSISTENCE.md`](DATA_AND_PERSISTENCE.md) — SQLite layout, database paths, Railway volume rules, backup guidance, and migration behavior
 - [`FOUNDATION_HARDENING.md`](FOUNDATION_HARDENING.md) — centralized SQLite settings, schema migrations, production auth safety, validation, and deployment checks
+- [`BACKUP_RESTORE_VERIFICATION_2026-08-01.md`](BACKUP_RESTORE_VERIFICATION_2026-08-01.md) — non-private evidence from the completed pre-migration backup and restore drill
 
 When a statement in a future-looking document conflicts with these files, these files should be treated as the description of the current implementation.
 
@@ -22,6 +23,7 @@ These documents explain how to deploy, verify, recover, and maintain the live sy
 
 - [`PHONE_DEPLOYMENT.md`](PHONE_DEPLOYMENT.md) — initial Railway and phone setup
 - [`OPERATIONS_RUNBOOK.md`](OPERATIONS_RUNBOOK.md) — routine deployment, health checks, persistence verification, incident response, migration safety, and rollback
+- [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md) — WAL-safe manual snapshot, off-volume transfer, restore drill, and production restore safeguards
 
 ## 3. Architecture history
 
@@ -32,6 +34,7 @@ These documents preserve why important technical choices were made.
 - [`ADR-013-mobile-chat-interface.md`](ADR-013-mobile-chat-interface.md)
 - [`ADR-014-secure-phone-deployment.md`](ADR-014-secure-phone-deployment.md)
 - [`ADR-015-foundation-hardening.md`](ADR-015-foundation-hardening.md)
+- [`ADR-016-memory-lifecycle-and-correction.md`](ADR-016-memory-lifecycle-and-correction.md)
 
 The repository root also contains:
 

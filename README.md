@@ -2,7 +2,7 @@
 
 MootOS is Moot's private, mobile-friendly personal AI foundation.
 
-Version 0.1 provides a working chat interface, persistent conversations, explicit long-term-memory saves through normal chat, a read-only memory review screen, project-organized memory context, a replaceable model-provider boundary, private password access, and Railway deployment with hardened persistent SQLite storage.
+Version 0.1 provides a working chat interface, persistent conversations, explicit long-term-memory saves through normal chat, a production-verified memory review screen, and a feature branch for preserved memory correction. It also includes project-organized context, a replaceable model-provider boundary, private password access, and hardened persistent SQLite storage on Railway.
 
 MootOS is built in small, reviewable steps. The goal is a reliable system that Moot controls and can expand without rebuilding the foundation.
 
@@ -12,7 +12,8 @@ MootOS is built in small, reviewable steps. The goal is a reliable system that M
 **Primary branch:** `main`  
 **Deployment:** Railway, one service and one replica  
 **Production database:** SQLite on a Railway volume mounted at `/data`  
-**Current schema version:** `1 — initial_schema`  
+**Current schema on `main`:** `1 — initial_schema`  
+**Feature-branch schema:** `2 — memory_lifecycle`  
 **Current model provider:** OpenAI through a replaceable provider interface
 
 See [`docs/CURRENT_CHECKPOINT.md`](docs/CURRENT_CHECKPOINT.md) for the latest verified project state.
@@ -31,8 +32,9 @@ See [`docs/CURRENT_CHECKPOINT.md`](docs/CURRENT_CHECKPOINT.md) for the latest ve
 - Database-backed confirmation only after a memory write succeeds
 - Cross-chat recall from the `memories` table
 - Global memories available across project chats
-- Project memories isolated to their matching project
-- Read-only memory review at `/memory`
+- Main/no-project chat can use all saved memory; project chats currently prioritize global and matching-project memory
+- Production-verified memory review at `/memory`
+- UI-selected correction with preserved history on the current feature branch
 - All-memory, global-only, and exact-project memory filters
 - Memory content, scope, project, source, and creation date display
 - Relevant memory context supplied to the model
@@ -100,7 +102,9 @@ Available filters:
 - Global only
 - One exact project
 
-This first interface is deliberately read-only. It does not expose editing, correction, archive, restore, or permanent deletion controls. Those lifecycle changes require a later reviewed schema migration and focused branches.
+On the current correction branch, each active memory has a **Correct** control. The confirmation dialog creates a new active version and marks the selected version superseded in one transaction. The prior value remains available through the history API.
+
+Archive, restore, permanent deletion controls, and natural-language update commands are not included in this branch.
 
 ## What is not built yet
 
@@ -108,11 +112,11 @@ The following remain planned:
 
 - Natural-language `forget` commands
 - Natural-language memory update and correction commands
-- Memory correction, archive, restore, and search controls
+- Memory archive, restore, and search controls
 - Duplicate and conflict detection
 - Keyword or semantic memory search
 - Automatic profile import
-- Automatic database backups and tested restore workflow
+- Automatic encrypted database backups and scheduled restore testing
 - Voice conversations
 - Runtime tool integrations such as calendar, email, or file access
 - Local AI models
@@ -178,14 +182,14 @@ The browser never receives the OpenAI API key.
 ## Memory scope
 
 - A memory saved without a project is global and can appear in any project chat.
-- A memory saved in `Cars` is available to later `Cars` chats.
-- A `Cars` memory is not supplied to `Studio` chats.
-- Conversations without a project can load all memories.
-- At most 20 newest relevant memories are supplied to the model.
+- Conversations without a project can load all active memories.
+- A project chat currently loads active global memory plus active memory for that project.
+- Projects are intended as focus lenses, not permanent secrecy walls; cross-project relevance ranking is planned for the retrieval branch.
+- At most 20 newest active relevant memories are supplied to the model.
 
 The review page can display every saved row, but that does not mean every row is supplied to each model request.
 
-This is simple newest-first retrieval. Keyword ranking, embeddings, correction history, and deduplication are not implemented.
+This is simple newest-first retrieval. Correction history is implemented on the feature branch; keyword ranking, embeddings, and deduplication are not.
 
 ## Repository layout
 
@@ -352,7 +356,7 @@ Current protections:
 - Environment-based secrets
 - Protected chat, memory review, and APIs
 - Verified write-before-confirm memory behavior
-- Read-only memory review browser path
+- Confirmed memory correction only; no browser delete, archive, or restore control
 - Explicit approval before merges
 
 Current limitations:
@@ -361,7 +365,7 @@ Current limitations:
 - No login rate limiting
 - No MootOS-managed database encryption at rest
 - Public minimal `/health`
-- No automatic off-volume backup
+- One manual off-volume backup/restore drill; no automatic backup or retention
 - No destructive natural-language memory actions yet
 
 ## Development workflow

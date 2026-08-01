@@ -46,9 +46,9 @@ Serves the main chat interface.
 
 ### `GET /memory`
 
-Serves the protected read-only memory review interface.
+Serves the protected memory review and confirmed-correction interface.
 
-The browser page reads from `GET /projects` and `GET /memories`. It does not expose editing, archive, restore, or delete controls.
+The browser page reads from `GET /projects` and `GET /memories`. On the correction branch it can send one explicit `POST /memories/{memory_id}/corrections` request after confirmation. It does not expose archive, restore, hard-delete, `PATCH`, or `PUT` controls.
 
 ### `GET /login`
 
@@ -163,15 +163,25 @@ There are no project update, rename, or delete endpoints.
   "content": "My favorite tea is jasmine.",
   "project": "Personal",
   "memory_type": "explicit_chat",
-  "created_at": "2026-07-31T00:00:00+00:00"
+  "created_at": "2026-08-01T00:00:00+00:00",
+  "status": "active",
+  "updated_at": "2026-08-01T00:00:00+00:00",
+  "replaces_memory_id": null,
+  "superseded_by_id": null
 }
 ```
 
 `project: null` means the memory is global.
 
+Lifecycle values:
+
+- `active`: current version used by normal listings and model context
+- `superseded`: preserved older version replaced by a correction
+- `archived`: reserved for the later recoverable-forget branch
+
 ### `POST /memories`
 
-Creates a memory directly through the API.
+Creates a standalone active memory directly through the API.
 
 Request:
 
@@ -201,7 +211,7 @@ Unknown project: HTTP `422`.
 
 ### `GET /memories`
 
-Lists all memories newest first.
+Lists active memories newest first. Superseded and archived rows are excluded.
 
 Optional filter:
 
@@ -209,33 +219,95 @@ Optional filter:
 GET /memories?project=Studio
 ```
 
-The project filter returns only memories assigned to that project. It does not include global memories.
+The project filter returns only active memories assigned to that project. It does not include global memories.
 
 Unknown project filter returns HTTP `404`.
 
-The `/memory` browser interface uses this endpoint. Its global-only option loads the complete list and displays rows whose `project` value is `null`.
+The `/memory` browser interface uses this endpoint. Its global-only option loads the active list and displays rows whose `project` value is `null`.
 
 ### `GET /memories/{memory_id}`
 
-Returns one memory. Missing records return HTTP `404`.
+Returns one memory version by ID, including superseded versions. Missing records return HTTP `404`.
 
-### `DELETE /memories/{memory_id}`
+### `GET /memories/{memory_id}/history`
 
-Deletes one memory.
+Returns the complete correction chain containing the selected version, ordered oldest to newest.
 
-Success:
+Example:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "old-uuid",
+      "content": "My car is silver.",
+      "status": "superseded",
+      "superseded_by_id": "new-uuid"
+    },
+    {
+      "id": "new-uuid",
+      "content": "My car is black.",
+      "status": "active",
+      "replaces_memory_id": "old-uuid"
+    }
+  ]
+}
+```
+
+Missing records return HTTP `404`.
+
+### `POST /memories/{memory_id}/corrections`
+
+Creates a new active version and supersedes the selected active version in one transaction.
+
+Request:
+
+```json
+{
+  "content": "My car is black."
+}
+```
+
+Validation:
+
+- Content is required and trimmed.
+- Maximum length is 10,000 characters.
+- Blank content is rejected.
+- Content identical to the current version is rejected.
+- Only an active memory can be corrected.
+
+Success: HTTP `201`.
 
 ```json
 {
   "success": true,
   "data": {
-    "id": "uuid",
-    "status": "deleted"
+    "superseded": {
+      "id": "old-uuid",
+      "status": "superseded",
+      "superseded_by_id": "new-uuid"
+    },
+    "replacement": {
+      "id": "new-uuid",
+      "status": "active",
+      "replaces_memory_id": "old-uuid"
+    }
   }
 }
 ```
 
-There is no memory update endpoint yet. The read-only review page does not call this delete endpoint.
+Missing memory returns HTTP `404`. An inactive or unchanged target returns HTTP `409`.
+
+The replacement preserves the selected memory's project and memory type. The endpoint does not call the external model provider.
+
+### `DELETE /memories/{memory_id}`
+
+Legacy administrative hard delete for one standalone memory. It is not exposed in the browser.
+
+A row that participates in correction history cannot be permanently deleted and returns HTTP `409`. User-facing recoverable forgetting remains planned for a later archive branch.
+
+Missing records return HTTP `404`.
 
 ## Conversations
 
@@ -473,7 +545,7 @@ Not implemented:
 - Duplicate detection
 - Conflict resolution
 - Keyword or semantic search
-- Memory correction, archive, and restore UI
+- Memory archive and restore UI
 
 ## FastAPI-generated documentation
 

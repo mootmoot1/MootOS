@@ -1,6 +1,6 @@
 # MootOS Data and Persistence
 
-**Applies to:** MootOS Version 0.1 foundation hardening
+**Applies to:** MootOS Version 0.1 foundation hardening and memory lifecycle migration 2
 
 This document explains where MootOS stores data, how SQLite is configured, how schema migrations work, what the Railway volume protects, what is still not backed up, and when the database design should change.
 
@@ -116,10 +116,11 @@ Applied migrations are stored in:
 schema_migrations
 ```
 
-Current migration:
+Current migrations on this branch:
 
 ```text
 1 — initial_schema
+2 — memory_lifecycle
 ```
 
 The migration runner:
@@ -161,7 +162,35 @@ Automated tests verify adoption of an existing database while preserving a saved
 
 Production must still be manually verified after merge.
 
-## 8. Newer-schema protection
+## 8. Memory lifecycle migration 2
+
+Migration 2 alters the existing `memories` table in place. It adds:
+
+```text
+status
+updated_at
+replaces_memory_id
+superseded_by_id
+```
+
+Existing rows are preserved and backfilled as active:
+
+```text
+status = active
+updated_at = created_at
+replaces_memory_id = null
+superseded_by_id = null
+```
+
+Two indexes support active-memory listing and correction-chain traversal.
+
+Correction uses `BEGIN IMMEDIATE` so the selected row is rechecked under a serialized write transaction. The new active row and the old superseded row commit together or roll back together.
+
+Migration 2 is covered by clean-install, schema-1 upgrade, data-preservation, rollback, history, and active-context tests. It is not production-verified until the branch is reviewed, merged, and deployed.
+
+The pre-migration snapshot and isolated restore drill were completed before implementation. See [`BACKUP_RESTORE_VERIFICATION_2026-08-01.md`](BACKUP_RESTORE_VERIFICATION_2026-08-01.md).
+
+## 9. Newer-schema protection
 
 An older MootOS build refuses to start against a database with a newer unknown migration version.
 
@@ -169,7 +198,7 @@ This prevents an accidental code rollback from silently using a schema it does n
 
 The correct response is to deploy a compatible application version or follow a documented data rollback. Do not edit `schema_migrations` merely to force startup.
 
-## 9. Verified production persistence
+## 10. Verified production persistence
 
 On July 31, 2026:
 
@@ -179,7 +208,7 @@ On July 31, 2026:
 
 That verifies persistence across normal rebuilds. It does not prove backup recovery or protection from volume deletion, corruption, or account loss.
 
-## 10. One-replica rule
+## 11. One-replica rule
 
 Keep Railway at **one replica** while SQLite remains the live database.
 
@@ -187,7 +216,7 @@ WAL improves concurrency between connections using the same local database file.
 
 A move to multiple replicas requires a planned database architecture decision, likely including PostgreSQL.
 
-## 11. Redundancy versus dual writing
+## 12. Redundancy versus dual writing
 
 MootOS should not write every record to SQLite and an unrelated second live database merely for redundancy.
 
@@ -211,9 +240,9 @@ Verified backup copies
 Documented restore testing
 ```
 
-## 12. Current backup status
+## 13. Current backup status
 
-The Railway volume protects against normal redeployments.
+The Railway volume protects against normal redeployments. One manual WAL-safe snapshot was downloaded off-volume, matched by SHA-256, and opened through an isolated application restore drill on August 1, 2026.
 
 MootOS still does not implement:
 
@@ -226,7 +255,7 @@ MootOS still does not implement:
 
 The volume is persistent storage, not a complete disaster-recovery system.
 
-## 13. Safe backup direction
+## 14. Safe backup direction
 
 A future backup feature should:
 
@@ -238,9 +267,9 @@ A future backup feature should:
 6. Test restore away from production.
 7. Require explicit approval before replacing live data.
 
-A backup that has never been restored is not fully verified.
+The August 1 manual backup was restored and read successfully in isolation. Future backups still require the same verification discipline.
 
-## 14. Manual persistence verification
+## 15. Manual persistence verification
 
 After database, migration, or deployment changes:
 
@@ -256,7 +285,7 @@ After database, migration, or deployment changes:
 
 Do not detach or replace the existing volume because a new deployment merely appears healthy.
 
-## 15. Migration development rules
+## 16. Migration development rules
 
 Every future schema change must:
 
@@ -271,7 +300,7 @@ Every future schema change must:
 
 Do not silently edit an already-applied migration. Add a new migration instead.
 
-## 16. When to keep SQLite
+## 17. When to keep SQLite
 
 Keep SQLite while most of these remain true:
 
@@ -283,7 +312,7 @@ Keep SQLite while most of these remain true:
 - Local-first portability matters
 - Simplicity matters more than horizontal scaling
 
-## 17. When to consider PostgreSQL
+## 18. When to consider PostgreSQL
 
 Consider PostgreSQL when real requirements include:
 
@@ -298,7 +327,7 @@ Consider PostgreSQL when real requirements include:
 
 The central database layer and migration history make a future planned migration easier, but they do not perform that migration automatically.
 
-## 18. DynamoDB and MongoDB
+## 19. DynamoDB and MongoDB
 
 DynamoDB and MongoDB are valid databases, but larger-scale or newer branding does not automatically make them a better fit.
 
@@ -314,7 +343,7 @@ Useful for document-shaped data that varies heavily. MootOS currently has clear 
 
 The most likely future hosted upgrade because it preserves relational modeling, constraints, transactions, and SQL while supporting multiple users and replicas.
 
-## 19. Source of truth
+## 20. Source of truth
 
 The live SQLite database on the Railway volume is the production source of truth.
 
@@ -322,7 +351,7 @@ GitHub stores code and documentation, not production conversations or memories.
 
 OpenAI generates responses but is not MootOS's history database. Provider-side response storage is disabled, and MootOS stores its own history.
 
-## 20. Rules before storage changes
+## 21. Rules before storage changes
 
 Before changing storage:
 
@@ -337,4 +366,4 @@ Before changing storage:
 - Keep one replica while SQLite is live
 - Receive Moot's explicit approval
 
-See [`FOUNDATION_HARDENING.md`](FOUNDATION_HARDENING.md) and [`ADR-015-foundation-hardening.md`](ADR-015-foundation-hardening.md).
+See [`FOUNDATION_HARDENING.md`](FOUNDATION_HARDENING.md), [`ADR-015-foundation-hardening.md`](ADR-015-foundation-hardening.md), and [`ADR-016-memory-lifecycle-and-correction.md`](ADR-016-memory-lifecycle-and-correction.md).

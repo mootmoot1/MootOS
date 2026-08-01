@@ -116,17 +116,42 @@ def _insert_memory(
     content: str,
     project: Optional[str],
 ) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
     memory = {
         "id": str(uuid.uuid4()),
         "content": content,
         "project": project,
         "memory_type": "explicit_chat",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now,
+        "status": "active",
+        "updated_at": now,
+        "replaces_memory_id": None,
+        "superseded_by_id": None,
     }
     connection.execute(
         """
-        INSERT INTO memories (id, content, project, memory_type, created_at)
-        VALUES (:id, :content, :project, :memory_type, :created_at)
+        INSERT INTO memories (
+            id,
+            content,
+            project,
+            memory_type,
+            created_at,
+            status,
+            updated_at,
+            replaces_memory_id,
+            superseded_by_id
+        )
+        VALUES (
+            :id,
+            :content,
+            :project,
+            :memory_type,
+            :created_at,
+            :status,
+            :updated_at,
+            :replaces_memory_id,
+            :superseded_by_id
+        )
         """,
         memory,
     )

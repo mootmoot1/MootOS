@@ -23,7 +23,17 @@ DEFAULT_PROJECTS = (
 
 REQUIRED_COLUMNS = {
     "projects": {"id", "name", "description", "created_at"},
-    "memories": {"id", "content", "project", "memory_type", "created_at"},
+    "memories": {
+        "id",
+        "content",
+        "project",
+        "memory_type",
+        "created_at",
+        "status",
+        "updated_at",
+        "replaces_memory_id",
+        "superseded_by_id",
+    },
     "conversations": {"id", "title", "project", "created_at", "updated_at"},
     "messages": {
         "id",
@@ -115,8 +125,59 @@ def _migration_001_initial_schema(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migration_002_memory_lifecycle(connection: sqlite3.Connection) -> None:
+    """Add correction and archival lifecycle fields without replacing rows."""
+    existing_columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(memories)").fetchall()
+    }
+
+    if "status" not in existing_columns:
+        connection.execute(
+            """
+            ALTER TABLE memories
+            ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
+            CHECK (status IN ('active', 'superseded', 'archived'))
+            """
+        )
+    if "updated_at" not in existing_columns:
+        connection.execute("ALTER TABLE memories ADD COLUMN updated_at TEXT")
+    if "replaces_memory_id" not in existing_columns:
+        connection.execute("ALTER TABLE memories ADD COLUMN replaces_memory_id TEXT")
+    if "superseded_by_id" not in existing_columns:
+        connection.execute("ALTER TABLE memories ADD COLUMN superseded_by_id TEXT")
+
+    connection.execute(
+        """
+        UPDATE memories
+        SET status = 'active'
+        WHERE status IS NULL OR status = ''
+        """
+    )
+    connection.execute(
+        """
+        UPDATE memories
+        SET updated_at = created_at
+        WHERE updated_at IS NULL OR updated_at = ''
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_memories_status_created_at
+        ON memories (status, created_at DESC)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_memories_superseded_by_id
+        ON memories (superseded_by_id)
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "initial_schema", _migration_001_initial_schema),
+    Migration(2, "memory_lifecycle", _migration_002_memory_lifecycle),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -164,6 +225,20 @@ def _verify_schema(connection: sqlite3.Connection) -> None:
         raise RuntimeError(
             "Database schema is incompatible: messages.conversation_id "
             "must reference conversations.id"
+        )
+
+    invalid_memory_status = connection.execute(
+        """
+        SELECT status
+        FROM memories
+        WHERE status NOT IN ('active', 'superseded', 'archived')
+        LIMIT 1
+        """
+    ).fetchone()
+    if invalid_memory_status is not None:
+        raise RuntimeError(
+            "Database schema is incompatible: memories.status contains "
+            f"unsupported value {invalid_memory_status['status']!r}"
         )
 
 

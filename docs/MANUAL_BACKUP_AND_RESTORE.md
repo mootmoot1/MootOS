@@ -186,12 +186,40 @@ A real production restore is a high-risk operation. Use this only after diagnosi
 
 Do not restore an older database merely to fix a code bug. Prefer a code rollback when the current data is valid and the deployed code is the problem.
 
-## Current verification status
+## Completed verification record — August 1, 2026
 
-- PR #12 memory persistence through a Railway rebuild is production-verified.
-- This manual procedure is documented.
-- A consistent off-volume backup has not yet been recorded in the repository documentation.
-- A non-production restore drill has not yet been recorded.
-- Automated encrypted backups, retention, and point-in-time recovery are not implemented.
+Stages 1–3 were completed before work began on migration 2.
 
-Before migration 2 changes the memory lifecycle schema, record completion of Stages 1–3 without committing private backup data.
+Production snapshot record:
+
+- Deployed application commit: `78806da6c9d4ba33f956b65b17c3dbb549031f83`
+- Snapshot UTC timestamp: `2026-08-01T02:24:51Z`
+- Backup filename: `mootos-20260801T022451Z.db`
+- SHA-256: `b055b4315acbec122fba3093c714839b3e734b8a95a074e5676f370fe40b8e34`
+- SQLite integrity result: `ok`
+- Schema: `1 — initial_schema`
+- Projects: `5`
+- Conversations: `15`
+- Messages: `58`
+- Memories: `2`
+
+Off-volume verification:
+
+- The snapshot was downloaded from the Railway volume to a private Mac.
+- SHA-256 was recalculated after download and matched the production digest exactly.
+- The database file and its contents were not committed to GitHub.
+
+Non-production restore drill:
+
+- A separate working copy was created; the original downloaded backup remained untouched.
+- The working copy passed `PRAGMA integrity_check` with `ok`.
+- MootOS was started in an isolated environment with `MOOTOS_DATABASE_PATH` pointing to the working copy.
+- The application returned health HTTP `200`.
+- The protected memory interface loaded.
+- All five projects and all fifteen conversations were readable.
+- A known conversation opened with its stored messages.
+- Both known memories were readable.
+- The isolated environment lacked the OpenAI package, so an import-only stand-in was used. No model request was made, and the stand-in did not participate in database, API, conversation, or memory verification.
+- The original backup's SHA-256 remained unchanged after the drill.
+
+The manual pre-migration safety gate is complete. The concise non-private evidence record is in [`BACKUP_RESTORE_VERIFICATION_2026-08-01.md`](BACKUP_RESTORE_VERIFICATION_2026-08-01.md). Automated encrypted backups, retention, scheduled verification, and point-in-time recovery are still not implemented.
