@@ -21,6 +21,11 @@ def test_private_deployment_redirects_browser_and_blocks_api(private_client):
     chat_browser = private_client.get("/chat", follow_redirects=False)
     memory_browser = private_client.get("/memory", follow_redirects=False)
     api = private_client.get("/projects")
+    correction = private_client.post(
+        "/memories/missing/corrections",
+        json={"content": "Replacement"},
+    )
+    history = private_client.get("/memories/missing/history")
     health = private_client.get("/health")
 
     assert chat_browser.status_code == 303
@@ -29,6 +34,10 @@ def test_private_deployment_redirects_browser_and_blocks_api(private_client):
     assert memory_browser.headers["location"] == "/login?next=/memory"
     assert api.status_code == 401
     assert api.json()["detail"] == "Authentication required"
+    assert correction.status_code == 401
+    assert correction.json()["detail"] == "Authentication required"
+    assert history.status_code == 401
+    assert history.json()["detail"] == "Authentication required"
     assert health.status_code == 200
 
 
@@ -55,6 +64,11 @@ def test_correct_password_unlocks_interface_and_api(private_client):
     assert private_client.get("/memory").status_code == 200
     assert private_client.get("/projects").status_code == 200
     assert private_client.get("/memories").status_code == 200
+    assert private_client.post(
+        "/memories/missing/corrections",
+        json={"content": "Replacement"},
+    ).status_code == 404
+    assert private_client.get("/memories/missing/history").status_code == 404
 
 
 def test_logout_clears_private_session(private_client):
