@@ -20,7 +20,7 @@
         <p class="eyebrow">MootOS v0.1</p>
         <h1>Long-term memories</h1>
         <p class="memory-intro">
-          Review, correct, and safely forget memories. Forgotten memories stay recoverable.
+          Search, review, correct, and safely forget memories. Forgotten memories stay recoverable.
         </p>
       </div>
 
@@ -32,7 +32,27 @@
       </div>
     </header>
 
-    <section class="memory-toolbar" aria-label="Memory filters">
+    <section class="memory-toolbar" aria-label="Memory search and filters">
+      <form class="memory-search-form" id="memorySearchForm" role="search">
+        <label class="memory-field-label" for="memorySearchInput">Keyword search</label>
+        <div class="memory-search-controls">
+          <input
+            id="memorySearchInput"
+            class="memory-search-input"
+            type="search"
+            maxlength="500"
+            placeholder="Search content, project, or source"
+            autocomplete="off"
+          >
+          <button class="primary-button" id="searchMemoriesButton" type="submit">
+            Search
+          </button>
+          <button class="secondary-button" id="clearMemorySearchButton" type="button">
+            Clear
+          </button>
+        </div>
+      </form>
+
       <div class="memory-filter-row">
         <div class="memory-filter-group">
           <label class="memory-field-label" for="memoryStatusFilter">View</label>
@@ -74,9 +94,9 @@
     </main>
 
     <section class="memory-readonly-note" aria-label="Memory safety notice">
-      <strong>Forget is recoverable.</strong>
+      <strong>Search stays understandable.</strong>
       <span>
-        Forget moves a selected active memory to Archived, where it can be restored. Correction history remains preserved, and the browser never permanently deletes memories.
+        Search uses literal keywords across normal active or archived listings. Forget remains recoverable, correction history stays preserved, and the browser never permanently deletes memories.
       </span>
     </section>
   </div>
