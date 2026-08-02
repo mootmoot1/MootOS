@@ -116,7 +116,7 @@ class MemorySearchRequest(BaseModel):
 
     query: str = Field(min_length=1, max_length=MAX_MEMORY_SEARCH_LENGTH)
     project: Optional[str] = None
-    memory_status: str = Field(default="active", alias="status")
+    status: str = "active"
 
 
 class ProjectCreate(BaseModel):
@@ -322,7 +322,7 @@ def search_memory_list(search: MemorySearchRequest) -> dict[str, Any]:
     query = search.query.strip()
     if not query:
         raise HTTPException(status_code=422, detail="Search query cannot be empty")
-    if search.memory_status not in {"active", "archived"}:
+    if search.status not in {"active", "archived"}:
         raise HTTPException(
             status_code=422,
             detail="Memory status must be active or archived",
@@ -331,7 +331,7 @@ def search_memory_list(search: MemorySearchRequest) -> dict[str, Any]:
         memories = search_memories(
             query=query,
             project=search.project,
-            memory_status=search.memory_status,
+            memory_status=search.status,
         )
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
