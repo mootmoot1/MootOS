@@ -207,6 +207,53 @@ def test_existing_chat_assistant_storage_failure_keeps_old_history_only(
     assert _table_count("messages") == 0
 
 
+def test_chat_preparation_storage_failure_is_sanitized_and_writes_nothing(
+    clean_db,
+    monkeypatch,
+):
+    def fail_database_connection(*args, **kwargs):
+        raise RuntimeError("raw database path and preparation details")
+
+    monkeypatch.setattr("backend.main.get_model_router", lambda: SuccessfulRouter())
+    monkeypatch.setattr(
+        "backend.chat_pipeline.database_connection",
+        fail_database_connection,
+    )
+    client = TestClient(app)
+
+    response = client.post("/chat", json={"message": "Preparation must fail cleanly"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "MootOS could not save the conversation turn. Please retry."
+    )
+    assert "raw database" not in response.text
+    assert _table_count("conversations") == 0
+    assert _table_count("messages") == 0
+
+
+def test_chat_connection_failure_after_provider_is_sanitized_and_writes_nothing(
+    clean_db,
+    monkeypatch,
+):
+    def fail_connect(*args, **kwargs):
+        raise RuntimeError("raw database connection details")
+
+    monkeypatch.setattr("backend.main.get_model_router", lambda: SuccessfulRouter())
+    monkeypatch.setattr("backend.chat_pipeline.connect", fail_connect)
+    client = TestClient(app)
+
+    response = client.post("/chat", json={"message": "Commit must fail cleanly"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "MootOS could not save the conversation turn. Please retry."
+    )
+    assert "raw database" not in response.text
+    assert _table_count("conversations") == 0
+    assert _table_count("messages") == 0
+
+
 def test_openai_provider_uses_bounded_timeout_and_zero_automatic_retries(
     monkeypatch,
 ):
@@ -234,12 +281,26 @@ def test_openai_provider_uses_bounded_timeout_and_zero_automatic_retries(
     assert captured["max_retries"] == PROVIDER_MAX_RETRIES == 0
 
 
-def test_frontend_removes_failed_bubbles_and_restores_composer_text():
+def test_frontend_distinguishes_failed_send_from_saved_turn_refresh_error():
     source = Path("frontend/app.js").read_text(encoding="utf-8")
-
-    assert 'const userRow = addMessage("user", cleanMessage);' in source
-    assert "typingRow.remove();\n    userRow.remove();" in source
-    assert "elements.messageInput.value = cleanMessage;" in source
-    assert "localStorage.setItem" not in source.split("} catch (error) {")[1].split(
-        "} finally"
+    send_source = source.split("async function sendMessage(message) {", 1)[1].split(
+        "async function checkHealth()",
+        1,
     )[0]
+
+    request_failure = send_source.split("  } catch (error) {", 1)[1].split(
+        "  }\n\n  try {",
+        1,
+    )[0]
+    assert "typingRow.remove();\n    userRow.remove();" in request_failure
+    assert "elements.messageInput.value = cleanMessage;" in request_failure
+    assert "localStorage.setItem" not in request_failure
+    assert "return;" in request_failure
+
+    refresh_failure = send_source.rsplit("    } catch (error) {", 1)[1].split(
+        "    }\n  } finally",
+        1,
+    )[0]
+    assert "Message was saved" in refresh_failure
+    assert "userRow.remove();" not in refresh_failure
+    assert "elements.messageInput.value = cleanMessage;" not in refresh_failure
