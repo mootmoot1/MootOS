@@ -74,10 +74,12 @@ message text, memory text, project names, IDs, search terms, or provider payload
 - Capability honesty is based on the running application, not provider personality.
 - The design remains provider-independent and works for future local models.
 - Internal budget failures remain behind a fixed public error response.
+- Capability instructions are fixed and testable instead of being left to provider personality alone.
 
 ### Limitations
 
 - Character counts are only an approximate proxy for provider tokens.
+- The capability manifest is a fixed provider instruction, not a deterministic output validator. Representative tests and production checks can reduce false claims but cannot guarantee every future model response. A future response-policy layer could add stronger enforcement if needed.
 - The application still retrieves at most 20 active memories before budgeting.
 - A selected history window can begin with an assistant message when the oldest
   user message falls outside the budget.
