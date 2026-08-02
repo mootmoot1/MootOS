@@ -8,6 +8,7 @@ from backend.model_input import (
     CAPABILITY_MANIFEST,
     MEMORY_CONTEXT_FOOTER,
     MEMORY_CONTEXT_HEADER,
+    MODEL_INPUT_TOTAL_CHARACTER_BUDGET,
     ModelInputBudgetError,
     prepare_model_input,
 )
@@ -162,7 +163,10 @@ def test_fixed_identity_capabilities_and_conversation_rules_are_never_truncated(
     assert "Fixed identity marker" in prepared.instructions
     assert "Current MootOS capability manifest" in prepared.instructions
     assert "Conversation handling rules" in prepared.instructions
-    assert prepared.diagnostics.total_characters <= 120_000
+    assert (
+        prepared.diagnostics.total_characters
+        <= MODEL_INPUT_TOTAL_CHARACTER_BUDGET
+    )
 
 
 def test_privacy_safe_budget_log_contains_counts_not_message_or_memory_content(
