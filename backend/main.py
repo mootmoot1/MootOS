@@ -45,12 +45,11 @@ from backend.memory import (
     get_memory as load_memory,
     get_memory_history as load_memory_history,
     init_db,
-    list_context_memories as load_context_memories,
-    list_memories as load_memories,
     list_projects as load_projects,
     restore_memory as restore_saved_memory,
 )
 from backend.memory_commands import parse_memory_save_command
+from backend.memory_retrieval import retrieve_context_memories, search_memories
 from backend.model_router import (
     ModelConfigurationError,
     ModelProviderError,
@@ -68,6 +67,7 @@ PUBLIC_PATHS = {
 }
 HTML_PATHS = {"/", "/chat", "/memory", "/docs", "/redoc"}
 MAX_MEMORY_CONTENT_LENGTH = 10_000
+MAX_MEMORY_SEARCH_LENGTH = 500
 
 validate_auth_configuration()
 
@@ -156,15 +156,14 @@ async def require_private_session(request: Request, call_next):
     )
 
 
-def _build_model_instructions(project: Optional[str]) -> str:
-    """Build the identity and memory context supplied to the model provider."""
-    memories = load_context_memories(project=project)
-    recent_memories = memories[:20]
-    if not recent_memories:
+def _build_model_instructions(project: Optional[str], query: str) -> str:
+    """Build identity plus keyword-ranked active memory context."""
+    memories = retrieve_context_memories(project=project, query=query, limit=20)
+    if not memories:
         return BASE_INSTRUCTIONS
 
     memory_lines = []
-    for memory in recent_memories:
+    for memory in memories:
         memory_type = memory["memory_type"] or "memory"
         memory_project = memory["project"] or "Global"
         memory_lines.append(
@@ -291,15 +290,20 @@ def create_memory(memory: MemoryCreate) -> dict[str, Any]:
 def list_memories(
     project: Optional[str] = None,
     memory_status: str = Query(default="active", alias="status"),
+    query: Optional[str] = Query(default=None, alias="q", max_length=MAX_MEMORY_SEARCH_LENGTH),
 ) -> dict[str, Any]:
-    """List active or archived memories, optionally filtered by project."""
+    """List or keyword-search active or archived memories."""
     if memory_status not in {"active", "archived"}:
         raise HTTPException(
             status_code=422,
             detail="Memory status must be active or archived",
         )
     try:
-        memories = load_memories(project=project, memory_status=memory_status)
+        memories = search_memories(
+            query=query,
+            project=project,
+            memory_status=memory_status,
+        )
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return {"success": True, "data": memories}
@@ -504,7 +508,10 @@ def chat(request: ChatRequest) -> dict[str, Any]:
     try:
         model_response = router.generate(
             messages=model_messages,
-            instructions=_build_model_instructions(conversation["project"]),
+            instructions=_build_model_instructions(
+                conversation["project"],
+                request.message,
+            ),
         )
     except ModelConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
