@@ -8,7 +8,7 @@
 Normal provider-backed chat previously stored the user message before calling the
 model provider. If the provider timed out or failed, the database could retain an
 unmatched user message. The browser also kept its optimistic user bubble, so a
-manual retry could create a duplicate after an ambiguous failure.
+manual retry could create a duplicate after a confirmed provider failure.
 
 The current MootOS deployment is one FastAPI process, one Railway replica, and one
 SQLite database. Explicit long-term-memory commands already use their own atomic
@@ -26,8 +26,8 @@ Provider-backed chat will use a three-stage pipeline:
    `BEGIN IMMEDIATE` and atomically commit the optional new conversation, user
    message, assistant message, and conversation timestamp.
 
-If the provider fails, no conversation or message is committed. If storage fails,
-the entire message pair rolls back.
+If preparation or the provider fails, no conversation or message is committed. If
+the final storage transaction fails, the entire message pair rolls back.
 
 Existing conversations are serialized with an in-process per-conversation lock
 across history loading, provider generation, and the final commit. This is correct
@@ -40,8 +40,10 @@ Public errors are fixed MootOS messages; raw provider and storage exception text
 kept only in exception chains.
 
 The browser may render a temporary user bubble and typing indicator while waiting.
-On failure it removes both, restores the exact composer text, keeps the current
-conversation identity unchanged, and never auto-resends.
+On a failed `/chat` response it removes both, restores the exact composer text, keeps
+the current conversation identity unchanged, and never auto-resends. After a
+successful `/chat` response, a secondary sidebar-refresh failure does not undo the
+visible committed turn or restore the composer text.
 
 ## Consequences
 
@@ -52,17 +54,23 @@ Positive:
 - Successful turns store both sides together.
 - Storage failure cannot leave a half turn.
 - Provider latency does not hold a SQLite write transaction.
-- Browser retries are explicit and do not start from a misleading optimistic state.
+- Confirmed failed sends do not leave a misleading optimistic state.
+- A failed post-success sidebar refresh cannot invite a duplicate resend.
 - Raw upstream errors are not exposed to the user.
 
 Tradeoffs:
 
 - A provider may complete successfully just before the process crashes, causing a
   paid response to be lost before commit. This is preferable to storing an orphan.
+- A network-level response loss remains ambiguous: the server may have committed the
+  turn even though the browser did not receive the response. Automatic replay is
+  therefore prohibited; the user should refresh before retrying.
 - Concurrent turns for one conversation are serialized in one process.
 - Multi-replica deployment would require a distributed coordination design.
 - Zero automatic retries favors predictable writes over transparent recovery from
   transient transport failures.
+- The in-process lock registry lasts for the life of the process; this is acceptable
+  for the current single-user Version 0.1 service but is not a general queue design.
 
 ## Explicit memory commands
 
@@ -84,8 +92,8 @@ lock on the production database.
 
 ### Automatically resend after a browser or provider error
 
-Rejected because the provider may have processed a request even when the client did
-not receive a response. Automatic replay can duplicate cost or behavior.
+Rejected because the provider or server may have completed a request even when the
+client did not receive a response. Automatic replay can duplicate cost or behavior.
 
 ### Add Redis or a durable job queue
 
@@ -98,10 +106,15 @@ Automated tests must prove:
 
 - New-chat provider failure writes no conversation or messages.
 - Existing-chat provider failure leaves history unchanged.
+- Preparation and connection failures return sanitized storage errors and write
+  nothing.
 - The provider receives the current user message before that message is persisted.
 - A successful turn commits one user and one assistant message.
 - Assistant-message storage failure rolls back the complete pair.
 - Public provider and storage errors contain no raw exception text.
 - The provider client has a bounded timeout and zero automatic retries.
-- The browser removes optimistic bubbles and restores composer text on failure.
+- The browser removes optimistic bubbles and restores composer text on a failed
+  `/chat` request.
+- A post-success history-refresh failure preserves the committed turn and does not
+  restore composer text.
 - Explicit memory-command behavior remains covered by the existing atomic tests.
