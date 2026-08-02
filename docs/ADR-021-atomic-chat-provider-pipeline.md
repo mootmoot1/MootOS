@@ -34,7 +34,7 @@ across history loading, provider generation, and the final commit. This is corre
 for the current one-process, one-replica deployment. It is not a multi-replica
 coordination mechanism.
 
-Provider requests use a 45-second total client timeout and zero automatic SDK
+Provider requests use a 45-second client request timeout and zero automatic SDK
 retries. MootOS does not retry empty output or provider failures automatically.
 Public errors are fixed MootOS messages; raw provider and storage exception text is
 kept only in exception chains.
