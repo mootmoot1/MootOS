@@ -19,6 +19,8 @@ That rule is predictable, but it can miss an older relevant memory and treats pr
 
 The first retrieval improvement must remain inspectable and easy to debug. Embeddings, vector databases, FTS migrations, background indexing, and model-based relevance scoring would add complexity before simple keyword retrieval has been tested in real use.
 
+Memory search terms may themselves be private. Putting them in a URL query string could expose them in browser history, proxy logs, or ordinary access logs, so browser search should submit them in a protected request body.
+
 ## Decision
 
 MootOS adds a pure-Python keyword retrieval layer in `backend/memory_retrieval.py`.
@@ -33,7 +35,9 @@ The retrieval layer:
 2. Extracts letters and numbers.
 3. Removes a small documented set of common English stop words.
 4. Applies intentionally limited plural normalization, including `cars` → `car`, `codes` → `code`, and `memories` → `memory`.
-5. Keeps at most 40 unique query keywords.
+5. Keeps at most 40 unique query keywords after duplicate removal.
+
+Stored memory content is scanned completely; the 40-keyword limit applies only to the user's query.
 
 It does not claim synonym, intent, entity, or semantic understanding.
 
@@ -57,7 +61,7 @@ For a project conversation, keyword matches are ordered by focus:
 
 After keyword matches, remaining context slots may be filled only with recent matching-project and global active memories. Unrelated other-project memories are not used as fallback.
 
-For a no-project conversation, keyword matches may come from every project. Remaining context slots may be filled from all active memories.
+For a no-project conversation, scope does not receive a ranking bonus. Match strength and recency decide among active memories from all projects. Remaining context slots may be filled from all active memories.
 
 This makes projects focus lenses rather than permanent walls while preserving predictable fallback behavior.
 
@@ -75,13 +79,32 @@ At most 20 active memories are supplied to a model request. Keyword matches come
 
 ### Memory-page search
 
-`GET /memories` accepts an optional `q` query parameter with a maximum length of 500 characters.
+The protected browser submits read-only searches to:
 
-Search operates only inside the requested normal listing:
+```text
+POST /memories/search
+```
 
-- `status=active` or `status=archived`
-- Optional exact project filter
-- No superseded rows
+Request body:
+
+```json
+{
+  "query": "keyword phrase",
+  "status": "active",
+  "project": "Cars"
+}
+```
+
+Rules:
+
+- `query` is required, trimmed, and limited to 500 characters.
+- `status` must be `active` or `archived`.
+- `project` is optional and must be one exact existing project when supplied.
+- Superseded rows are never returned.
+- The endpoint performs no database mutation.
+- Search terms stay out of the request URL and ordinary URL logs.
+
+`GET /memories` remains the unsearched active-or-archived listing endpoint.
 
 The protected Memory page adds an explicit Search form and Clear control. Search text, stored content, and project values continue to render through `textContent`.
 
@@ -91,7 +114,7 @@ The browser adds no memory `DELETE`, `PATCH`, or `PUT` request.
 
 The algorithm is small enough to inspect in one file, deterministic enough to test exactly, and useful enough to improve older-memory recall and cross-project relevance.
 
-It also gives Moot a visible search tool using the same basic keyword rules as conversational retrieval.
+It also gives Moot a visible search tool using the same basic keyword rules as conversational retrieval while keeping private search text out of URL-based logs.
 
 No database migration means deployment and rollback risk are lower than a first FTS or vector-search implementation.
 
@@ -101,9 +124,10 @@ No database migration means deployment and rollback risk are lower than a first 
 
 - Relevant older memories can outrank newer unrelated memories.
 - Project chats can use clearly relevant cross-project memory.
-- Archived and superseded rows remain excluded.
+- Archived and superseded rows remain excluded from normal recall.
 - The ranking order is deterministic and testable.
 - Search works across active or archived normal listings.
+- Private search terms are sent in a protected request body rather than the URL.
 - No provider call or additional model credit is required for retrieval.
 - No new database or background service is introduced.
 
@@ -114,6 +138,7 @@ No database migration means deployment and rollback risk are lower than a first 
 - The application reads the eligible memory listing and ranks it in Python, which is appropriate for the current personal dataset but not an unbounded multi-user scale design.
 - Stop-word and plural rules are English-oriented and deliberately limited.
 - Keyword overlap can still produce imperfect relevance.
+- The search route uses POST for a read-only operation specifically to protect search terms from URL logging; it does not mutate state.
 
 ## Alternatives considered
 
@@ -124,6 +149,10 @@ Rejected because an older relevant fact can be pushed out by newer unrelated mem
 ### Strictly isolate projects
 
 Rejected because Moot defined projects as focus lenses, not secrecy walls. Explicitly saved long-term memory should remain available when relevant.
+
+### Use `GET /memories?q=...` for search
+
+Rejected because private memory search terms could appear in browser history and infrastructure access logs.
 
 ### Add SQLite FTS5 immediately
 
@@ -142,14 +171,20 @@ Rejected because it would spend model credits, make retrieval less deterministic
 Automated coverage must prove:
 
 - Case, punctuation, repeated terms, and simple plurals normalize predictably.
+- Repeated query terms do not hide later unique keywords.
+- Complete stored memory content is searched, including terms after the first 40 words.
 - A relevant older memory outranks a newer unrelated memory.
+- No-project ranking uses match strength rather than preferring global scope.
 - Project matches rank before global matches, which rank before relevant other-project matches.
 - Unrelated other-project memories are not used as project fallback.
 - Stop-word-only requests preserve the safe existing fallback behavior.
 - Archived and superseded rows never enter context.
 - Restoration makes the active row eligible again.
 - Active and archived browser searches remain separated.
-- Oversized search queries are rejected.
+- Exact project search is respected.
+- Blank, oversized, and unsupported-status searches are rejected.
+- The search endpoint requires authentication.
+- Search terms are sent in the request body, not as a URL query parameter.
 - Model instructions receive the current user request as the retrieval query.
 - Search rendering remains XSS-safe and introduces no permanent-delete browser request.
 
