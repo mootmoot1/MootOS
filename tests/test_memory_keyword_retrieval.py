@@ -146,13 +146,13 @@ def test_memory_search_api_filters_active_and_archived_keyword_matches(clean_db,
     archive_memory(archived["id"])
     create_memory("The studio microphone is repaired.", project="Studio")
 
-    active_response = client.get(
-        "/memories",
-        params={"status": "active", "q": "jasmine"},
+    active_response = client.post(
+        "/memories/search",
+        json={"status": "active", "query": "jasmine"},
     )
-    archived_response = client.get(
-        "/memories",
-        params={"status": "archived", "q": "jasmine"},
+    archived_response = client.post(
+        "/memories/search",
+        json={"status": "archived", "query": "jasmine"},
     )
 
     assert active_response.status_code == 200
@@ -165,10 +165,48 @@ def test_memory_search_api_filters_active_and_archived_keyword_matches(clean_db,
     ]
 
 
-def test_memory_search_rejects_oversized_query(clean_db, client):
-    response = client.get("/memories", params={"q": "x" * 501})
+def test_memory_search_api_respects_exact_project_filter(clean_db, client):
+    cars = create_memory("The black Benz needs service.", project="Cars")
+    create_memory("The studio service door is locked.", project="Studio")
 
-    assert response.status_code == 422
+    response = client.post(
+        "/memories/search",
+        json={"query": "service", "project": "Cars", "status": "active"},
+    )
+
+    assert response.status_code == 200
+    assert [memory["id"] for memory in response.json()["data"]] == [cars["id"]]
+
+
+def test_memory_search_rejects_empty_oversized_and_unknown_status(clean_db, client):
+    assert client.post(
+        "/memories/search",
+        json={"query": "   ", "status": "active"},
+    ).status_code == 422
+    assert client.post(
+        "/memories/search",
+        json={"query": "x" * 501, "status": "active"},
+    ).status_code == 422
+    assert client.post(
+        "/memories/search",
+        json={"query": "test", "status": "superseded"},
+    ).status_code == 422
+
+
+def test_memory_search_endpoint_requires_authentication(monkeypatch):
+    monkeypatch.setenv("MOOTOS_PASSWORD", "correct-horse")
+    monkeypatch.setenv("MOOTOS_SESSION_SECRET", "test-secret-that-is-long-enough")
+    monkeypatch.delenv("MOOTOS_ALLOW_PUBLIC", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN", raising=False)
+    private_client = TestClient(app)
+
+    response = private_client.post(
+        "/memories/search",
+        json={"query": "private phrase", "status": "active"},
+    )
+
+    assert response.status_code == 401
 
 
 def test_model_instructions_include_relevant_cross_project_memory_only(clean_db):
@@ -184,7 +222,7 @@ def test_model_instructions_include_relevant_cross_project_memory_only(clean_db)
     assert unrelated["content"] not in instructions
 
 
-def test_memory_search_interface_uses_keyword_query_without_new_mutation_methods(client):
+def test_memory_search_interface_uses_private_body_without_new_destructive_methods(client):
     page = client.get("/memory")
     script = client.get("/static/memory.js")
 
@@ -192,7 +230,9 @@ def test_memory_search_interface_uses_keyword_query_without_new_mutation_methods
     assert 'id="memorySearchForm"' in page.text
     assert 'id="memorySearchInput"' in page.text
     assert 'maxlength="500"' in page.text
-    assert 'params.set("q", searchQuery)' in script.text
+    assert 'apiRequest("/memories/search"' in script.text
+    assert "query: searchQuery" in script.text
+    assert "params.set(\"q\"" not in script.text
     assert 'method: "DELETE"' not in script.text
     assert 'method: "PATCH"' not in script.text
     assert 'method: "PUT"' not in script.text
