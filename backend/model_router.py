@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from backend.model_input import (
+    ModelInputBudgetError,
     ModelInputDiagnostics,
     prepare_model_input,
 )
@@ -126,10 +127,14 @@ class ModelRouter:
         """Apply fixed capabilities, budgets, and guidance before generation."""
         provider = self._get_provider()
         provider.ensure_ready()
-        prepared = prepare_model_input(
-            base_instructions=instructions,
-            messages=messages,
-        )
+        try:
+            prepared = prepare_model_input(
+                base_instructions=instructions,
+                messages=messages,
+            )
+        except ModelInputBudgetError as error:
+            raise ModelProviderError("Model input preparation failed") from error
+
         self.last_input_diagnostics = prepared.diagnostics
         return provider.generate(
             messages=prepared.messages,
