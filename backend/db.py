@@ -6,6 +6,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional, Union
 
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 SQLITE_BUSY_TIMEOUT_MS = 5_000
 SQLITE_CONNECT_TIMEOUT_SECONDS = SQLITE_BUSY_TIMEOUT_MS / 1_000
