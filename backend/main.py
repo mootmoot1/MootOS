@@ -30,6 +30,11 @@ from backend.conversation import (
     list_conversations as load_conversations,
     list_messages as load_messages,
 )
+from backend.db import (
+    DatabaseReadinessError,
+    check_database_readiness,
+    validate_database_configuration,
+)
 from backend.memory import (
     MemoryArchiveConflictError,
     MemoryCorrectionConflictError,
@@ -50,6 +55,7 @@ from backend.memory import (
 )
 from backend.memory_commands import parse_memory_save_command
 from backend.memory_retrieval import retrieve_context_memories, search_memories
+from backend.migrations import LATEST_SCHEMA_VERSION
 from backend.model_router import (
     ModelConfigurationError,
     ModelProviderError,
@@ -62,6 +68,7 @@ PUBLIC_PATHS = {
     "/auth/login",
     "/auth/logout",
     "/health",
+    "/ready",
     "/login",
     "/manifest.webmanifest",
 }
@@ -70,6 +77,7 @@ MAX_MEMORY_CONTENT_LENGTH = 10_000
 MAX_MEMORY_SEARCH_LENGTH = 500
 
 validate_auth_configuration()
+validate_database_configuration()
 
 app = FastAPI(
     title="MootOS",
@@ -273,8 +281,21 @@ def web_manifest() -> FileResponse:
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
-    """Return a public health check for Railway deployments."""
+    """Return a minimal process-liveness response."""
     return {"status": "healthy"}
+
+
+@app.get("/ready")
+def readiness_check() -> dict[str, str]:
+    """Confirm the existing database opens and matches the supported schema."""
+    try:
+        check_database_readiness(LATEST_SCHEMA_VERSION)
+    except DatabaseReadinessError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is not ready",
+        ) from error
+    return {"status": "ready"}
 
 
 @app.post("/memories", status_code=status.HTTP_201_CREATED)
