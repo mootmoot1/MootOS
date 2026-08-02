@@ -1,7 +1,7 @@
 # MootOS Current Implementation
 
-**Applies to:** Version 0.1 on `feature/memory-forget-v0.1`  
-**Production base:** PR #15 merged and production-verified  
+**Applies to:** Version 0.1 on `feature/memory-keyword-retrieval-v0.1`  
+**Production base:** PR #16 merged and production-verified  
 **Schema:** `2 — memory_lifecycle`  
 **Purpose:** Describe what the code actually does, separate from future plans.
 
@@ -17,12 +17,16 @@ Production uses one Railway service and one replica. The same process:
 - Runs schema migrations during startup
 - Reads and writes SQLite
 - Detects explicit memory-save commands
+- Ranks active memory using deterministic keywords
+- Searches active or archived memory through a protected read-only request body
 - Builds model instructions from active memories
 - Calls the configured AI provider for normal conversation
 - Handles correction, archive, and restore internally without a model call
 - Returns responses to the browser
 
 There are no microservices, background workers, task queues, cache servers, vector databases, or multiple application replicas.
+
+The keyword branch adds no schema migration and no external retrieval service.
 
 ## 2. Current modules
 
@@ -40,8 +44,10 @@ Responsibilities:
 - Resolves normal conversations and stores normal chat messages
 - Routes explicit memory-save commands to the atomic chat-memory operation
 - Exposes memory correction, history, archive, and restore APIs
-- Validates active or archived list status
-- Builds model instructions from identity rules and active saved memories
+- Exposes `GET /memories` for normal active or archived listings
+- Exposes read-only `POST /memories/search` so private terms stay out of request URLs
+- Passes the current user request to the retrieval layer
+- Builds model instructions from identity rules and ranked active memories
 - Sends ordinary chat requests to the configured model provider
 
 ### `backend/auth.py`
@@ -121,7 +127,9 @@ replaces_memory_id
 superseded_by_id
 ```
 
-Existing memories are preserved, set active, and receive `updated_at = created_at`. The forget branch reuses schema 2 and adds no migration 3.
+Existing memories are preserved, set active, and receive `updated_at = created_at`.
+
+The keyword branch reuses schema 2 and adds no migration 3.
 
 ### `backend/memory.py`
 
@@ -130,7 +138,6 @@ Responsibilities:
 - Creates and lists projects
 - Creates, lists, retrieves, filters, and protects memories
 - Validates projects inside the same connection used for the operation
-- Supplies active context memories to the chat system
 - Corrects an active memory through append-and-supersede
 - Traverses correction history
 - Archives one exact latest active memory
@@ -143,15 +150,7 @@ Memory lifecycle values:
 - `superseded`
 - `archived`
 
-Normal active-memory context rules:
-
-- An unassigned memory is global.
-- Global active memories are available in every project conversation.
-- A project conversation currently loads active global memory plus active memory assigned to that project.
-- A conversation without a project can load all active memories.
-- Projects are intended as focus lenses, not permanent secrecy walls.
-- Active context is ordered newest first.
-- Archived and superseded rows never enter ordinary model context.
+Only active rows are eligible for ordinary model context. Archived and superseded rows remain available through their intended review paths but never enter normal recall.
 
 Default projects:
 
@@ -160,6 +159,48 @@ Default projects:
 - Social Media
 - Cars
 - Personal
+
+### `backend/memory_retrieval.py`
+
+Responsibilities:
+
+- Normalizes the current request into understandable keywords
+- Case-folds and extracts letters and numbers
+- Removes a small documented English stop-word set
+- Applies limited plural normalization
+- Removes repeated query terms before applying the 40-keyword limit
+- Scans complete stored memory content
+- Scores matches against content, project name, and memory type/source
+- Adds a bonus for a contiguous multi-keyword content phrase
+- Applies project-focus ordering
+- Appends only safe recent fallback memory
+- Caps ordinary context at 20 active memories
+- Searches active or archived normal listings without exposing superseded rows
+
+Project-chat ranking:
+
+1. Matching-project keyword matches
+2. Global keyword matches
+3. Relevant other-project keyword matches
+4. Recent matching-project and global fallback
+
+Unrelated other-project memory is not used as fallback.
+
+No-project ranking:
+
+1. Keyword matches from all active memories, ordered by match strength and recency without a global-scope bonus
+2. Recent active fallback from all projects
+
+Keyword retrieval does not:
+
+- Call OpenAI
+- Spend extra model credits
+- Mutate database state
+- Infer synonyms
+- Correct spelling
+- Use embeddings
+- Use a vector database
+- Use SQLite FTS5
 
 ### `backend/memory_commands.py`
 
@@ -261,6 +302,7 @@ The chat interface provides:
 The Memory interface provides:
 
 - A protected page at `/memory`
+- Keyword Search and Clear controls
 - Active and Archived views
 - All, Global-only, and exact-project scope filters
 - Memory content
@@ -276,9 +318,13 @@ The Memory interface provides:
 - Refresh, loading, empty, success, and error states
 - A direct return link to chat
 
-The browser creates DOM nodes and assigns database values through `textContent`. It does not render saved memory content as HTML.
+When search is empty, the browser loads `GET /memories` with optional lifecycle status and exact project parameters. When search is nonblank, it submits `query`, `status`, and optional `project` in the JSON body of protected read-only `POST /memories/search`. This keeps private search text out of request URLs and ordinary URL logs.
 
-The browser can send only explicit `POST` mutations for correction, archive, and restore. It contains no memory `DELETE`, `PATCH`, or `PUT` request.
+The browser preserves the request-generation guard so an older response cannot overwrite a newer search or filter selection.
+
+The browser creates DOM nodes and assigns database values and search labels through `textContent`. It does not render saved memory content as HTML.
+
+The browser sends explicit `POST` mutations only for correction, archive, and restore. Search also uses POST but is read-only. The script contains no memory `DELETE`, `PATCH`, or `PUT` request.
 
 ## 3. Database schema
 
@@ -316,6 +362,8 @@ MootOS uses one SQLite file.
 | `superseded_by_id` | Newer version that replaced this row |
 
 The correction self-links are application-managed. SQLite cannot add those self-referential constraints to the existing table through a simple `ALTER TABLE` migration.
+
+Keyword retrieval creates no table, index, or stored ranking value.
 
 ### `conversations`
 
@@ -357,7 +405,7 @@ The messages table has an enforced foreign key to conversations.
 12. It commits and closes the connection.
 13. The application becomes available.
 
-## 5. Normal chat request flow
+## 5. Normal chat and ranked-retrieval flow
 
 1. `POST /chat` receives `message` and optional `project` or `conversation_id`.
 2. The memory-command parser checks the message.
@@ -365,10 +413,16 @@ The messages table has an enforced foreign key to conversations.
 4. MootOS validates or creates the conversation.
 5. The user message is stored.
 6. Up to 20 recent messages are loaded chronologically.
-7. Up to 20 active relevant memories are added to model instructions.
-8. The provider generates a response.
-9. The assistant response is saved with provider metadata.
-10. The API returns both stored messages and the conversation ID.
+7. The current user message is passed to `retrieve_context_memories`.
+8. The retrieval layer loads active memories only.
+9. Query keywords are normalized, duplicate terms are removed, and at most 40 unique terms remain.
+10. Complete stored memory content, project name, and source are scored.
+11. Matches are ranked by project focus when a project exists, then match score and recency.
+12. Safe fallback fills remaining context slots.
+13. At most 20 memories are added to model instructions.
+14. The provider generates a response.
+15. The assistant response is saved with provider metadata.
+16. The API returns both stored messages and the conversation ID.
 
 Provider failure behavior:
 
@@ -448,11 +502,11 @@ Archived rows immediately leave active lists and model context. The row is not d
 8. The transaction commits or rolls back.
 9. The browser reloads the archived list.
 
-The same row returns to normal active listings and model context.
+The same row returns to normal active listings, search, and model context.
 
-## 10. Listing behavior
+## 10. Listing and keyword-search behavior
 
-`GET /memories` defaults to active rows.
+`GET /memories` defaults to active rows and provides unsearched normal listings.
 
 Supported status values:
 
@@ -461,9 +515,35 @@ active
 archived
 ```
 
+Optional GET parameter:
+
+```text
+project=<exact project name>
+```
+
 Superseded rows are intentionally available only through direct retrieval and correction history.
 
 For an exact project filter, the API returns only rows assigned to that project. The browser's Global-only filter loads the selected lifecycle list and displays rows whose project is `NULL`.
+
+Keyword search uses protected read-only:
+
+```text
+POST /memories/search
+```
+
+JSON body:
+
+```json
+{
+  "query": "keyword phrase",
+  "status": "active",
+  "project": "Cars"
+}
+```
+
+The query is required after trimming and limited to 500 characters. Status must be active or archived. Project is optional and exact. Superseded rows cannot appear.
+
+The POST method is used for privacy, not mutation: search terms stay out of request URLs, browser history, and ordinary URL access logs. The endpoint does not modify SQLite or call the model provider.
 
 ## 11. Hard-delete boundary
 
@@ -489,7 +569,7 @@ When Railway metadata is absent and both auth variables are absent, auth is disa
 When both auth variables are present:
 
 1. Protected browser routes, including `/chat` and `/memory`, redirect to `/login`.
-2. Protected APIs return HTTP `401` without a valid cookie.
+2. Protected APIs, including `POST /memories/search`, return HTTP `401` without a valid cookie.
 3. Correct login creates a signed 30-day cookie.
 4. Logout deletes the cookie.
 
@@ -513,20 +593,20 @@ When Railway metadata is present:
 - Volume mount: `/data`
 - Database: `/data/mootos.db`
 
-Production verification completed for correction on August 1, 2026:
+Production verification is complete for:
 
-- Migration 2 deployed.
-- Existing data remained available.
-- A selected active memory was corrected.
-- A new conversation recalled only the corrected active value.
-- Another Railway rebuild completed.
-- A new conversation recalled the corrected value again.
+- Persistent conversations and explicit saves
+- Memory review filters
+- Migration 2
+- Preserved correction
+- Recoverable forget and restore
+- Corrected and restored active-memory persistence through rebuilds
 
-Forget and restore remain branch-only until PR #16 is reviewed, merged, deployed, and manually tested.
+Keyword retrieval remains branch-only until PR #17 is reviewed, merged, deployed, and manually verified.
 
 ## 14. Test coverage
 
-Tests cover:
+The full suite covers:
 
 - SQLite PRAGMAs and migrations
 - Existing-data preservation and incompatible-schema rejection
@@ -538,66 +618,48 @@ Tests cover:
 - Atomic explicit-save rollback
 - Save in one chat and recall in a brand-new chat
 - Active-only model context
-- Migration 2 existing-row preservation
-- Atomic append-and-supersede correction
-- Correction history and multi-step chains
+- Migration 2 data preservation
+- Atomic correction and correction history
 - Competing corrections and forced rollback
-- Hard-delete protection for correction chains
-- Archive exclusion from active listings and model context
-- Archived listing with project filtering
-- Restore returning the same row to active
-- Correction history preservation through archive and restore
-- Missing and wrong-state archive/restore conflicts
-- Forced archive and restore rollback
-- Competing archive and restore requests
-- Hard-delete protection for archived rows
-- Endpoint authentication
-- Protected memory routing
-- Browser request shapes and safe rendering
-- Absence of browser memory `DELETE`, `PATCH`, and `PUT`
+- Archive, restore, and hard-delete protection
+- Competing lifecycle operations
+- Authentication boundaries
+- Memory page rendering and browser mutation restrictions
+- Keyword normalization and unique-query cap
+- Complete long-memory scanning
+- Project, global, and relevant other-project ordering
+- No-project match-strength ordering
+- No unrelated other-project fallback
+- Archived and superseded exclusion from ranked context
+- Active and archived search separation
+- Exact project search
+- Blank, oversized, and unsupported-status search rejection
+- Private body-based search and authentication
+- Query-aware model instructions
 
-Local branch result:
+The first keyword-branch GitHub Actions run collected 103 tests. One presentation regression failed because the safety-note heading no longer included the established phrase `Forget is recoverable`; the phrase was restored. Internal review then added ranking-edge and private-search regression tests. Exact-final-head CI remains required.
 
-- 83 tests passed.
-- Python bytecode compilation passed.
-- JavaScript syntax validation passed.
+## 15. Current limitations
 
-Known missing areas:
-
-- Natural-language forget and update
-- Permanent-delete or secure-erasure UI
-- Keyword or semantic retrieval
-- Duplicate detection
-- Full browser correction-history viewer
-- Automated backup and restore scheduling
-- Provider timeout recovery after saving a user message
-- Login rate limiting
-- Browser end-to-end tests against Railway
-
-## 15. Intentional boundaries
-
-Version 0.1 remains:
-
-- Single user
-- Single Railway replica
-- One SQLite database
-- One implemented external model provider
-- Text chat only
-- Synchronous provider calls
-- No background queue
-- No autonomous external actions
-- No multi-agent system
-
-Explicit chat saves are deliberately narrow. MootOS does not silently convert ordinary conversation into permanent memory.
-
-Correction, archive, and restore are deliberately UI-selected and confirmed. The browser does not offer permanent deletion, and archived data still exists in SQLite.
+- Single-user deployment
+- One Railway replica
+- SQLite source of truth
+- OpenAI is the only implemented external provider
+- No background task system
+- No runtime tools
+- No voice or vision
+- No automatic encrypted backups or retention
+- No semantic search, embeddings, FTS5, synonym expansion, or typo correction
+- Keyword ranking reads the eligible personal memory list into application code
+- No duplicate detection
+- No natural-language correction or forget
+- No permanent-delete or secure-erasure UI
+- No full browser correction-history viewer
 
 ## 16. Source of truth
 
-When code and documentation disagree:
-
-1. Code and tests describe runtime behavior.
-2. Documentation must be corrected in the same PR that changes behavior.
-3. Planned features must remain labeled as planned.
-4. A memory is not considered saved until the complete explicit-memory transaction commits.
-5. A memory is not considered forgotten until the archive transaction commits.
+- GitHub stores code, tests, and documentation.
+- Railway `/data/mootos.db` stores production conversations and memories.
+- OpenAI generates normal chat responses but is not MootOS's history database.
+- Active memory rows are the only long-term-memory versions eligible for ordinary model context.
+- Documentation must distinguish merged production behavior from feature-branch behavior.

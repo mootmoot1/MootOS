@@ -3,7 +3,7 @@
 **Version:** 0.1  
 **Base URL:** Railway service domain in production or `http://127.0.0.1:8000` locally
 
-This reference documents current FastAPI behavior on `feature/memory-forget-v0.1`. Planned endpoints are not included.
+This reference documents current FastAPI behavior on `feature/memory-keyword-retrieval-v0.1`. Planned endpoints are not included.
 
 ## Authentication behavior
 
@@ -46,9 +46,9 @@ Serves the main chat interface.
 
 ### `GET /memory`
 
-Serves the protected memory review, correction, recoverable-forget, and restore interface.
+Serves the protected memory search, review, correction, recoverable-forget, and restore interface.
 
-The browser page reads from `GET /projects` and `GET /memories`. It can send explicit confirmed `POST` requests for correction, archive, and restore. It does not expose permanent-delete, `PATCH`, or `PUT` controls.
+The browser page reads from `GET /projects`, `GET /memories`, and the read-only `POST /memories/search` endpoint. It can send explicit confirmed `POST` requests for correction, archive, and restore. It does not expose permanent-delete, `PATCH`, or `PUT` controls.
 
 ### `GET /login`
 
@@ -224,21 +224,72 @@ Examples:
 
 ```text
 GET /memories
-GET /memories?status=active
 GET /memories?status=archived
-GET /memories?status=archived&project=Cars
+GET /memories?status=active&project=Cars
 ```
 
 Rules:
 
 - `active` is the default status.
-- `archived` returns recoverably forgotten rows ordered by latest lifecycle update.
+- `archived` returns recoverably forgotten rows.
 - Superseded rows are intentionally unavailable through the normal list endpoint.
 - The project filter returns only rows assigned to that exact project. It does not automatically add global rows.
 - Unsupported status returns HTTP `422`.
 - Unknown project returns HTTP `404`.
 
-The `/memory` browser interface uses this endpoint. Its Global-only option filters rows whose `project` value is `null`.
+The `/memory` browser interface uses this endpoint when the search field is empty. Its Global-only option filters rows whose `project` value is `null` after the protected API response is received.
+
+### `POST /memories/search`
+
+Performs a read-only keyword search while keeping private search terms out of the URL, browser history, and ordinary URL access logs.
+
+Request:
+
+```json
+{
+  "query": "black Benz",
+  "status": "active",
+  "project": "Cars"
+}
+```
+
+Fields:
+
+- `query`: required after trimming, 1–500 characters
+- `status`: `active` or `archived`; defaults to `active`
+- `project`: optional exact existing project
+
+Rules:
+
+- Superseded rows are never returned.
+- The optional project filter searches only rows assigned to that exact project.
+- Keywords match normalized memory content, project name, and memory type or source.
+- Content matches receive the strongest score.
+- A contiguous multi-keyword content phrase receives an additional ranking bonus.
+- Stored memory content is scanned completely.
+- The query is capped at 40 unique normalized keywords after duplicate removal.
+- Blank, oversized, or unsupported-status requests return HTTP `422`.
+- Unknown project returns HTTP `404`.
+- The endpoint reads data only and performs no database mutation.
+- The endpoint does not call the external model provider.
+
+Success: HTTP `200`.
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "content": "I drive a black C300 Benz.",
+      "project": "Cars",
+      "status": "active"
+    }
+  ]
+}
+```
+
+The Memory page uses this endpoint only while nonblank search text is present. Search text and returned values are rendered through `textContent`.
 
 ### `GET /memories/{memory_id}`
 
@@ -328,19 +379,9 @@ Behavior:
 4. Changes `status` to `archived` and updates `updated_at`.
 5. Commits the change or rolls back.
 
-The row disappears from active listings and model context but remains available through `status=archived`, direct retrieval, and correction history.
+The row disappears from active listings and model context but remains available through `status=archived`, direct retrieval, correction history, and archived keyword search.
 
 Success: HTTP `200`.
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "status": "archived"
-  }
-}
-```
 
 Missing memory returns HTTP `404`. An already archived, superseded, or stale target returns HTTP `409`.
 
@@ -356,19 +397,9 @@ Behavior:
 4. Changes `status` to `active` and updates `updated_at`.
 5. Commits the change or rolls back.
 
-The same row returns to active listings and model context. Correction links remain unchanged.
+The same row returns to active listings, active keyword search, and model context. Correction links remain unchanged.
 
 Success: HTTP `200`.
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "status": "active"
-  }
-}
-```
 
 Missing memory returns HTTP `404`. An active, superseded, or stale target returns HTTP `409`.
 
@@ -451,13 +482,7 @@ GET /conversations?project=MootOS
 
 Returns one conversation with its complete message history.
 
-Missing conversation returns HTTP `404`:
-
-```json
-{
-  "detail": "Conversation not found"
-}
-```
+Missing conversation returns HTTP `404`.
 
 ## Chat
 
@@ -499,9 +524,12 @@ When the message is not an explicit save command:
 2. The conversation is validated or created.
 3. The user message is stored.
 4. Up to 20 recent messages are loaded.
-5. Up to 20 newest active relevant memories are added to instructions.
-6. The configured model provider generates a response.
-7. The assistant response is stored and returned.
+5. The current request is normalized into understandable keywords.
+6. Up to 20 active memories are ranked by keyword relevance, project focus, and safe recent fallback.
+7. The configured model provider generates a response.
+8. The assistant response is stored and returned.
+
+Retrieval itself does not call the external model provider or spend additional model credits.
 
 Missing provider configuration returns HTTP `503` before a new normal conversation is created.
 
@@ -534,47 +562,18 @@ For a recognized save command:
 
 This path does not call OpenAI.
 
-Example request:
-
-```json
-{
-  "message": "Remember that my favorite tea is jasmine.",
-  "project": "Personal"
-}
-```
-
-Example response fields:
-
-```json
-{
-  "success": true,
-  "data": {
-    "conversation_id": "uuid",
-    "project": "Personal",
-    "user_message": {
-      "role": "user",
-      "content": "Remember that my favorite tea is jasmine."
-    },
-    "assistant_message": {
-      "role": "assistant",
-      "content": "Saved to Personal long-term memory: my favorite tea is jasmine.",
-      "provider": "mootos",
-      "model": "memory-command-v1"
-    },
-    "provider": "mootos",
-    "model": "memory-command-v1"
-  }
-}
-```
-
 ### Cross-chat recall rules
 
 - Only active memories are supplied to ordinary model context.
-- Global memories are supplied to project conversations.
-- A project conversation currently loads active global memory plus active memory assigned to that project.
-- A conversation without a project can load all active memories.
-- Projects are focus lenses, not permanent secrecy walls; broader cross-project relevance ranking is planned for the retrieval branch.
-- At most 20 newest relevant active memories are supplied.
+- A project conversation ranks matching-project keyword matches first, global matches next, and relevant other-project matches afterward.
+- After keyword matches, project fallback may include only recent matching-project and global active memories.
+- A no-project conversation ranks all active memories by match strength and recency without a global-scope bonus.
+- No-project fallback may come from every active project.
+- Archived and superseded rows never enter normal context.
+- At most 20 active memories are supplied.
+- Keyword matching is literal and normalized; synonyms and typographical errors are not inferred.
+- Stored memory content is scanned completely.
+- The query uses at most 40 unique normalized keywords after duplicate removal.
 
 ### Standard successful chat response
 
@@ -598,23 +597,11 @@ Missing conversation: HTTP `404`.
 
 Project mismatch: HTTP `409`.
 
-```json
-{
-  "detail": "The requested project does not match this conversation"
-}
-```
-
 Oversized extracted memory: HTTP `422`.
 
-```json
-{
-  "detail": "Memory content must be 10,000 characters or fewer"
-}
-```
+## Browser request boundary
 
-## Browser mutation boundary
-
-The Memory page can send only these memory mutations:
+The Memory page can send these confirmed memory mutations:
 
 ```text
 POST /memories/{id}/corrections
@@ -622,9 +609,15 @@ POST /memories/{id}/archive
 POST /memories/{id}/restore
 ```
 
-It sends no memory `DELETE`, `PATCH`, or `PUT` request. Stored content and project values are rendered through DOM `textContent`.
+It also sends read-only keyword searches through:
 
-## Current memory-command limitations
+```text
+POST /memories/search
+```
+
+The search request body keeps private terms out of the URL and performs no database mutation. The page sends no memory `DELETE`, `PATCH`, or `PUT` request. Stored content, project values, and search labels are rendered through DOM `textContent`.
+
+## Current memory-command and retrieval limitations
 
 Not implemented:
 
@@ -635,7 +628,8 @@ Not implemented:
 - Bulk archive or restore
 - Duplicate detection
 - Conflict resolution beyond exact lifecycle state checks
-- Keyword or semantic search
+- Semantic search, embeddings, FTS5, or synonym expansion
+- Typographical-error correction
 - Full browser correction-history viewer
 
 ## FastAPI-generated documentation

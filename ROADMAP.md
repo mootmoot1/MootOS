@@ -40,6 +40,9 @@ Merged and production-verified:
 - Migration 2 memory lifecycle
 - UI-selected correction with preserved history
 - Corrected active-memory recall after another Railway rebuild
+- UI-selected recoverable forget and restore
+- Archived-memory exclusion from recall
+- Restored active-memory recall after another Railway rebuild
 
 ## Immediate sequence
 
@@ -50,13 +53,13 @@ Completed safety and lifecycle work:
 3. Consistent off-volume backup and isolated restore drill completed before migration 2 development.
 4. `feature/memory-review-ui-v0.1` merged and production-verified.
 5. `feature/memory-correction-v0.1` merged and production-verified.
+6. `feature/memory-forget-v0.1` merged and production-verified.
 
 Current product branch sequence:
 
-1. `feature/memory-forget-v0.1` — current branch
-2. `feature/memory-keyword-retrieval-v0.1`
-3. `feature/conversation-refinement-v0.1`
-4. `feature/moot-bootstrap-profile-v0.1`
+1. `feature/memory-keyword-retrieval-v0.1` — current branch
+2. `feature/conversation-refinement-v0.1`
+3. `feature/moot-bootstrap-profile-v0.1`
 
 This order follows the control loop:
 
@@ -64,7 +67,7 @@ This order follows the control loop:
 see → correct → archive → find → converse better → import curated profile
 ```
 
-Visibility comes before mutation. Correction comes before forgetting. Keyword retrieval comes after memory review and lifecycle controls. Permanent profile import comes only after the user can inspect, correct, archive, and retrieve memories.
+Visibility comes before mutation. Correction comes before forgetting. Keyword retrieval comes after memory review and lifecycle controls. Permanent profile import comes only after the user can inspect, correct, archive, restore, and retrieve memories.
 
 ---
 
@@ -96,6 +99,7 @@ Create a private personal AI that can hold useful ongoing conversations, deliber
 - Cross-chat memory recall
 - Production persistence through rebuilds
 - Memory review and confirmed correction
+- Recoverable archive and restore
 
 ## Verified chat-memory checkpoint
 
@@ -109,7 +113,6 @@ PR #12 delivered and verified:
 - `explicit_chat` memory type
 - Global memories available across projects
 - Main/no-project chat can use all active memory
-- Project chats currently use global plus matching-project memory
 - Internal action metadata using `mootos` and `memory-command-v1`
 - Parser, validation, rollback, and cross-chat recall tests
 - GitHub Actions on Python 3.9, 3.10, and 3.11
@@ -137,7 +140,7 @@ Scope:
 - Project filtering
 - Safe rendering and stale-request protection
 
-### Controlled memory lifecycle
+### Controlled memory lifecycle — completed
 
 Correction and forgetting share one lifecycle model rather than introducing separate incompatible schema changes.
 
@@ -160,40 +163,46 @@ Correction:
 - Commits atomically
 - Is verified in brand-new conversations
 
-Current forget branch:
+Recoverable forgetting and restoration were merged in PR #16 and production-verified.
 
-```text
-feature/memory-forget-v0.1
-```
+Forget and restore:
 
-Forgetting should:
-
-- Be selected from the review interface
+- Select one exact row from the review interface
 - Show the exact memory affected
 - Require confirmation
 - Archive rather than immediately hard-delete
-- Exclude archived values from model context and default lists
-- Support restoration through an Archived view
+- Exclude archived values from model context and active lists
+- Restore the same stored row through an Archived view
 - Preserve correction history
 - Reuse schema 2 without an unnecessary migration
+- Survive another Railway rebuild
 
 Natural-language `update that` and `forget that` commands remain later thin branches because ambiguous matching is riskier than UI-selected actions.
 
-### Basic keyword retrieval
+### Basic keyword retrieval — current branch
 
-After review, correction, and archival:
+Current branch:
 
-- Tokenize the current request
-- Use understandable keyword or `LIKE` matching
-- Rank active memories by term matches and recency
-- Prioritize matching-project memory, then global memory, then relevant other-project memory when useful
-- Merge keyword matches with recent memories
-- Cap the final context set
-- Add search to the memory review interface when practical
+```text
+feature/memory-keyword-retrieval-v0.1
+```
+
+Implemented on the branch:
+
+- Tokenize and normalize the current request
+- Use understandable pure-Python keyword matching
+- Match content, project name, and memory type or source
+- Prioritize matching-project memory, then global memory, then relevant other-project memory
+- Use only matching-project and global fallback inside a project chat
+- Allow no-project chat to rank all active memory
+- Cap final model context at 20 active memories
+- Add protected search to the Memory page
+- Keep active and archived searches separate
+- Introduce no migration, embeddings, vector database, or extra model request
 
 Projects are focus lenses, not permanent memory walls.
 
-Do not add embeddings, a vector database, or FTS5 until the simple approach proves inadequate.
+Do not add semantic embeddings, a vector database, or FTS5 until simple keyword retrieval is production-tested and proves inadequate.
 
 ### Conversation refinement
 
@@ -209,7 +218,7 @@ Normal notes must not silently become permanent memories.
 
 ### Curated Moot bootstrap profile
 
-The profile belongs only after memory review, correction, archival, and retrieval controls exist.
+The profile belongs only after memory review, correction, archival, restoration, retrieval, and conversation refinement controls exist.
 
 It should contain:
 

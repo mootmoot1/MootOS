@@ -2,7 +2,7 @@
 
 MootOS is Moot's private, mobile-friendly personal AI foundation.
 
-Version 0.1 provides a working chat interface, persistent conversations, explicit long-term-memory saves through normal chat, production-verified memory review and correction, and a current feature branch for recoverable forgetting and restoration. It also includes project-focused context, a replaceable model-provider boundary, private password access, and hardened persistent SQLite storage on Railway.
+Version 0.1 provides a working chat interface, persistent conversations, explicit long-term-memory saves through normal chat, and production-verified memory review, correction, recoverable forgetting, and restoration. The current feature branch adds understandable keyword-ranked recall and protected memory search. MootOS also includes project-focused context, a replaceable model-provider boundary, private password access, and hardened persistent SQLite storage on Railway.
 
 MootOS is built in small, reviewable steps. The goal is a reliable system that Moot controls and can expand without rebuilding the foundation.
 
@@ -10,7 +10,7 @@ MootOS is built in small, reviewable steps. The goal is a reliable system that M
 
 **Version:** `0.1.0`  
 **Primary branch:** `main`  
-**Current feature branch:** `feature/memory-forget-v0.1`  
+**Current feature branch:** `feature/memory-keyword-retrieval-v0.1`  
 **Deployment:** Railway, one service and one replica  
 **Production database:** SQLite on a Railway volume mounted at `/data`  
 **Current schema:** `2 — memory_lifecycle`  
@@ -35,13 +35,14 @@ Production-verified on `main`:
 - Cross-chat recall from the `memories` table
 - Global memories available across project chats
 - Main/no-project chat can use all active saved memory
-- Project chats currently use active global plus matching-project memory
 - Protected memory review at `/memory`
 - All-memory, global-only, and exact-project memory filters
-- Memory content, scope, project, source, and creation date display
+- Memory content, scope, project, source, version, and lifecycle-status display
 - UI-selected correction with preserved history
 - Superseded values excluded from normal recall
-- Corrected active value surviving another Railway rebuild
+- UI-selected recoverable Forget and Restore
+- Archived values excluded from normal recall
+- Corrected and restored active values surviving Railway rebuilds
 - Relevant active memory context supplied to the model
 - Replaceable model-provider boundary
 - OpenAI Responses API integration
@@ -54,16 +55,20 @@ Production-verified on `main`:
 - Numbered schema migrations and schema compatibility checks
 - Exact direct-dependency pins
 - Manual off-volume backup and isolated restore verification
-- Automated tests for memory commands, cross-chat recall, database hardening, migrations, auth, conversations, interface behavior, and deployment configuration
+- Automated tests for memory commands, lifecycle behavior, cross-chat recall, database hardening, migrations, auth, conversations, interface behavior, and deployment configuration
 
 Implemented on the current feature branch:
 
-- Active and Archived memory views
-- UI-selected **Forget** with exact confirmation
-- UI-selected **Restore** with exact confirmation
-- Archived-memory exclusion from normal lists and model context
-- Correction-history preservation through archive and restore
-- Archived-memory protection from permanent deletion
+- Pure-Python keyword normalization and deterministic memory ranking
+- Current-project matches before global matches, then relevant other-project matches
+- Safe recent fallback without unrelated other-project leakage
+- No-project ranking by match strength and recency without a global-scope bonus
+- Complete stored-memory text scanning and a 40-unique-keyword query cap
+- Active-only model context preserved during ranking
+- Protected read-only keyword search across active or archived normal listings
+- Private search terms submitted in a request body rather than the URL
+- Search by memory content, project name, or source
+- No schema migration, embeddings, vector database, or additional provider call
 
 ## Explicit long-term memory through chat
 
@@ -93,7 +98,7 @@ Do you remember that studio session?
 
 remain ordinary model requests and are not interpreted as writes.
 
-## Review and control saved memories
+## Search, review, and control saved memories
 
 Open the protected memory page:
 
@@ -115,6 +120,7 @@ The screen shows saved rows, including:
 
 Available controls on the current branch:
 
+- Keyword search
 - Active or Archived view
 - All memories
 - Global only
@@ -122,6 +128,8 @@ Available controls on the current branch:
 - **Correct** on active memories
 - **Forget** on active memories
 - **Restore** on archived memories
+
+Search uses literal normalized keywords across memory content, project name, and source. It does not claim semantic understanding, synonym matching, or typo correction. The protected browser submits search terms in the JSON body of `POST /memories/search`, keeping private phrases out of the request URL and ordinary URL logs.
 
 Correction creates a new active version and marks the selected version superseded in one transaction. The prior value remains available through the history API.
 
@@ -136,7 +144,7 @@ The following remain planned:
 - Permanent-delete or secure-erasure UI
 - Bulk archive and restore
 - Duplicate and conflict detection
-- Keyword or semantic memory search
+- Semantic memory search, embeddings, or vector retrieval
 - Automatic profile import
 - Automatic encrypted database backups and scheduled restore testing
 - Voice conversations
@@ -162,6 +170,7 @@ FastAPI application (backend/main.py)
         |-- Versioned migrations (backend/migrations.py)
         |-- Conversation storage (backend/conversation.py)
         |-- Project and memory lifecycle storage (backend/memory.py)
+        |-- Keyword retrieval and ranking (backend/memory_retrieval.py)
         |-- Explicit memory-command parser (backend/memory_commands.py)
         |-- Model provider boundary (backend/model_router.py)
         |-- Static chat and memory interfaces (frontend/)
@@ -187,9 +196,13 @@ Normal conversation only
 3. MootOS checks that the message is not an explicit save command.
 4. The provider configuration is validated.
 5. The conversation and user message are stored.
-6. Recent history and active relevant memories are loaded.
-7. The provider generates a response.
-8. The assistant response is stored and returned.
+6. Recent history is loaded.
+7. Active memories are ranked against the current request using understandable keywords and project focus.
+8. Up to 20 ranked memories are supplied to the provider.
+9. The provider generates a response.
+10. The assistant response is stored and returned.
+
+Keyword ranking is handled internally and does not create an extra provider request.
 
 ### Explicit memory save
 
@@ -203,7 +216,7 @@ The browser never receives the OpenAI API key.
 
 ## Memory lifecycle
 
-- `active` — included in normal lists and model context
+- `active` — included in normal lists, keyword search, and model context
 - `superseded` — preserved older version replaced by correction
 - `archived` — recoverably forgotten and excluded from normal recall
 
@@ -211,17 +224,19 @@ Correction is append-and-supersede. Archive and restore change the status of the
 
 The browser does not expose permanent delete. The legacy administrative delete API refuses to delete archived, superseded, or correction-linked rows.
 
-## Memory scope
+## Memory retrieval and project focus
 
-- A memory saved without a project is global and can appear in any project chat.
-- Conversations without a project can load all active memories.
-- A project chat currently loads active global memory plus active memory for that project.
-- Projects are intended as focus lenses, not permanent secrecy walls; cross-project relevance ranking is planned for the retrieval branch.
-- At most 20 newest active relevant memories are supplied to the model.
+- A memory saved without a project is global.
+- Only active memories can enter ordinary model context.
+- A project chat ranks matching-project keyword matches first, global matches next, and relevant other-project matches afterward.
+- After keyword matches, a project chat may use recent matching-project and global fallback only.
+- A no-project chat ranks all active memory by match strength and recency, then may use fallback from every active project.
+- Projects are focus lenses, not permanent secrecy walls.
+- At most 20 active memories are supplied to the model.
 
-The review page can display active or archived rows, but archived and superseded rows are never supplied to ordinary model context.
+Keyword matching is deterministic and limited. It normalizes case, punctuation, common English stop words, and simple plurals. Stored memories are scanned completely, while the request is capped at 40 unique normalized keywords. It does not infer synonyms or correct misspellings.
 
-This remains simple newest-first retrieval. Keyword ranking, embeddings, and deduplication are not implemented.
+The Memory page can search active or archived normal listings through the read-only `POST /memories/search` endpoint. Superseded rows remain history-only.
 
 ## Repository layout
 
@@ -234,6 +249,7 @@ MootOS/
 |   |-- migrations.py          Ordered schema migrations
 |   |-- conversation.py        Conversation and message persistence
 |   |-- memory.py              Project and memory lifecycle persistence
+|   |-- memory_retrieval.py    Keyword normalization and ranking
 |   |-- memory_commands.py     Explicit save-command parsing
 |   `-- model_router.py        Replaceable provider protocol
 |-- frontend/                  Mobile chat and memory interfaces
@@ -374,6 +390,8 @@ Protected application routes include:
 - `GET /chat`
 - `POST /chat`
 - `GET /memory`
+- `GET /memories` for active or archived normal listings
+- `POST /memories/search` for private read-only keyword search
 - Project, memory, and conversation APIs
 - Memory correction, history, archive, and restore APIs
 
@@ -387,9 +405,11 @@ Current protections:
 - Signed HTTP-only sessions
 - Secure cookies on Railway
 - Environment-based secrets
-- Protected chat, memory interface, and APIs
+- Protected chat, memory interface, search, and APIs
+- Private keyword search terms kept out of request URLs
 - Verified write-before-confirm memory behavior
 - Exact selected-memory confirmation for correction, forget, and restore
+- Active-only normal model context
 - No browser permanent-delete request
 - Explicit approval before merges
 
@@ -401,6 +421,7 @@ Current limitations:
 - Public minimal `/health`
 - One manual off-volume backup/restore drill; no automatic backup or retention
 - No natural-language destructive memory actions
+- Keyword retrieval reads and ranks the eligible personal memory set in application code; it is not a multi-user scale design
 
 ## Development workflow
 
