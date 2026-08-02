@@ -3,7 +3,7 @@
 **Version:** 0.1  
 **Base URL:** Railway service domain in production or `http://127.0.0.1:8000` locally
 
-This reference documents current FastAPI behavior on `feature/memory-forget-v0.1`. Planned endpoints are not included.
+This reference documents current FastAPI behavior on `feature/memory-keyword-retrieval-v0.1`. Planned endpoints are not included.
 
 ## Authentication behavior
 
@@ -46,7 +46,7 @@ Serves the main chat interface.
 
 ### `GET /memory`
 
-Serves the protected memory review, correction, recoverable-forget, and restore interface.
+Serves the protected memory search, review, correction, recoverable-forget, and restore interface.
 
 The browser page reads from `GET /projects` and `GET /memories`. It can send explicit confirmed `POST` requests for correction, archive, and restore. It does not expose permanent-delete, `PATCH`, or `PUT` controls.
 
@@ -211,34 +211,39 @@ Unknown project: HTTP `422`.
 
 ### `GET /memories`
 
-Lists active memories newest first by default.
+Lists active memories newest first by default and optionally performs literal keyword search.
 
 Optional query parameters:
 
 ```text
 status=active|archived
 project=<exact project name>
+q=<keyword query, maximum 500 characters>
 ```
 
 Examples:
 
 ```text
 GET /memories
-GET /memories?status=active
-GET /memories?status=archived
-GET /memories?status=archived&project=Cars
+GET /memories?status=active&q=car
+GET /memories?status=archived&q=test%20code
+GET /memories?status=archived&project=Cars&q=benz
 ```
 
 Rules:
 
 - `active` is the default status.
-- `archived` returns recoverably forgotten rows ordered by latest lifecycle update.
+- `archived` returns recoverably forgotten rows.
 - Superseded rows are intentionally unavailable through the normal list endpoint.
 - The project filter returns only rows assigned to that exact project. It does not automatically add global rows.
+- `q` matches normalized keywords against memory content, project name, and memory type or source.
+- Content matches receive the strongest score; contiguous content phrases receive an additional ranking bonus.
+- An omitted or stop-word-only `q` preserves the normal listing order.
 - Unsupported status returns HTTP `422`.
+- A search query longer than 500 characters returns HTTP `422`.
 - Unknown project returns HTTP `404`.
 
-The `/memory` browser interface uses this endpoint. Its Global-only option filters rows whose `project` value is `null`.
+The `/memory` browser interface uses this endpoint. Its Global-only option filters rows whose `project` value is `null` after the protected API response is received.
 
 ### `GET /memories/{memory_id}`
 
@@ -328,7 +333,7 @@ Behavior:
 4. Changes `status` to `archived` and updates `updated_at`.
 5. Commits the change or rolls back.
 
-The row disappears from active listings and model context but remains available through `status=archived`, direct retrieval, and correction history.
+The row disappears from active listings and model context but remains available through `status=archived`, direct retrieval, correction history, and archived keyword search.
 
 Success: HTTP `200`.
 
@@ -356,7 +361,7 @@ Behavior:
 4. Changes `status` to `active` and updates `updated_at`.
 5. Commits the change or rolls back.
 
-The same row returns to active listings and model context. Correction links remain unchanged.
+The same row returns to active listings, active keyword search, and model context. Correction links remain unchanged.
 
 Success: HTTP `200`.
 
@@ -499,9 +504,12 @@ When the message is not an explicit save command:
 2. The conversation is validated or created.
 3. The user message is stored.
 4. Up to 20 recent messages are loaded.
-5. Up to 20 newest active relevant memories are added to instructions.
-6. The configured model provider generates a response.
-7. The assistant response is stored and returned.
+5. The current request is normalized into understandable keywords.
+6. Up to 20 active memories are ranked by keyword relevance, project focus, and safe recent fallback.
+7. The configured model provider generates a response.
+8. The assistant response is stored and returned.
+
+Retrieval itself does not call the external model provider or spend additional model credits.
 
 Missing provider configuration returns HTTP `503` before a new normal conversation is created.
 
@@ -570,11 +578,12 @@ Example response fields:
 ### Cross-chat recall rules
 
 - Only active memories are supplied to ordinary model context.
-- Global memories are supplied to project conversations.
-- A project conversation currently loads active global memory plus active memory assigned to that project.
-- A conversation without a project can load all active memories.
-- Projects are focus lenses, not permanent secrecy walls; broader cross-project relevance ranking is planned for the retrieval branch.
-- At most 20 newest relevant active memories are supplied.
+- A project conversation ranks matching-project keyword matches first, global matches next, and relevant other-project matches afterward.
+- After keyword matches, project fallback may include only recent matching-project and global active memories.
+- A no-project conversation can rank keyword matches from every project and fill remaining slots from all active memories.
+- Archived and superseded rows never enter normal context.
+- At most 20 active memories are supplied.
+- Keyword matching is literal and normalized; synonyms and typographical errors are not inferred.
 
 ### Standard successful chat response
 
@@ -622,9 +631,9 @@ POST /memories/{id}/archive
 POST /memories/{id}/restore
 ```
 
-It sends no memory `DELETE`, `PATCH`, or `PUT` request. Stored content and project values are rendered through DOM `textContent`.
+Keyword search is a protected `GET /memories?...&q=...` request. The page sends no memory `DELETE`, `PATCH`, or `PUT` request. Stored content, project values, and search labels are rendered through DOM `textContent`.
 
-## Current memory-command limitations
+## Current memory-command and retrieval limitations
 
 Not implemented:
 
@@ -635,7 +644,7 @@ Not implemented:
 - Bulk archive or restore
 - Duplicate detection
 - Conflict resolution beyond exact lifecycle state checks
-- Keyword or semantic search
+- Semantic search, embeddings, FTS5, or synonym expansion
 - Full browser correction-history viewer
 
 ## FastAPI-generated documentation
