@@ -28,9 +28,12 @@ Verified production facts:
 - Migration 2 deployed without losing existing memories or conversations.
 - UI-selected correction works in production.
 - Only the corrected active value was recalled in a new chat.
-- The corrected value survived another Railway rebuild.
+- UI-selected recoverable forgetting works in production.
+- An archived memory disappeared from ordinary recall and appeared in Archived.
+- Restoring the exact row returned it to ordinary recall.
+- Corrected and restored active values survived later Railway rebuilds.
 
-Projects are focus lenses, not permanent memory walls. A no-project conversation can use all active saved memory. A selected project currently focuses context on global plus matching-project memory; broader relevant cross-project ranking belongs to the later retrieval branch.
+Projects are focus lenses, not permanent memory walls. A no-project conversation can use all active saved memory. The current retrieval branch ranks matching-project memory first, global memory next, and relevant other-project memory afterward while preventing unrelated other-project fallback.
 
 Automatic encrypted backups, retention, scheduled restore testing, and point-in-time recovery are not implemented.
 
@@ -150,11 +153,6 @@ Implemented:
 - Cross-chat recall and rollback regression tests
 - External read-only review followed by verification
 
-Automated verification:
-
-- GitHub Actions passed on Python 3.9, 3.10, and 3.11.
-- Dependency installation, blocking-error lint, and the complete test suite passed in every matrix job.
-
 Production verification:
 
 1. Railway rebuilt from merged `main`.
@@ -205,7 +203,6 @@ Implemented:
 - Mobile responsive layout
 - Safe DOM rendering through `textContent`
 - Stale-request generation guard
-- No browser mutation request at that milestone
 
 Production verification:
 
@@ -253,11 +250,6 @@ Implemented:
 - Confirmed mobile correction UI
 - ADR-016 and synchronized documentation
 
-Automated verification:
-
-- GitHub Actions passed on Python 3.9, 3.10, and 3.11.
-- Local tests, compilation, JavaScript parsing, production-backup migration rehearsal, and external review passed.
-
 Production verification:
 
 - Railway deployed migration 2 successfully.
@@ -270,54 +262,91 @@ Production verification:
 
 See [`MEMORY_CORRECTION_PRODUCTION_VERIFICATION_2026-08-01.md`](MEMORY_CORRECTION_PRODUCTION_VERIFICATION_2026-08-01.md).
 
-## Current work — recoverable memory forget and restore
+### PR #16 — Recoverable memory forget and restore
+
+Merged into `main` on August 1, 2026.
+
+Squash merge commit:
+
+```text
+efd970336ed03535c2704bba2c8dc5655aa63b10
+```
+
+Implemented:
+
+- Reused migration 2; no new schema migration
+- `POST /memories/{id}/archive`
+- `POST /memories/{id}/restore`
+- `GET /memories?status=active|archived`
+- Active and Archived views on the protected Memory page
+- Exact selected-memory Forget and Restore confirmation
+- Archived rows excluded from model context and normal recall
+- Correction chains preserved through archive and restore
+- Archived rows protected from hard deletion
+- Serialized lifecycle writes with `BEGIN IMMEDIATE`
+- Conflict, rollback, and competing-request coverage
+- No browser memory `DELETE`, `PATCH`, or `PUT`
+- ADR-017 and synchronized documentation
+
+Production verification:
+
+- Railway deployed successfully without a schema change.
+- Existing active memories remained visible.
+- One selected memory moved to Archived.
+- A fresh no-project chat no longer recalled the archived value.
+- The exact row appeared in Archived with Restore available.
+- Restoring the row returned it to active recall.
+- A fresh chat recalled the restored value again.
+- The restored state survived another Railway rebuild.
+
+See [`MEMORY_FORGET_RESTORE_PRODUCTION_VERIFICATION_2026-08-01.md`](MEMORY_FORGET_RESTORE_PRODUCTION_VERIFICATION_2026-08-01.md).
+
+## Current work — understandable keyword memory retrieval
 
 Branch:
 
 ```text
-feature/memory-forget-v0.1
+feature/memory-keyword-retrieval-v0.1
 ```
 
 Draft PR:
 
 ```text
-#16 — feat: add recoverable memory forget and restore
+#17 — feat: add understandable keyword memory retrieval
 ```
 
 Purpose:
 
-Let Moot deliberately remove one exact active memory from normal recall without permanently deleting it, then restore that same row later.
+Find useful active memories using deterministic keywords while treating projects as focus lenses rather than hard walls, and add protected keyword search to the Memory page.
 
 Implemented on the branch:
 
-- Reuses migration 2; no new schema migration
-- `POST /memories/{id}/archive`
-- `POST /memories/{id}/restore`
-- `GET /memories?status=active|archived`
-- Active and Archived views on the protected Memory page
-- Exact selected-memory **Forget** confirmation
-- Exact selected-memory **Restore** confirmation
-- Archived rows excluded from model context and normal recall
-- Correction chains preserved through archive and restore
-- Archived rows protected from hard deletion
-- Serialized lifecycle writes with `BEGIN IMMEDIATE`
-- Conflict handling for stale or wrong-state requests
-- Forced-failure rollback coverage
-- Competing-request coverage
-- Safe DOM rendering through `textContent`
-- No browser memory `DELETE`, `PATCH`, or `PUT`
-- ADR-017 and synchronized documentation
+- New `backend/memory_retrieval.py`
+- Pure-Python case, punctuation, stop-word, and limited plural normalization
+- Matches memory content, project name, and memory type/source
+- Matching-project matches first
+- Global matches second
+- Relevant other-project matches third
+- Project fallback limited to matching-project and global active memory
+- No-project matches and fallback across all active memory
+- Maximum 20 context memories
+- Absolute exclusion of archived and superseded rows from model context
+- Optional `q` parameter on `GET /memories`, maximum 500 characters
+- Active and Archived browser search
+- Search and Clear controls with mobile layout
+- Search-aware loading, summary, empty, and error states
+- Stored values and search labels rendered through `textContent`
+- No schema migration, embeddings, vector database, FTS5, or extra model-provider call
+- ADR-018 and synchronized API, roadmap, requirements, and README documentation
 
-Local verification:
+Verification so far:
 
-- 83 automated tests passed.
-- Python bytecode compilation passed.
-- JavaScript syntax validation passed.
-
-GitHub verification:
-
-- The first exact draft head passed GitHub Actions on Python 3.9, 3.10, and 3.11.
-- Documentation was subsequently tightened to preserve useful detail, so the final exact head must pass CI again before review completion.
+- Python and JavaScript syntax checks passed locally.
+- Retrieval smoke tests confirmed project → global → relevant other-project ordering.
+- The first GitHub Actions run collected 103 tests.
+- 102 tests passed.
+- One regression failed because the updated safety-note heading removed the exact established phrase `Forget is recoverable`.
+- The wording was restored without removing the new search explanation.
 
 Still required before merge:
 
@@ -331,13 +360,13 @@ Still required after merge:
 
 - Railway reaches online status
 - Login remains functional
-- Existing active memories remain visible
-- Forget one selected test memory
-- Confirm a new chat does not recall the archived value
-- Confirm the exact row appears in Archived
-- Restore the same row
-- Confirm a new chat recalls it again
-- Confirm the lifecycle result survives a Railway rebuild
+- Existing active and archived memories remain intact
+- Memory-page search finds content, project-name, and corrected active values
+- Archived search finds archived values without exposing them in Active
+- A project chat recalls a clearly relevant memory from another project
+- An unrelated other-project memory is not used as fallback
+- No-project chat still recalls relevant active memory
+- Retrieval and search behavior survive a Railway rebuild
 
 ## Current implementation boundaries
 
@@ -354,22 +383,24 @@ MootOS remains:
 - No multi-agent system
 - No automatic off-volume backups
 
-## Explicitly out of scope for PR #16
+## Explicitly out of scope for PR #17
 
-- Permanent-delete UI or secure erasure
-- Natural-language `forget`
-- Bulk archive or restore
-- Automatic retention or cleanup
-- Keyword or semantic retrieval
-- Full browser correction-history viewer
-- Multi-user permissions
+- Embeddings or vector search
+- SQLite FTS5 or migration 3
+- Synonym or typo correction
+- Model-based memory selection
+- Automatic memory extraction
+- Natural-language correction or forget
+- Duplicate detection
+- Pagination redesign
+- Full browser history viewer
 
 ## Locked sequence
 
 1. Memory review — complete
 2. Memory correction — complete and production-verified
-3. Recoverable forget/archive — current
-4. Keyword retrieval before embeddings
+3. Recoverable forget/archive — complete and production-verified
+4. Keyword retrieval before embeddings — current
 5. Conversation refinement
 6. Curated Moot bootstrap profile
 
@@ -389,4 +420,4 @@ MootOS remains:
 
 ## Immediate decision
 
-Finish final exact-head CI and internal review for PR #16, then request external read-only review. Do not merge until Moot explicitly approves the reviewed exact head.
+Finish exact-head CI and internal review for PR #17, then request external read-only review. Do not merge until Moot explicitly approves the reviewed exact head.
