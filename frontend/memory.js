@@ -426,6 +426,9 @@ async function loadMemories({ preserveSuccess = false, throwOnError = false } = 
   const filterValue = elements.projectFilter.value;
   const memoryStatus = elements.statusFilter.value;
   const searchQuery = selectedSearchQuery();
+  const project = filterValue.startsWith("project:")
+    ? filterValue.slice("project:".length)
+    : null;
 
   setLoading(true);
   clearError();
@@ -434,15 +437,24 @@ async function loadMemories({ preserveSuccess = false, throwOnError = false } = 
   }
 
   try {
-    const params = new URLSearchParams({ status: memoryStatus });
-    if (filterValue.startsWith("project:")) {
-      params.set("project", filterValue.slice("project:".length));
-    }
+    let memories;
     if (searchQuery) {
-      params.set("q", searchQuery);
+      memories = await apiRequest("/memories/search", {
+        method: "POST",
+        body: JSON.stringify({
+          query: searchQuery,
+          project,
+          status: memoryStatus,
+        }),
+      });
+    } else {
+      const params = new URLSearchParams({ status: memoryStatus });
+      if (project) {
+        params.set("project", project);
+      }
+      memories = await apiRequest(`/memories?${params.toString()}`);
     }
 
-    let memories = await apiRequest(`/memories?${params.toString()}`);
     if (requestGeneration !== memoryRequestGeneration) {
       return;
     }
