@@ -2,12 +2,16 @@
 
 import os
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Optional, Protocol
 
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from backend.conversation_guidance import build_conversation_instructions
+from backend.model_input import (
+    ModelInputBudgetError,
+    ModelInputDiagnostics,
+    prepare_model_input,
+)
 
 
 load_dotenv()
@@ -93,13 +97,14 @@ class OpenAIProvider:
 
 
 class ModelRouter:
-    """Select and call the configured replaceable AI provider."""
+    """Select, bound, and call the configured replaceable AI provider."""
 
     def __init__(self) -> None:
         self.provider_name = os.getenv("AI_PROVIDER", "openai").lower()
         self.providers: dict[str, ModelProvider] = {
             "openai": OpenAIProvider(),
         }
+        self.last_input_diagnostics: Optional[ModelInputDiagnostics] = None
 
     def _get_provider(self) -> ModelProvider:
         provider = self.providers.get(self.provider_name)
@@ -119,16 +124,21 @@ class ModelRouter:
         messages: list[dict[str, str]],
         instructions: str,
     ) -> ModelResponse:
-        """Apply conversation guidance and generate through the selected provider."""
+        """Apply fixed capabilities, budgets, and guidance before generation."""
         provider = self._get_provider()
         provider.ensure_ready()
-        refined_instructions = build_conversation_instructions(
-            base_instructions=instructions,
-            messages=messages,
-        )
+        try:
+            prepared = prepare_model_input(
+                base_instructions=instructions,
+                messages=messages,
+            )
+        except ModelInputBudgetError as error:
+            raise ModelProviderError("Model input preparation failed") from error
+
+        self.last_input_diagnostics = prepared.diagnostics
         return provider.generate(
-            messages=messages,
-            instructions=refined_instructions,
+            messages=prepared.messages,
+            instructions=prepared.instructions,
         )
 
 
