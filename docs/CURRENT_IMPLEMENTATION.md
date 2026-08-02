@@ -18,6 +18,7 @@ Production uses one Railway service and one replica. The same process:
 - Reads and writes SQLite
 - Detects explicit memory-save commands
 - Ranks active memory using deterministic keywords
+- Searches active or archived memory through a protected read-only request body
 - Builds model instructions from active memories
 - Calls the configured AI provider for normal conversation
 - Handles correction, archive, and restore internally without a model call
@@ -43,7 +44,8 @@ Responsibilities:
 - Resolves normal conversations and stores normal chat messages
 - Routes explicit memory-save commands to the atomic chat-memory operation
 - Exposes memory correction, history, archive, and restore APIs
-- Accepts active or archived list status and optional keyword query
+- Exposes `GET /memories` for normal active or archived listings
+- Exposes read-only `POST /memories/search` so private terms stay out of request URLs
 - Passes the current user request to the retrieval layer
 - Builds model instructions from identity rules and ranked active memories
 - Sends ordinary chat requests to the configured model provider
@@ -166,7 +168,8 @@ Responsibilities:
 - Case-folds and extracts letters and numbers
 - Removes a small documented English stop-word set
 - Applies limited plural normalization
-- Limits the query to 40 unique keywords
+- Removes repeated query terms before applying the 40-keyword limit
+- Scans complete stored memory content
 - Scores matches against content, project name, and memory type/source
 - Adds a bonus for a contiguous multi-keyword content phrase
 - Applies project-focus ordering
@@ -185,7 +188,7 @@ Unrelated other-project memory is not used as fallback.
 
 No-project ranking:
 
-1. Keyword matches from all active memories
+1. Keyword matches from all active memories, ordered by match strength and recency without a global-scope bonus
 2. Recent active fallback from all projects
 
 Keyword retrieval does not:
@@ -315,11 +318,13 @@ The Memory interface provides:
 - Refresh, loading, empty, success, and error states
 - A direct return link to chat
 
-Search uses `GET /memories` with optional `status`, `project`, and `q` parameters. The browser preserves the request-generation guard so an older response cannot overwrite a newer search or filter selection.
+When search is empty, the browser loads `GET /memories` with optional lifecycle status and exact project parameters. When search is nonblank, it submits `query`, `status`, and optional `project` in the JSON body of protected read-only `POST /memories/search`. This keeps private search text out of request URLs and ordinary URL logs.
+
+The browser preserves the request-generation guard so an older response cannot overwrite a newer search or filter selection.
 
 The browser creates DOM nodes and assigns database values and search labels through `textContent`. It does not render saved memory content as HTML.
 
-The browser can send only explicit `POST` mutations for correction, archive, and restore. It contains no memory `DELETE`, `PATCH`, or `PUT` request.
+The browser sends explicit `POST` mutations only for correction, archive, and restore. Search also uses POST but is read-only. The script contains no memory `DELETE`, `PATCH`, or `PUT` request.
 
 ## 3. Database schema
 
@@ -410,12 +415,14 @@ The messages table has an enforced foreign key to conversations.
 6. Up to 20 recent messages are loaded chronologically.
 7. The current user message is passed to `retrieve_context_memories`.
 8. The retrieval layer loads active memories only.
-9. Query keywords are normalized and matches are ranked by project focus, match score, and recency.
-10. Safe fallback fills remaining context slots.
-11. At most 20 memories are added to model instructions.
-12. The provider generates a response.
-13. The assistant response is saved with provider metadata.
-14. The API returns both stored messages and the conversation ID.
+9. Query keywords are normalized, duplicate terms are removed, and at most 40 unique terms remain.
+10. Complete stored memory content, project name, and source are scored.
+11. Matches are ranked by project focus when a project exists, then match score and recency.
+12. Safe fallback fills remaining context slots.
+13. At most 20 memories are added to model instructions.
+14. The provider generates a response.
+15. The assistant response is saved with provider metadata.
+16. The API returns both stored messages and the conversation ID.
 
 Provider failure behavior:
 
@@ -499,7 +506,7 @@ The same row returns to normal active listings, search, and model context.
 
 ## 10. Listing and keyword-search behavior
 
-`GET /memories` defaults to active rows.
+`GET /memories` defaults to active rows and provides unsearched normal listings.
 
 Supported status values:
 
@@ -508,18 +515,35 @@ active
 archived
 ```
 
-Optional query parameters:
+Optional GET parameter:
 
 ```text
 project=<exact project name>
-q=<keyword query, maximum 500 characters>
 ```
 
 Superseded rows are intentionally available only through direct retrieval and correction history.
 
 For an exact project filter, the API returns only rows assigned to that project. The browser's Global-only filter loads the selected lifecycle list and displays rows whose project is `NULL`.
 
-When `q` contains useful keywords, normal rows are ranked by content, project-name, and source matches. A stop-word-only or omitted query preserves the normal listing order.
+Keyword search uses protected read-only:
+
+```text
+POST /memories/search
+```
+
+JSON body:
+
+```json
+{
+  "query": "keyword phrase",
+  "status": "active",
+  "project": "Cars"
+}
+```
+
+The query is required after trimming and limited to 500 characters. Status must be active or archived. Project is optional and exact. Superseded rows cannot appear.
+
+The POST method is used for privacy, not mutation: search terms stay out of request URLs, browser history, and ordinary URL access logs. The endpoint does not modify SQLite or call the model provider.
 
 ## 11. Hard-delete boundary
 
@@ -545,7 +569,7 @@ When Railway metadata is absent and both auth variables are absent, auth is disa
 When both auth variables are present:
 
 1. Protected browser routes, including `/chat` and `/memory`, redirect to `/login`.
-2. Protected APIs, including keyword search, return HTTP `401` without a valid cookie.
+2. Protected APIs, including `POST /memories/search`, return HTTP `401` without a valid cookie.
 3. Correct login creates a signed 30-day cookie.
 4. Logout deletes the cookie.
 
@@ -601,15 +625,19 @@ The full suite covers:
 - Competing lifecycle operations
 - Authentication boundaries
 - Memory page rendering and browser mutation restrictions
-- Keyword normalization
+- Keyword normalization and unique-query cap
+- Complete long-memory scanning
 - Project, global, and relevant other-project ordering
+- No-project match-strength ordering
 - No unrelated other-project fallback
 - Archived and superseded exclusion from ranked context
 - Active and archived search separation
-- Oversized search-query rejection
+- Exact project search
+- Blank, oversized, and unsupported-status search rejection
+- Private body-based search and authentication
 - Query-aware model instructions
 
-The first keyword-branch GitHub Actions run collected 103 tests. One presentation regression failed because the safety-note heading no longer included the established phrase `Forget is recoverable`; the phrase was restored. Exact-final-head CI remains required.
+The first keyword-branch GitHub Actions run collected 103 tests. One presentation regression failed because the safety-note heading no longer included the established phrase `Forget is recoverable`; the phrase was restored. Internal review then added ranking-edge and private-search regression tests. Exact-final-head CI remains required.
 
 ## 15. Current limitations
 
