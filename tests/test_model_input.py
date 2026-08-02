@@ -11,7 +11,7 @@ from backend.model_input import (
     ModelInputBudgetError,
     prepare_model_input,
 )
-from backend.model_router import ModelResponse, ModelRouter
+from backend.model_router import ModelProviderError, ModelResponse, ModelRouter
 
 
 class CapturingProvider:
@@ -64,6 +64,7 @@ def test_capability_manifest_is_explicit_about_available_and_unavailable_actions
     assert "Deployments, repository changes" in CAPABILITY_MANIFEST
     assert "Background work" in CAPABILITY_MANIFEST
     assert "Planning an action is not the same as having access" in CAPABILITY_MANIFEST
+    assert "chat model does not directly click or invoke" in CAPABILITY_MANIFEST
 
 
 def test_history_budget_drops_oldest_and_preserves_current_message_fully():
@@ -101,6 +102,26 @@ def test_memory_budget_keeps_highest_ranked_prefix_and_drops_lowest_ranked():
     assert second in prepared.instructions
     assert third not in prepared.instructions
     assert prepared.diagnostics.selected_memories == 2
+    assert prepared.diagnostics.dropped_memories == 1
+
+
+def test_multiline_memory_continuation_stays_with_its_ranked_entry():
+    first = (
+        "- [MootOS / note] first line"
+        "\ncontinuation line"
+        "\nthird line"
+    )
+    second = "- [Global / note] lower-ranked entry"
+
+    prepared = prepare_model_input(
+        base_instructions=_instructions_with_memories(first, second),
+        messages=[{"role": "user", "content": "Use the best memory."}],
+        memory_character_budget=len(first),
+    )
+
+    assert first in prepared.instructions
+    assert second not in prepared.instructions
+    assert prepared.diagnostics.selected_memories == 1
     assert prepared.diagnostics.dropped_memories == 1
 
 
@@ -198,3 +219,25 @@ def test_budget_error_does_not_truncate_fixed_core_or_current_request():
             messages=[{"role": "user", "content": "current request"}],
             total_character_budget=10,
         )
+
+
+def test_router_sanitizes_fail_closed_budget_errors(monkeypatch):
+    provider = CapturingProvider()
+    router = ModelRouter()
+    router.provider_name = provider.name
+    router.providers = {provider.name: provider}
+
+    def fail_budget(**kwargs):
+        raise ModelInputBudgetError("PRIVATE-INPUT-CONTENT")
+
+    monkeypatch.setattr("backend.model_router.prepare_model_input", fail_budget)
+
+    with pytest.raises(ModelProviderError) as captured:
+        router.generate(
+            messages=[{"role": "user", "content": "private request"}],
+            instructions="Base identity",
+        )
+
+    assert str(captured.value) == "Model input preparation failed"
+    assert "PRIVATE-INPUT-CONTENT" not in str(captured.value)
+    assert provider.messages == []
