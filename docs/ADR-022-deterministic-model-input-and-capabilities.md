@@ -23,7 +23,7 @@ MootOS prepares every provider request through `backend/model_input.py`.
 
 The current Version 0.1 character budgets are:
 
-- 120,000 characters for the complete provider request
+- 120,000 MootOS-counted characters across instructions, message roles, and message content
 - 64,000 characters for earlier conversation history
 - 32,000 characters for ranked long-term-memory entries
 
