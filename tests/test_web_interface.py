@@ -27,13 +27,15 @@ def test_memory_review_interface_is_served():
     assert response.headers["content-type"].startswith("text/html")
     assert "Long-term memories" in response.text
     assert "safely forget" in response.text
+    assert 'id="memorySearchForm"' in response.text
+    assert 'id="memorySearchInput"' in response.text
     assert 'id="memoryStatusFilter"' in response.text
     assert 'id="memoryProjectFilter"' in response.text
     assert 'id="memoryList"' in response.text
     assert 'id="memoryCorrectionDialog"' in response.text
     assert 'id="memoryCorrectionContent"' in response.text
     assert 'id="memoryLifecycleDialog"' in response.text
-    assert "Forget is recoverable" in response.text
+    assert "Search stays understandable" in response.text
     assert "/static/memory.js" in response.text
     assert "/static/memory.css" in response.text
 
@@ -52,6 +54,7 @@ def test_interface_assets_are_served():
     assert "conversation_id" in chat_script.text
     assert 'apiRequest("/projects")' in memory_script.text
     assert 'apiRequest(`/memories?${params.toString()}`)' in memory_script.text
+    assert 'params.set("q", searchQuery)' in memory_script.text
     assert "memoryRequestGeneration" in memory_script.text
     assert "requestGeneration !== memoryRequestGeneration" in memory_script.text
     assert '/corrections`' in memory_script.text
