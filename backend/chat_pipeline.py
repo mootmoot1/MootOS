@@ -23,7 +23,7 @@ class ChatProjectNotFoundError(ValueError):
 
 
 class ChatStorageError(RuntimeError):
-    """Raised when a complete provider-backed turn cannot be committed."""
+    """Raised when a provider-backed turn cannot be prepared or committed."""
 
 
 _lock_registry_guard = threading.Lock()
@@ -98,43 +98,52 @@ def prepare_chat_turn(
     The returned new-conversation record exists only in memory until the provider
     succeeds and ``commit_chat_turn`` atomically stores the complete pair.
     """
-    with database_connection() as connection:
-        if conversation_id is not None:
-            row = connection.execute(
-                """
-                SELECT id, title, project, created_at, updated_at
-                FROM conversations
-                WHERE id = ?
-                """,
-                (conversation_id,),
-            ).fetchone()
-            if row is None:
-                raise ChatConversationNotFoundError("Conversation not found")
+    try:
+        with database_connection() as connection:
+            if conversation_id is not None:
+                row = connection.execute(
+                    """
+                    SELECT id, title, project, created_at, updated_at
+                    FROM conversations
+                    WHERE id = ?
+                    """,
+                    (conversation_id,),
+                ).fetchone()
+                if row is None:
+                    raise ChatConversationNotFoundError("Conversation not found")
 
-            conversation = dict(row)
+                conversation = dict(row)
+                if project is not None:
+                    existing_project = conversation["project"] or ""
+                    if existing_project.casefold() != project.casefold():
+                        raise ChatProjectMismatchError(
+                            "The requested project does not match this conversation"
+                        )
+
+                history = _load_recent_messages(
+                    connection,
+                    conversation_id=conversation_id,
+                    limit=history_limit,
+                )
+                return {
+                    "conversation": conversation,
+                    "history": history,
+                    "is_new": False,
+                }
+
+            canonical_project = project
             if project is not None:
-                existing_project = conversation["project"] or ""
-                if existing_project.casefold() != project.casefold():
-                    raise ChatProjectMismatchError(
-                        "The requested project does not match this conversation"
-                    )
-
-            history = _load_recent_messages(
-                connection,
-                conversation_id=conversation_id,
-                limit=history_limit,
-            )
-            return {
-                "conversation": conversation,
-                "history": history,
-                "is_new": False,
-            }
-
-        canonical_project = project
-        if project is not None:
-            canonical_project = _canonical_project_name(connection, project)
-            if canonical_project is None:
-                raise ChatProjectNotFoundError("Project does not exist")
+                canonical_project = _canonical_project_name(connection, project)
+                if canonical_project is None:
+                    raise ChatProjectNotFoundError("Project does not exist")
+    except (
+        ChatConversationNotFoundError,
+        ChatProjectMismatchError,
+        ChatProjectNotFoundError,
+    ):
+        raise
+    except Exception as error:
+        raise ChatStorageError("Conversation turn could not be prepared") from error
 
     now = datetime.now(timezone.utc).isoformat()
     conversation = {
@@ -187,6 +196,15 @@ def _insert_message(
     )
 
 
+def _rollback_safely(connection: Optional[sqlite3.Connection]) -> None:
+    if connection is None:
+        return
+    try:
+        connection.rollback()
+    except sqlite3.Error:
+        pass
+
+
 def commit_chat_turn(
     *,
     conversation: dict[str, Any],
@@ -210,8 +228,9 @@ def commit_chat_turn(
         model=model,
     )
 
-    connection = connect()
+    connection: Optional[sqlite3.Connection] = None
     try:
+        connection = connect()
         connection.execute("BEGIN IMMEDIATE")
         if is_new:
             connection.execute(
@@ -237,13 +256,14 @@ def commit_chat_turn(
         )
         connection.commit()
     except ChatConversationNotFoundError:
-        connection.rollback()
+        _rollback_safely(connection)
         raise
     except Exception as error:
-        connection.rollback()
+        _rollback_safely(connection)
         raise ChatStorageError("Conversation turn could not be saved") from error
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
 
     saved_conversation = dict(conversation)
     saved_conversation["updated_at"] = assistant_message["created_at"]
