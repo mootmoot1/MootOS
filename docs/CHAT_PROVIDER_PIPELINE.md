@@ -2,8 +2,9 @@
 
 ## Purpose
 
-This guide describes how normal provider-backed chat avoids orphan messages,
-duplicate retries, unbounded provider waits, and raw upstream error leakage.
+This guide describes how normal provider-backed chat avoids orphan messages and
+half-saved turns, bounds provider waits, reduces duplicate-retry risk, and prevents
+raw upstream error leakage.
 
 Explicit long-term-memory commands use a separate atomic path and are unchanged.
 
@@ -50,7 +51,7 @@ The request returns HTTP `502` with:
 No conversation or message is written. Raw SDK exceptions, endpoints, request IDs,
 and provider response text are not returned to the browser.
 
-### Storage failure after provider success
+### Storage failure before or after provider generation
 
 The request returns HTTP `503` with:
 
@@ -60,16 +61,16 @@ The request returns HTTP `503` with:
 }
 ```
 
-The transaction rolls back the complete pair. A new conversation is also rolled
-back when the failed turn would have created it.
+A preparation failure writes nothing. A commit failure rolls back the complete pair,
+including a new conversation when the failed turn would have created one.
 
-A provider response may have incurred cost before a storage failure. MootOS does not
+A provider response may have incurred cost before a commit failure. MootOS does not
 auto-resend.
 
 ## Browser behavior
 
 While waiting, the browser displays a temporary user bubble and typing indicator.
-If the request fails, it:
+When the `/chat` request returns a failure, it:
 
 - removes both temporary bubbles
 - restores the exact submitted text to the composer
@@ -78,13 +79,22 @@ If the request fails, it:
 - shows the generic server error
 - does not automatically retry
 
-The user decides whether and when to send again.
+After `/chat` succeeds, the committed user and assistant messages remain visible and
+the conversation ID is stored before the sidebar history is refreshed. If that
+secondary history refresh fails, the browser says the message was saved and asks the
+user to refresh the page. It does not remove the committed bubbles or restore the
+composer text.
+
+A network-level response loss is inherently ambiguous: the server may have committed
+the turn even though the browser did not receive the success response. MootOS never
+auto-resends in that situation. Before manually retrying an ambiguous network error,
+refresh the conversation to check whether the pair was saved.
 
 ## Concurrency boundary
 
 The current production architecture is one process and one Railway replica. An
 in-process lock serializes provider turns for the same existing conversation so two
-requests cannot both generate from the same old history.
+normal provider requests cannot both generate from the same old history.
 
 Do not increase the service to multiple processes or replicas and assume this lock
 still coordinates turns. A future multi-replica design needs distributed ordering or
@@ -96,12 +106,16 @@ Before merging:
 
 - Exact-head CI passes all supported Python versions.
 - Provider failure creates zero new rows.
-- Storage failure rolls back both messages and any new conversation.
+- Preparation failure creates zero new rows and returns a sanitized error.
+- Commit connection or message failure rolls back both messages and any new
+  conversation.
 - Successful chat stores exactly one user and one assistant message.
 - The current user message appears in provider input before persistence.
 - Raw provider and storage text does not appear in HTTP responses.
 - OpenAI client construction uses `timeout=45.0` and `max_retries=0`.
-- Frontend failure handling removes temporary bubbles and restores the composer.
+- Frontend request failure removes temporary bubbles and restores the composer.
+- A post-success history-refresh failure keeps the committed turn visible and does
+  not invite a duplicate resend.
 - Existing explicit-memory transaction tests remain green.
 
 After deployment:
@@ -110,8 +124,9 @@ After deployment:
 2. Confirm an ordinary successful message stores both sides after refresh.
 3. Use a controlled non-production provider failure or test configuration when
    available; do not intentionally break the live production API key.
-4. Confirm no unmatched user message appears after a failed request.
-5. Retry manually and confirm only one successful pair is stored.
+4. Confirm no unmatched user message appears after a confirmed failed request.
+5. Retry manually after that confirmed failure and confirm only one successful pair
+   is stored.
 6. Confirm explicit `remember` behavior still stores memory and confirmation once.
 
 ## Incident response
