@@ -41,6 +41,12 @@ def test_keyword_tokenizer_normalizes_case_punctuation_and_simple_plurals():
     )
 
 
+def test_repeated_query_terms_do_not_hide_later_unique_keyword():
+    query = ("repeat " * 45) + "needleword"
+
+    assert tokenize_keywords(query) == ("repeat", "needleword")
+
+
 def test_no_project_retrieval_prioritizes_relevant_memory_across_projects(clean_db):
     relevant = create_memory(
         "I drive a black C300 Benz.",
