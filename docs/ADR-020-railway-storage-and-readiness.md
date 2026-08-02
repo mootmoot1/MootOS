@@ -41,17 +41,19 @@ MootOS also separates liveness from readiness:
 
 - `/health` proves the FastAPI process is alive.
 - `/ready` opens the existing configured database in read-write mode without
-  creating it, performs a small query, and requires the exact schema version
-  supported by the running code.
+  creating the main database, performs a small query, and requires the exact
+  schema version supported by the running code.
 - Railway uses `/ready` as its deployment health check.
 - Public readiness responses reveal no database path, record count, schema name,
   provider configuration, secret, or private content.
 
 ## Why readiness does not run migrations
 
-Startup owns configuration validation and migrations. Readiness must not repair,
-create, or modify storage. A failed readiness response should stop traffic and
-prompt investigation rather than hide a missing database by creating another one.
+Startup owns configuration validation and migrations. Readiness does not create
+the main database, run migrations, or write application records. SQLite may still
+manage normal connection metadata or WAL sidecar state when an existing database
+is opened. A failed readiness response should stop traffic and prompt
+investigation rather than hide a missing database by creating another one.
 
 ## Consequences
 
@@ -97,7 +99,7 @@ Automated tests must prove:
 - Railway refuses an unavailable mount.
 - Railway rejects `MOOTOS_DATABASE_PATH` without the high-risk override.
 - The high-risk override requires an absolute path.
-- Readiness does not create a missing database.
+- Readiness does not create a missing main database.
 - Readiness accepts the exact latest schema and rejects an unsupported version.
 - `/ready` remains public for Railway but returns only generic failure details.
 - `railway.toml` points deployment health checks to `/ready`.
