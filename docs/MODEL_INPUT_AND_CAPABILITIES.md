@@ -63,20 +63,33 @@ Memory entries are kept as the highest-ranked contiguous prefix. When the memory
 budget or total budget is reached, entries are removed from the lowest-ranked end.
 Memory text is not partially truncated.
 
+Normal multiline continuation text remains attached to its ranked entry. The
+current handoff uses the existing rendered memory format, where each new entry
+starts on a line beginning with `- [`. A memory deliberately containing a new line
+that imitates that exact prefix can be counted as a separate budgeting unit. It
+remains untrusted context and does not gain authority over fixed instructions.
+
 Only active memories can enter normal model context. Archived and superseded
 memory versions remain excluded by the existing retrieval layer.
 
 ## Capability manifest
 
-Available in the current running version:
+The manifest distinguishes the running application's features from actions that
+the chat model can directly invoke.
+
+Available to the current running application:
 
 - text chat through the configured provider
-- recent supplied conversation history
-- ranked active long-term memory
-- explicit `remember` and `save this` memory writes
-- memory review, correction, recoverable archive, and restore
+- recent supplied conversation history as chat context
+- ranked active long-term memory as chat context
+- explicit `remember` and `save this` storage writes
+- user-facing memory review, correction, recoverable archive, and restore
 
-Unavailable in the current running version:
+The chat model does not directly click or invoke the memory-management controls.
+It may explain how Moot can use them, and may report a result only when the
+application supplied a confirmed result.
+
+Unavailable to the chat model in the current running version:
 
 - live web search, browsing, or local-business lookup
 - sending messages or contacting people
@@ -111,6 +124,11 @@ tests and in-process inspection. It is not returned by the public chat API.
 
 If fixed instructions plus the current request ever exceed the complete budget,
 the budgeter raises `ModelInputBudgetError` rather than truncating either one.
+
+`ModelRouter` converts that internal exception to the existing fixed
+`ModelProviderError` boundary. The normal `/chat` endpoint therefore returns its
+generic provider-failure response and does not expose the private request,
+instructions, configured limits, or exception text.
 
 With the current API and constants, the 20,000-character request maximum leaves
 ample room for the fixed core. The error exists as a fail-closed invariant for
