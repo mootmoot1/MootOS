@@ -105,7 +105,11 @@ def _normalize_token(token: str) -> str:
     return normalized
 
 
-def _keyword_sequence(text: Optional[str]) -> tuple[str, ...]:
+def _keyword_sequence(
+    text: Optional[str],
+    *,
+    limit: Optional[int] = None,
+) -> tuple[str, ...]:
     if not text:
         return ()
 
@@ -117,7 +121,7 @@ def _keyword_sequence(text: Optional[str]) -> tuple[str, ...]:
         if len(token) < 2 and not token.isdigit():
             continue
         keywords.append(token)
-        if len(keywords) >= MAX_QUERY_TOKENS:
+        if limit is not None and len(keywords) >= limit:
             break
     return tuple(keywords)
 
@@ -126,7 +130,7 @@ def tokenize_keywords(text: Optional[str]) -> tuple[str, ...]:
     """Return unique normalized query keywords while preserving their order."""
     seen: set[str] = set()
     unique: list[str] = []
-    for token in _keyword_sequence(text):
+    for token in _keyword_sequence(text, limit=MAX_QUERY_TOKENS):
         if token in seen:
             continue
         seen.add(token)
@@ -147,7 +151,7 @@ def _contains_sequence(candidate: Sequence[str], query: Sequence[str]) -> bool:
 def _scope_rank(memory: dict[str, Any], project: Optional[str]) -> int:
     memory_project = memory.get("project")
     if project is None:
-        return 1 if memory_project is None else 0
+        return 0
     if memory_project and memory_project.casefold() == project.casefold():
         return 2
     if memory_project is None:
