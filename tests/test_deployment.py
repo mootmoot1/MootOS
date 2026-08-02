@@ -25,11 +25,11 @@ def test_explicit_database_path_has_priority(monkeypatch):
     assert resolve_database_path() == Path("/private/mootos/custom.db")
 
 
-def test_railway_config_uses_port_and_healthcheck():
+def test_railway_config_uses_port_and_database_readiness():
     config = (ROOT / "railway.toml").read_text(encoding="utf-8")
 
     assert "--port $PORT" in config
-    assert 'healthcheckPath = "/health"' in config
+    assert 'healthcheckPath = "/ready"' in config
     assert 'restartPolicyType = "ON_FAILURE"' in config
 
 
