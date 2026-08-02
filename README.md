@@ -62,8 +62,11 @@ Implemented on the current feature branch:
 - Pure-Python keyword normalization and deterministic memory ranking
 - Current-project matches before global matches, then relevant other-project matches
 - Safe recent fallback without unrelated other-project leakage
+- No-project ranking by match strength and recency without a global-scope bonus
+- Complete stored-memory text scanning and a 40-unique-keyword query cap
 - Active-only model context preserved during ranking
-- Protected keyword search across active or archived normal listings
+- Protected read-only keyword search across active or archived normal listings
+- Private search terms submitted in a request body rather than the URL
 - Search by memory content, project name, or source
 - No schema migration, embeddings, vector database, or additional provider call
 
@@ -126,7 +129,7 @@ Available controls on the current branch:
 - **Forget** on active memories
 - **Restore** on archived memories
 
-Search uses literal normalized keywords across memory content, project name, and source. It does not claim semantic understanding, synonym matching, or typo correction.
+Search uses literal normalized keywords across memory content, project name, and source. It does not claim semantic understanding, synonym matching, or typo correction. The protected browser submits search terms in the JSON body of `POST /memories/search`, keeping private phrases out of the request URL and ordinary URL logs.
 
 Correction creates a new active version and marks the selected version superseded in one transaction. The prior value remains available through the history API.
 
@@ -227,13 +230,13 @@ The browser does not expose permanent delete. The legacy administrative delete A
 - Only active memories can enter ordinary model context.
 - A project chat ranks matching-project keyword matches first, global matches next, and relevant other-project matches afterward.
 - After keyword matches, a project chat may use recent matching-project and global fallback only.
-- A no-project chat can rank matches and fallback across every active project memory.
+- A no-project chat ranks all active memory by match strength and recency, then may use fallback from every active project.
 - Projects are focus lenses, not permanent secrecy walls.
 - At most 20 active memories are supplied to the model.
 
-Keyword matching is deterministic and limited. It normalizes case, punctuation, common English stop words, and simple plurals. It does not infer synonyms or correct misspellings.
+Keyword matching is deterministic and limited. It normalizes case, punctuation, common English stop words, and simple plurals. Stored memories are scanned completely, while the request is capped at 40 unique normalized keywords. It does not infer synonyms or correct misspellings.
 
-The Memory page can search active or archived normal listings. Superseded rows remain history-only.
+The Memory page can search active or archived normal listings through the read-only `POST /memories/search` endpoint. Superseded rows remain history-only.
 
 ## Repository layout
 
@@ -387,7 +390,8 @@ Protected application routes include:
 - `GET /chat`
 - `POST /chat`
 - `GET /memory`
-- `GET /memories` with optional status, project, and keyword search
+- `GET /memories` for active or archived normal listings
+- `POST /memories/search` for private read-only keyword search
 - Project, memory, and conversation APIs
 - Memory correction, history, archive, and restore APIs
 
@@ -402,6 +406,7 @@ Current protections:
 - Secure cookies on Railway
 - Environment-based secrets
 - Protected chat, memory interface, search, and APIs
+- Private keyword search terms kept out of request URLs
 - Verified write-before-confirm memory behavior
 - Exact selected-memory confirmation for correction, forget, and restore
 - Active-only normal model context
