@@ -105,11 +105,7 @@ def _normalize_token(token: str) -> str:
     return normalized
 
 
-def _keyword_sequence(
-    text: Optional[str],
-    *,
-    limit: Optional[int] = None,
-) -> tuple[str, ...]:
+def _keyword_sequence(text: Optional[str]) -> tuple[str, ...]:
     if not text:
         return ()
 
@@ -121,20 +117,20 @@ def _keyword_sequence(
         if len(token) < 2 and not token.isdigit():
             continue
         keywords.append(token)
-        if limit is not None and len(keywords) >= limit:
-            break
     return tuple(keywords)
 
 
 def tokenize_keywords(text: Optional[str]) -> tuple[str, ...]:
-    """Return unique normalized query keywords while preserving their order."""
+    """Return at most 40 unique normalized keywords in their original order."""
     seen: set[str] = set()
     unique: list[str] = []
-    for token in _keyword_sequence(text, limit=MAX_QUERY_TOKENS):
+    for token in _keyword_sequence(text):
         if token in seen:
             continue
         seen.add(token)
         unique.append(token)
+        if len(unique) >= MAX_QUERY_TOKENS:
+            break
     return tuple(unique)
 
 
