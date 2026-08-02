@@ -323,30 +323,39 @@ Implemented on the branch:
 
 - New `backend/memory_retrieval.py`
 - Pure-Python case, punctuation, stop-word, and limited plural normalization
+- Duplicate removal before a maximum of 40 unique query keywords
+- Complete scanning of stored memory content
 - Matches memory content, project name, and memory type/source
 - Matching-project matches first
 - Global matches second
 - Relevant other-project matches third
 - Project fallback limited to matching-project and global active memory
-- No-project matches and fallback across all active memory
+- No-project ranking by match strength and recency without global-scope bias
+- No-project fallback across all active memory
 - Maximum 20 context memories
 - Absolute exclusion of archived and superseded rows from model context
-- Optional `q` parameter on `GET /memories`, maximum 500 characters
+- `GET /memories` retained for unsearched active or archived listings
+- Protected read-only `POST /memories/search` with query, lifecycle status, and optional exact project in the JSON body
+- Search terms kept out of request URLs and ordinary URL access logs
 - Active and Archived browser search
 - Search and Clear controls with mobile layout
 - Search-aware loading, summary, empty, and error states
 - Stored values and search labels rendered through `textContent`
 - No schema migration, embeddings, vector database, FTS5, or extra model-provider call
-- ADR-018 and synchronized API, roadmap, requirements, and README documentation
+- No browser memory `DELETE`, `PATCH`, or `PUT`
+- ADR-018 and synchronized API, roadmap, requirements, implementation, and README documentation
 
 Verification so far:
 
-- Python and JavaScript syntax checks passed locally.
+- Python and JavaScript syntax checks passed during development.
 - Retrieval smoke tests confirmed project → global → relevant other-project ordering.
 - The first GitHub Actions run collected 103 tests.
 - 102 tests passed.
-- One regression failed because the updated safety-note heading removed the exact established phrase `Forget is recoverable`.
+- One presentation regression failed because the updated safety-note heading removed the exact established phrase `Forget is recoverable`.
 - The wording was restored without removing the new search explanation.
+- Internal review found and fixed complete-memory scanning, no-project scope bias, and repeated-query-budget edge cases.
+- Internal privacy review moved browser search terms from a URL query to a protected JSON request body.
+- Added regression coverage for long memories, no-project match strength, repeated terms, search authentication, exact project search, validation, and absence of URL query terms.
 
 Still required before merge:
 
