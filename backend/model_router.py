@@ -7,6 +7,8 @@ from typing import Protocol
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from backend.conversation_guidance import build_conversation_instructions
+
 
 load_dotenv()
 
@@ -110,10 +112,17 @@ class ModelRouter:
         messages: list[dict[str, str]],
         instructions: str,
     ) -> ModelResponse:
-        """Generate a normalized response through the selected provider."""
+        """Apply conversation guidance and generate through the selected provider."""
         provider = self._get_provider()
         provider.ensure_ready()
-        return provider.generate(messages=messages, instructions=instructions)
+        refined_instructions = build_conversation_instructions(
+            base_instructions=instructions,
+            messages=messages,
+        )
+        return provider.generate(
+            messages=messages,
+            instructions=refined_instructions,
+        )
 
 
 def get_model_router() -> ModelRouter:
