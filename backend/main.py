@@ -23,12 +23,19 @@ from backend.chat_memory import (
     ProjectNotFoundError,
     save_explicit_memory_chat,
 )
+from backend.chat_pipeline import (
+    ChatConversationNotFoundError,
+    ChatProjectMismatchError,
+    ChatProjectNotFoundError,
+    ChatStorageError,
+    commit_chat_turn,
+    conversation_turn_lock,
+    prepare_chat_turn,
+)
 from backend.conversation import (
-    add_message as store_message,
     create_conversation as store_conversation,
     get_conversation as load_conversation,
     list_conversations as load_conversations,
-    list_messages as load_messages,
 )
 from backend.db import (
     DatabaseReadinessError,
@@ -524,61 +531,74 @@ def chat(request: ChatRequest) -> dict[str, Any]:
     try:
         router.ensure_ready()
     except ModelConfigurationError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
+        raise HTTPException(
+            status_code=503,
+            detail="MootOS model provider is not configured",
+        ) from error
 
-    if request.conversation_id:
-        conversation = _get_conversation_or_404(request.conversation_id)
-        if request.project is not None:
-            existing_project = conversation["project"] or ""
-            if existing_project.casefold() != request.project.casefold():
-                raise HTTPException(
-                    status_code=409,
-                    detail="The requested project does not match this conversation",
-                )
-    else:
-        try:
-            conversation = store_conversation(
+    try:
+        with conversation_turn_lock(request.conversation_id):
+            prepared = prepare_chat_turn(
+                conversation_id=request.conversation_id,
                 project=request.project,
                 title=request.message.strip()[:80],
             )
-        except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
+            conversation = prepared["conversation"]
+            model_messages = [
+                {"role": message["role"], "content": message["content"]}
+                for message in prepared["history"]
+            ]
+            model_messages.append({"role": "user", "content": request.message})
 
-    user_message = store_message(
-        conversation_id=conversation["id"],
-        role="user",
-        content=request.message,
-    )
-    history = load_messages(conversation["id"], limit=20)
-    model_messages = [
-        {"role": message["role"], "content": message["content"]}
-        for message in history
-    ]
+            try:
+                model_response = router.generate(
+                    messages=model_messages,
+                    instructions=_build_model_instructions(
+                        conversation["project"],
+                        request.message,
+                    ),
+                )
+            except ModelConfigurationError as error:
+                raise HTTPException(
+                    status_code=503,
+                    detail="MootOS model provider is not configured",
+                ) from error
+            except ModelProviderError as error:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "MootOS could not get a model response. "
+                        "Your message was not saved."
+                    ),
+                ) from error
 
-    try:
-        model_response = router.generate(
-            messages=model_messages,
-            instructions=_build_model_instructions(
-                conversation["project"],
-                request.message,
-            ),
-        )
-    except ModelConfigurationError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    except ModelProviderError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
+            saved_turn = commit_chat_turn(
+                conversation=conversation,
+                is_new=prepared["is_new"],
+                user_content=request.message,
+                assistant_content=model_response.text,
+                provider=model_response.provider,
+                model=model_response.model,
+            )
+    except ChatConversationNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Conversation not found") from error
+    except ChatProjectMismatchError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="The requested project does not match this conversation",
+        ) from error
+    except ChatProjectNotFoundError as error:
+        raise HTTPException(status_code=422, detail="Project does not exist") from error
+    except ChatStorageError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="MootOS could not save the conversation turn. Please retry.",
+        ) from error
 
-    assistant_message = store_message(
-        conversation_id=conversation["id"],
-        role="assistant",
-        content=model_response.text,
-        provider=model_response.provider,
-        model=model_response.model,
-    )
     return _chat_response(
-        conversation=conversation,
-        user_message=user_message,
-        assistant_message=assistant_message,
+        conversation=saved_turn["conversation"],
+        user_message=saved_turn["user_message"],
+        assistant_message=saved_turn["assistant_message"],
         provider=model_response.provider,
         model=model_response.model,
     )

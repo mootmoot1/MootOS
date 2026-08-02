@@ -12,6 +12,7 @@ These documents describe the code and deployment that exist today.
 - [`CURRENT_IMPLEMENTATION.md`](CURRENT_IMPLEMENTATION.md) — current modules, request flows, boundaries, and known limitations
 - [`CONVERSATION_REFINEMENT.md`](CONVERSATION_REFINEMENT.md) — provider-independent rules for follow-ups, notes, corrections, uncertainty, capability honesty, context safety, and production verification
 - [`RAILWAY_STORAGE_AND_READINESS.md`](RAILWAY_STORAGE_AND_READINESS.md) — fail-closed production database-path rules, liveness/readiness separation, high-risk override, and deployment verification
+- [`CHAT_PROVIDER_PIPELINE.md`](CHAT_PROVIDER_PIPELINE.md) — atomic provider-backed turns, bounded provider calls, generic errors, concurrency boundary, and browser retry behavior
 - [`API_REFERENCE.md`](API_REFERENCE.md) — current HTTP routes, request fields, response shapes, and errors
 - [`DATA_AND_PERSISTENCE.md`](DATA_AND_PERSISTENCE.md) — SQLite layout, database paths, Railway volume rules, backup guidance, migrations, and memory lifecycle persistence
 - [`FOUNDATION_HARDENING.md`](FOUNDATION_HARDENING.md) — centralized SQLite settings, schema migrations, production auth safety, validation, and deployment checks
@@ -29,6 +30,7 @@ These documents explain how to deploy, verify, recover, and maintain the live sy
 - [`PHONE_DEPLOYMENT.md`](PHONE_DEPLOYMENT.md) — initial Railway and phone setup
 - [`OPERATIONS_RUNBOOK.md`](OPERATIONS_RUNBOOK.md) — routine deployment, health checks, persistence verification, incident response, migration safety, and rollback
 - [`RAILWAY_STORAGE_AND_READINESS.md`](RAILWAY_STORAGE_AND_READINESS.md) — production volume validation, readiness checks, and wrong-database incident response
+- [`CHAT_PROVIDER_PIPELINE.md`](CHAT_PROVIDER_PIPELINE.md) — provider/chat failure behavior, retry safety, verification, and incident response
 - [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md) — WAL-safe manual snapshot, off-volume transfer, restore drill, and production restore safeguards
 
 ## 3. Architecture history
@@ -45,6 +47,7 @@ These documents preserve why important technical choices were made.
 - [`ADR-018-understandable-keyword-memory-retrieval.md`](ADR-018-understandable-keyword-memory-retrieval.md)
 - [`ADR-019-provider-independent-conversation-refinement.md`](ADR-019-provider-independent-conversation-refinement.md)
 - [`ADR-020-railway-storage-and-readiness.md`](ADR-020-railway-storage-and-readiness.md)
+- [`ADR-021-atomic-chat-provider-pipeline.md`](ADR-021-atomic-chat-provider-pipeline.md)
 
 The repository root also contains:
 
@@ -77,9 +80,10 @@ For operating the live Railway deployment:
 
 1. `docs/OPERATIONS_RUNBOOK.md`
 2. `docs/RAILWAY_STORAGE_AND_READINESS.md`
-3. `docs/DATA_AND_PERSISTENCE.md`
-4. `docs/FOUNDATION_HARDENING.md`
-5. `docs/PHONE_DEPLOYMENT.md`
+3. `docs/CHAT_PROVIDER_PIPELINE.md`
+4. `docs/DATA_AND_PERSISTENCE.md`
+5. `docs/FOUNDATION_HARDENING.md`
+6. `docs/PHONE_DEPLOYMENT.md`
 
 For planning a future feature:
 

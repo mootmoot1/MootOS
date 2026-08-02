@@ -12,6 +12,9 @@ from backend.conversation_guidance import build_conversation_instructions
 
 load_dotenv()
 
+PROVIDER_TIMEOUT_SECONDS = 45.0
+PROVIDER_MAX_RETRIES = 0
+
 
 class ModelConfigurationError(RuntimeError):
     """Raised when the selected model provider is not configured."""
@@ -69,7 +72,11 @@ class OpenAIProvider:
     ) -> ModelResponse:
         self.ensure_ready()
         try:
-            client = OpenAI(api_key=self.api_key)
+            client = OpenAI(
+                api_key=self.api_key,
+                timeout=PROVIDER_TIMEOUT_SECONDS,
+                max_retries=PROVIDER_MAX_RETRIES,
+            )
             response = client.responses.create(
                 model=self.model,
                 instructions=instructions,
@@ -77,11 +84,11 @@ class OpenAIProvider:
                 store=False,
             )
         except Exception as error:
-            raise ModelProviderError(f"OpenAI request failed: {error}") from error
+            raise ModelProviderError("Model provider request failed") from error
 
         text = (response.output_text or "").strip()
         if not text:
-            raise ModelProviderError("OpenAI returned an empty response")
+            raise ModelProviderError("Model provider returned an empty response")
         return ModelResponse(text=text, provider=self.name, model=self.model)
 
 
@@ -104,7 +111,7 @@ class ModelRouter:
         return provider
 
     def ensure_ready(self) -> None:
-        """Validate the selected provider before a chat message is saved."""
+        """Validate the selected provider before preparing a chat turn."""
         self._get_provider().ensure_ready()
 
     def generate(

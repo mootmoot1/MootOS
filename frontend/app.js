@@ -274,7 +274,7 @@ async function sendMessage(message) {
 
   clearError();
   const cleanMessage = message.trim();
-  addMessage("user", cleanMessage);
+  const userRow = addMessage("user", cleanMessage);
   const typingRow = addMessage("assistant", "", {
     id: "typingMessage",
     typing: true,
@@ -291,12 +291,25 @@ async function sendMessage(message) {
     requestBody.project = elements.projectSelect.value;
   }
 
+  let result;
   try {
-    const result = await apiRequest("/chat", {
+    result = await apiRequest("/chat", {
       method: "POST",
       body: JSON.stringify(requestBody),
     });
+  } catch (error) {
+    typingRow.remove();
+    userRow.remove();
+    elements.messageInput.value = cleanMessage;
+    autoResizeInput();
+    setEmptyState(elements.messages.querySelectorAll(".message-row").length === 0);
+    showError(error.message);
+    setBusy(false);
+    elements.messageInput.focus();
+    return;
+  }
 
+  try {
     typingRow.remove();
     state.conversationId = result.conversation_id;
     state.project = result.project || "";
@@ -309,10 +322,15 @@ async function sendMessage(message) {
 
     addMessage("assistant", result.assistant_message.content);
     localStorage.setItem("mootosConversationId", state.conversationId);
-    await loadConversationHistory();
-  } catch (error) {
-    typingRow.remove();
-    showError(error.message);
+
+    try {
+      await loadConversationHistory();
+    } catch (error) {
+      showError(
+        "Message was saved, but the conversation list could not refresh. " +
+          "Refresh the page to reload it."
+      );
+    }
   } finally {
     setBusy(false);
     elements.messageInput.focus();
