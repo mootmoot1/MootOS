@@ -48,7 +48,7 @@ Serves the main chat interface.
 
 Serves the protected memory search, review, correction, recoverable-forget, and restore interface.
 
-The browser page reads from `GET /projects` and `GET /memories`. It can send explicit confirmed `POST` requests for correction, archive, and restore. It does not expose permanent-delete, `PATCH`, or `PUT` controls.
+The browser page reads from `GET /projects`, `GET /memories`, and the read-only `POST /memories/search` endpoint. It can send explicit confirmed `POST` requests for correction, archive, and restore. It does not expose permanent-delete, `PATCH`, or `PUT` controls.
 
 ### `GET /login`
 
@@ -211,23 +211,21 @@ Unknown project: HTTP `422`.
 
 ### `GET /memories`
 
-Lists active memories newest first by default and optionally performs literal keyword search.
+Lists active memories newest first by default.
 
 Optional query parameters:
 
 ```text
 status=active|archived
 project=<exact project name>
-q=<keyword query, maximum 500 characters>
 ```
 
 Examples:
 
 ```text
 GET /memories
-GET /memories?status=active&q=car
-GET /memories?status=archived&q=test%20code
-GET /memories?status=archived&project=Cars&q=benz
+GET /memories?status=archived
+GET /memories?status=active&project=Cars
 ```
 
 Rules:
@@ -236,14 +234,62 @@ Rules:
 - `archived` returns recoverably forgotten rows.
 - Superseded rows are intentionally unavailable through the normal list endpoint.
 - The project filter returns only rows assigned to that exact project. It does not automatically add global rows.
-- `q` matches normalized keywords against memory content, project name, and memory type or source.
-- Content matches receive the strongest score; contiguous content phrases receive an additional ranking bonus.
-- An omitted or stop-word-only `q` preserves the normal listing order.
 - Unsupported status returns HTTP `422`.
-- A search query longer than 500 characters returns HTTP `422`.
 - Unknown project returns HTTP `404`.
 
-The `/memory` browser interface uses this endpoint. Its Global-only option filters rows whose `project` value is `null` after the protected API response is received.
+The `/memory` browser interface uses this endpoint when the search field is empty. Its Global-only option filters rows whose `project` value is `null` after the protected API response is received.
+
+### `POST /memories/search`
+
+Performs a read-only keyword search while keeping private search terms out of the URL, browser history, and ordinary URL access logs.
+
+Request:
+
+```json
+{
+  "query": "black Benz",
+  "status": "active",
+  "project": "Cars"
+}
+```
+
+Fields:
+
+- `query`: required after trimming, 1–500 characters
+- `status`: `active` or `archived`; defaults to `active`
+- `project`: optional exact existing project
+
+Rules:
+
+- Superseded rows are never returned.
+- The optional project filter searches only rows assigned to that exact project.
+- Keywords match normalized memory content, project name, and memory type or source.
+- Content matches receive the strongest score.
+- A contiguous multi-keyword content phrase receives an additional ranking bonus.
+- Stored memory content is scanned completely.
+- The query is capped at 40 unique normalized keywords after duplicate removal.
+- Blank, oversized, or unsupported-status requests return HTTP `422`.
+- Unknown project returns HTTP `404`.
+- The endpoint reads data only and performs no database mutation.
+- The endpoint does not call the external model provider.
+
+Success: HTTP `200`.
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "content": "I drive a black C300 Benz.",
+      "project": "Cars",
+      "status": "active"
+    }
+  ]
+}
+```
+
+The Memory page uses this endpoint only while nonblank search text is present. Search text and returned values are rendered through `textContent`.
 
 ### `GET /memories/{memory_id}`
 
@@ -337,16 +383,6 @@ The row disappears from active listings and model context but remains available 
 
 Success: HTTP `200`.
 
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "status": "archived"
-  }
-}
-```
-
 Missing memory returns HTTP `404`. An already archived, superseded, or stale target returns HTTP `409`.
 
 ### `POST /memories/{memory_id}/restore`
@@ -364,16 +400,6 @@ Behavior:
 The same row returns to active listings, active keyword search, and model context. Correction links remain unchanged.
 
 Success: HTTP `200`.
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "status": "active"
-  }
-}
-```
 
 Missing memory returns HTTP `404`. An active, superseded, or stale target returns HTTP `409`.
 
@@ -456,13 +482,7 @@ GET /conversations?project=MootOS
 
 Returns one conversation with its complete message history.
 
-Missing conversation returns HTTP `404`:
-
-```json
-{
-  "detail": "Conversation not found"
-}
-```
+Missing conversation returns HTTP `404`.
 
 ## Chat
 
@@ -542,48 +562,18 @@ For a recognized save command:
 
 This path does not call OpenAI.
 
-Example request:
-
-```json
-{
-  "message": "Remember that my favorite tea is jasmine.",
-  "project": "Personal"
-}
-```
-
-Example response fields:
-
-```json
-{
-  "success": true,
-  "data": {
-    "conversation_id": "uuid",
-    "project": "Personal",
-    "user_message": {
-      "role": "user",
-      "content": "Remember that my favorite tea is jasmine."
-    },
-    "assistant_message": {
-      "role": "assistant",
-      "content": "Saved to Personal long-term memory: my favorite tea is jasmine.",
-      "provider": "mootos",
-      "model": "memory-command-v1"
-    },
-    "provider": "mootos",
-    "model": "memory-command-v1"
-  }
-}
-```
-
 ### Cross-chat recall rules
 
 - Only active memories are supplied to ordinary model context.
 - A project conversation ranks matching-project keyword matches first, global matches next, and relevant other-project matches afterward.
 - After keyword matches, project fallback may include only recent matching-project and global active memories.
-- A no-project conversation can rank keyword matches from every project and fill remaining slots from all active memories.
+- A no-project conversation ranks all active memories by match strength and recency without a global-scope bonus.
+- No-project fallback may come from every active project.
 - Archived and superseded rows never enter normal context.
 - At most 20 active memories are supplied.
 - Keyword matching is literal and normalized; synonyms and typographical errors are not inferred.
+- Stored memory content is scanned completely.
+- The query uses at most 40 unique normalized keywords after duplicate removal.
 
 ### Standard successful chat response
 
@@ -607,23 +597,11 @@ Missing conversation: HTTP `404`.
 
 Project mismatch: HTTP `409`.
 
-```json
-{
-  "detail": "The requested project does not match this conversation"
-}
-```
-
 Oversized extracted memory: HTTP `422`.
 
-```json
-{
-  "detail": "Memory content must be 10,000 characters or fewer"
-}
-```
+## Browser request boundary
 
-## Browser mutation boundary
-
-The Memory page can send only these memory mutations:
+The Memory page can send these confirmed memory mutations:
 
 ```text
 POST /memories/{id}/corrections
@@ -631,7 +609,13 @@ POST /memories/{id}/archive
 POST /memories/{id}/restore
 ```
 
-Keyword search is a protected `GET /memories?...&q=...` request. The page sends no memory `DELETE`, `PATCH`, or `PUT` request. Stored content, project values, and search labels are rendered through DOM `textContent`.
+It also sends read-only keyword searches through:
+
+```text
+POST /memories/search
+```
+
+The search request body keeps private terms out of the URL and performs no database mutation. The page sends no memory `DELETE`, `PATCH`, or `PUT` request. Stored content, project values, and search labels are rendered through DOM `textContent`.
 
 ## Current memory-command and retrieval limitations
 
@@ -645,6 +629,7 @@ Not implemented:
 - Duplicate detection
 - Conflict resolution beyond exact lifecycle state checks
 - Semantic search, embeddings, FTS5, or synonym expansion
+- Typographical-error correction
 - Full browser correction-history viewer
 
 ## FastAPI-generated documentation
