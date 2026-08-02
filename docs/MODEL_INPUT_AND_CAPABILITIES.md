@@ -33,11 +33,11 @@ Current constants in `backend/model_input.py`:
 
 | Input area | Budget |
 | --- | ---: |
-| Complete provider request | 120,000 characters |
+| Instructions plus message role/content text | 120,000 characters |
 | Earlier conversation history | 64,000 characters |
 | Ranked memory context | 32,000 characters |
 
-The complete total counts both instructions and messages.
+The total counts instruction text plus each selected message role and content. It is an application input-text budget, not the byte size of the serialized provider HTTP request.
 
 The current user message is accepted by the existing API limit of 20,000
 characters and is preserved in full. Fixed identity, capability rules,
