@@ -10,6 +10,7 @@ These documents describe the code and deployment that exist today.
 
 - [`CURRENT_CHECKPOINT.md`](CURRENT_CHECKPOINT.md) — latest verified project status and next milestone
 - [`CURRENT_IMPLEMENTATION.md`](CURRENT_IMPLEMENTATION.md) — current modules, request flows, boundaries, and known limitations
+- [`CONVERSATION_REFINEMENT.md`](CONVERSATION_REFINEMENT.md) — provider-independent rules for follow-ups, notes, corrections, uncertainty, capability honesty, context safety, and production verification
 - [`API_REFERENCE.md`](API_REFERENCE.md) — current HTTP routes, request fields, response shapes, and errors
 - [`DATA_AND_PERSISTENCE.md`](DATA_AND_PERSISTENCE.md) — SQLite layout, database paths, Railway volume rules, backup guidance, migrations, and memory lifecycle persistence
 - [`FOUNDATION_HARDENING.md`](FOUNDATION_HARDENING.md) — centralized SQLite settings, schema migrations, production auth safety, validation, and deployment checks
@@ -40,6 +41,7 @@ These documents preserve why important technical choices were made.
 - [`ADR-016-memory-lifecycle-and-correction.md`](ADR-016-memory-lifecycle-and-correction.md)
 - [`ADR-017-recoverable-memory-forget-and-restore.md`](ADR-017-recoverable-memory-forget-and-restore.md)
 - [`ADR-018-understandable-keyword-memory-retrieval.md`](ADR-018-understandable-keyword-memory-retrieval.md)
+- [`ADR-019-provider-independent-conversation-refinement.md`](ADR-019-provider-independent-conversation-refinement.md)
 
 The repository root also contains:
 
