@@ -74,8 +74,7 @@ memory versions remain excluded by the existing retrieval layer.
 
 ## Capability manifest
 
-The manifest distinguishes the running application's features from actions that
-the chat model can directly invoke.
+The manifest is deterministic application-owned input. It distinguishes the running application's features from actions that the chat model can directly invoke. It does not claim to be a deterministic validator of every provider output.
 
 Available to the current running application:
 
@@ -102,9 +101,9 @@ Unavailable to the chat model in the current running version:
 MootOS may help plan, draft, compare, explain, or prepare steps for an outside
 action. That is not the same as accessing the service or completing the action.
 
-A provider response must not claim that an unavailable action started or
-completed. Long-term memory may be reported as saved only after the explicit
-storage path confirms the write.
+A provider response is instructed not to claim that an unavailable action started or completed. Long-term memory may be reported as saved only after the explicit storage path confirms the write.
+
+Because the current boundary is prompt-based, representative tests and production prompts verify behavior but cannot mathematically guarantee every future response. A future response-policy layer may add stronger deterministic checks if concrete failures justify it.
 
 ## Diagnostics and privacy
 
