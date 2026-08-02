@@ -54,6 +54,32 @@ def test_no_project_retrieval_prioritizes_relevant_memory_across_projects(clean_
     assert results[0]["id"] == relevant["id"]
 
 
+def test_no_project_retrieval_uses_match_strength_not_global_scope(clean_db):
+    project_memory = create_memory(
+        "My black C300 Benz is the current vehicle.",
+        project="Cars",
+    )
+    global_memory = create_memory("Car paperwork is stored safely.")
+
+    results = retrieve_context_memories(None, "car C300 Benz")
+
+    assert [memory["id"] for memory in results[:2]] == [
+        project_memory["id"],
+        global_memory["id"],
+    ]
+
+
+def test_keyword_match_scans_complete_long_memory_content(clean_db):
+    long_memory = create_memory(
+        ("fillerword " * 45) + "needleword appears at the end.",
+        project="Personal",
+    )
+
+    results = retrieve_context_memories(None, "needleword")
+
+    assert results[0]["id"] == long_memory["id"]
+
+
 def test_project_retrieval_orders_matching_global_and_other_project_matches(clean_db):
     matching_project = create_memory(
         "The Studio car workflow uses the rear entrance.",
