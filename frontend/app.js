@@ -274,7 +274,7 @@ async function sendMessage(message) {
 
   clearError();
   const cleanMessage = message.trim();
-  addMessage("user", cleanMessage);
+  const userRow = addMessage("user", cleanMessage);
   const typingRow = addMessage("assistant", "", {
     id: "typingMessage",
     typing: true,
@@ -312,6 +312,10 @@ async function sendMessage(message) {
     await loadConversationHistory();
   } catch (error) {
     typingRow.remove();
+    userRow.remove();
+    elements.messageInput.value = cleanMessage;
+    autoResizeInput();
+    setEmptyState(elements.messages.querySelectorAll(".message-row").length === 0);
     showError(error.message);
   } finally {
     setBusy(false);
