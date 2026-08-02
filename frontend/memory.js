@@ -1,4 +1,8 @@
 const elements = {
+  searchForm: document.querySelector("#memorySearchForm"),
+  searchInput: document.querySelector("#memorySearchInput"),
+  searchButton: document.querySelector("#searchMemoriesButton"),
+  clearSearchButton: document.querySelector("#clearMemorySearchButton"),
   statusFilter: document.querySelector("#memoryStatusFilter"),
   projectFilter: document.querySelector("#memoryProjectFilter"),
   refreshButton: document.querySelector("#refreshMemoriesButton"),
@@ -146,6 +150,9 @@ function clearLifecycleError() {
 }
 
 function setLoading(loading) {
+  elements.searchInput.disabled = loading;
+  elements.searchButton.disabled = loading;
+  elements.clearSearchButton.disabled = loading;
   elements.statusFilter.disabled = loading;
   elements.projectFilter.disabled = loading;
   elements.refreshButton.disabled = loading;
@@ -349,17 +356,28 @@ function selectedStatusLabel() {
   return elements.statusFilter.value === "archived" ? "archived" : "active";
 }
 
+function selectedSearchQuery() {
+  return elements.searchInput.value.trim();
+}
+
 function renderEmptyState() {
   const empty = document.createElement("section");
   empty.className = "memory-empty-state";
 
   const title = document.createElement("h2");
   const statusLabel = selectedStatusLabel();
-  title.textContent = statusLabel === "archived" ? "No archived memories" : "No memories found";
+  const searchQuery = selectedSearchQuery();
+  if (searchQuery) {
+    title.textContent = "No matching memories";
+  } else {
+    title.textContent = statusLabel === "archived" ? "No archived memories" : "No memories found";
+  }
 
   const message = document.createElement("p");
   const filterValue = elements.projectFilter.value;
-  if (statusLabel === "archived") {
+  if (searchQuery) {
+    message.textContent = `No ${statusLabel} memories matched “${searchQuery}” in ${selectedFilterLabel()}.`;
+  } else if (statusLabel === "archived") {
     message.textContent =
       "Forgotten memories will appear here and can be restored to normal recall.";
   } else if (filterValue === "global") {
@@ -377,7 +395,9 @@ function renderEmptyState() {
 function renderMemories(memories) {
   const count = memories.length;
   const statusLabel = selectedStatusLabel();
-  elements.memorySummary.textContent = `${count} ${statusLabel} ${count === 1 ? "memory" : "memories"} · ${selectedFilterLabel()}`;
+  const searchQuery = selectedSearchQuery();
+  const searchLabel = searchQuery ? ` · Search: “${searchQuery}”` : "";
+  elements.memorySummary.textContent = `${count} ${statusLabel} ${count === 1 ? "memory" : "memories"} · ${selectedFilterLabel()}${searchLabel}`;
   elements.memoryList.replaceChildren();
 
   if (!count) {
@@ -405,6 +425,7 @@ async function loadMemories({ preserveSuccess = false, throwOnError = false } = 
   const requestGeneration = ++memoryRequestGeneration;
   const filterValue = elements.projectFilter.value;
   const memoryStatus = elements.statusFilter.value;
+  const searchQuery = selectedSearchQuery();
 
   setLoading(true);
   clearError();
@@ -416,6 +437,9 @@ async function loadMemories({ preserveSuccess = false, throwOnError = false } = 
     const params = new URLSearchParams({ status: memoryStatus });
     if (filterValue.startsWith("project:")) {
       params.set("project", filterValue.slice("project:".length));
+    }
+    if (searchQuery) {
+      params.set("q", searchQuery);
     }
 
     let memories = await apiRequest(`/memories?${params.toString()}`);
@@ -521,6 +545,20 @@ async function submitLifecycle(event) {
   }
 }
 
+function submitSearch(event) {
+  event.preventDefault();
+  loadMemories();
+}
+
+function clearSearch() {
+  if (!elements.searchInput.value) {
+    return;
+  }
+  elements.searchInput.value = "";
+  loadMemories();
+  elements.searchInput.focus();
+}
+
 async function initialize() {
   setLoading(true);
   clearError();
@@ -537,6 +575,8 @@ async function initialize() {
   }
 }
 
+elements.searchForm.addEventListener("submit", submitSearch);
+elements.clearSearchButton.addEventListener("click", clearSearch);
 elements.statusFilter.addEventListener("change", loadMemories);
 elements.projectFilter.addEventListener("change", loadMemories);
 elements.refreshButton.addEventListener("click", loadMemories);
