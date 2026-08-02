@@ -111,6 +111,14 @@ class MemoryCorrection(BaseModel):
     content: str = Field(min_length=1, max_length=MAX_MEMORY_CONTENT_LENGTH)
 
 
+class MemorySearchRequest(BaseModel):
+    """Private read-only keyword search submitted in the request body."""
+
+    query: str = Field(min_length=1, max_length=MAX_MEMORY_SEARCH_LENGTH)
+    project: Optional[str] = None
+    memory_status: str = Field(default="active", alias="status")
+
+
 class ProjectCreate(BaseModel):
     """Input accepted when creating a project."""
 
@@ -156,7 +164,7 @@ async def require_private_session(request: Request, call_next):
     )
 
 
-def _build_model_instructions(project: Optional[str], query: str) -> str:
+def _build_model_instructions(project: Optional[str], query: str = "") -> str:
     """Build identity plus keyword-ranked active memory context."""
     memories = retrieve_context_memories(project=project, query=query, limit=20)
     if not memories:
@@ -290,9 +298,8 @@ def create_memory(memory: MemoryCreate) -> dict[str, Any]:
 def list_memories(
     project: Optional[str] = None,
     memory_status: str = Query(default="active", alias="status"),
-    query: Optional[str] = Query(default=None, alias="q", max_length=MAX_MEMORY_SEARCH_LENGTH),
 ) -> dict[str, Any]:
-    """List or keyword-search active or archived memories."""
+    """List active or archived memories, optionally filtered by project."""
     if memory_status not in {"active", "archived"}:
         raise HTTPException(
             status_code=422,
@@ -300,9 +307,31 @@ def list_memories(
         )
     try:
         memories = search_memories(
-            query=query,
+            query=None,
             project=project,
             memory_status=memory_status,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"success": True, "data": memories}
+
+
+@app.post("/memories/search")
+def search_memory_list(search: MemorySearchRequest) -> dict[str, Any]:
+    """Search active or archived memories without placing terms in the URL."""
+    query = search.query.strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="Search query cannot be empty")
+    if search.memory_status not in {"active", "archived"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Memory status must be active or archived",
+        )
+    try:
+        memories = search_memories(
+            query=query,
+            project=search.project,
+            memory_status=search.memory_status,
         )
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
