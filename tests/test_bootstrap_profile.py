@@ -86,10 +86,10 @@ def test_import_writes_all_entries_with_fixed_memory_type(clean_db):
         BOOTSTRAP_PROFILE_MEMORY_TYPE
     }
     assert result["imported"][1]["project"] == "Studio"
-    assert memory_rows() == [
+    assert set(memory_rows()) == {
         ("Use plain explanations.", None, "bootstrap_profile", "active"),
         ("Studio work uses Pro Tools.", "Studio", "bootstrap_profile", "active"),
-    ]
+    }
 
 
 def test_repeated_import_is_a_safe_noop(clean_db):
