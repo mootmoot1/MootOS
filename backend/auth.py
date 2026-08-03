@@ -4,8 +4,10 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import os
 import secrets
+import threading
 import time
 from typing import Optional
 
@@ -15,7 +17,14 @@ from fastapi.responses import Response
 
 COOKIE_NAME = "mootos_session"
 SESSION_DAYS = 30
+MIN_SESSION_SECRET_LENGTH = 32
+LOGIN_FAILURE_LIMIT = 5
+LOGIN_COOLDOWN_SECONDS = 60
 TRUE_VALUES = {"1", "true", "yes", "on"}
+
+_LOGIN_THROTTLE_LOCK = threading.Lock()
+_failed_login_attempts = 0
+_login_blocked_until = 0.0
 
 
 def _environment_flag(name: str) -> bool:
@@ -35,19 +44,30 @@ def public_access_allowed() -> bool:
     return _environment_flag("MOOTOS_ALLOW_PUBLIC")
 
 
+def permanent_memory_delete_allowed() -> bool:
+    """Allow hard delete locally, but require an explicit Railway override."""
+    return not running_on_railway() or _environment_flag("MOOTOS_ALLOW_HARD_DELETE")
+
+
 def auth_enabled() -> bool:
     """Return whether password protection is configured."""
     return bool(os.getenv("MOOTOS_PASSWORD", "").strip())
 
 
 def validate_auth_configuration() -> None:
-    """Reject incomplete or accidentally public production configuration."""
+    """Reject incomplete, weak, or accidentally public production configuration."""
     password = os.getenv("MOOTOS_PASSWORD", "").strip()
     session_secret = os.getenv("MOOTOS_SESSION_SECRET", "").strip()
 
     if bool(password) != bool(session_secret):
         raise RuntimeError(
             "MOOTOS_PASSWORD and MOOTOS_SESSION_SECRET must be configured together"
+        )
+
+    if session_secret and len(session_secret) < MIN_SESSION_SECRET_LENGTH:
+        raise RuntimeError(
+            "MOOTOS_SESSION_SECRET must be at least "
+            f"{MIN_SESSION_SECRET_LENGTH} characters"
         )
 
     if running_on_railway() and not password and not public_access_allowed():
@@ -62,6 +82,55 @@ def password_matches(candidate: str) -> bool:
     """Compare a submitted password without timing-sensitive equality."""
     configured = os.getenv("MOOTOS_PASSWORD", "")
     return bool(configured) and secrets.compare_digest(candidate, configured)
+
+
+def _throttle_clock(now: Optional[float] = None) -> float:
+    return time.monotonic() if now is None else float(now)
+
+
+def login_retry_after(now: Optional[float] = None) -> int:
+    """Return whole seconds remaining in the process-global login cooldown."""
+    global _failed_login_attempts, _login_blocked_until
+
+    current_time = _throttle_clock(now)
+    with _LOGIN_THROTTLE_LOCK:
+        if _login_blocked_until <= current_time:
+            if _login_blocked_until:
+                _failed_login_attempts = 0
+                _login_blocked_until = 0.0
+            return 0
+        return max(1, math.ceil(_login_blocked_until - current_time))
+
+
+def record_failed_login(now: Optional[float] = None) -> int:
+    """Record one failure and return retry seconds when cooldown begins."""
+    global _failed_login_attempts, _login_blocked_until
+
+    current_time = _throttle_clock(now)
+    with _LOGIN_THROTTLE_LOCK:
+        if _login_blocked_until > current_time:
+            return max(1, math.ceil(_login_blocked_until - current_time))
+
+        if _login_blocked_until:
+            _failed_login_attempts = 0
+            _login_blocked_until = 0.0
+
+        _failed_login_attempts += 1
+        if _failed_login_attempts < LOGIN_FAILURE_LIMIT:
+            return 0
+
+        _failed_login_attempts = 0
+        _login_blocked_until = current_time + LOGIN_COOLDOWN_SECONDS
+        return LOGIN_COOLDOWN_SECONDS
+
+
+def reset_login_throttle() -> None:
+    """Clear process-global login failures after success or in isolated tests."""
+    global _failed_login_attempts, _login_blocked_until
+
+    with _LOGIN_THROTTLE_LOCK:
+        _failed_login_attempts = 0
+        _login_blocked_until = 0.0
 
 
 def _session_secret() -> bytes:
