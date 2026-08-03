@@ -144,12 +144,15 @@ def test_correct_password_unlocks_interface_and_api(private_client):
     assert private_client.get("/memories/missing/history").status_code == 404
 
 
-def test_private_html_and_json_are_no_store(private_client):
+def test_private_html_json_and_redirects_are_no_store(private_client):
     login_page = private_client.get("/login")
+    chat_redirect = private_client.get("/chat", follow_redirects=False)
     unauthenticated_api = private_client.get("/projects")
 
     assert login_page.status_code == 200
     assert login_page.headers["Cache-Control"] == "no-store"
+    assert chat_redirect.status_code == 303
+    assert chat_redirect.headers["Cache-Control"] == "no-store"
     assert unauthenticated_api.status_code == 401
     assert unauthenticated_api.headers["Cache-Control"] == "no-store"
 
@@ -166,6 +169,7 @@ def test_core_security_headers_cover_public_and_private_responses(private_client
     responses = [
         private_client.get("/health"),
         private_client.get("/login"),
+        private_client.get("/chat", follow_redirects=False),
         private_client.get("/projects"),
     ]
 
