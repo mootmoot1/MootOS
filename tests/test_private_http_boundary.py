@@ -53,9 +53,9 @@ def test_railway_hard_delete_is_disabled_but_archive_restore_stay_available(
     assert restored.json()["data"]["status"] == "active"
 
 
-def test_railway_hard_delete_needs_explicit_truthy_override(clean_db, monkeypatch):
+def test_railway_hard_delete_requires_exact_true_override(clean_db, monkeypatch):
     monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", "mootos.example")
-    monkeypatch.setenv("MOOTOS_ALLOW_HARD_DELETE", "false")
+    monkeypatch.setenv("MOOTOS_ALLOW_HARD_DELETE", "yes")
     client = TestClient(app)
     created = client.post(
         "/memories",
