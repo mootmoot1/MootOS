@@ -22,6 +22,7 @@ These documents describe the code and deployment that exist today.
 - [`MEMORY_CORRECTION_PRODUCTION_VERIFICATION_2026-08-01.md`](MEMORY_CORRECTION_PRODUCTION_VERIFICATION_2026-08-01.md) — non-private evidence that migration 2 and correction worked in production and survived a rebuild
 - [`MEMORY_FORGET_RESTORE_PRODUCTION_VERIFICATION_2026-08-01.md`](MEMORY_FORGET_RESTORE_PRODUCTION_VERIFICATION_2026-08-01.md) — non-private evidence that recoverable forget and restore worked in production and survived a rebuild
 - [`MEMORY_KEYWORD_RETRIEVAL_PRODUCTION_VERIFICATION_2026-08-01.md`](MEMORY_KEYWORD_RETRIEVAL_PRODUCTION_VERIFICATION_2026-08-01.md) — non-private evidence that keyword-ranked recall and protected Memory-page search worked in production and survived a rebuild
+- [`PRIVATE_HTTP_BOUNDARY_PRODUCTION_VERIFICATION_2026-08-03.md`](PRIVATE_HTTP_BOUNDARY_PRODUCTION_VERIFICATION_2026-08-03.md) — non-private evidence that PR #23 deployed successfully, private response headers were active, login remained functional, and recoverable memory lifecycle controls still worked
 
 When a statement in a future-looking document conflicts with these files, these files should be treated as the description of the current implementation.
 
