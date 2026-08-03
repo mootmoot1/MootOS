@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "content": "Replace this placeholder with one reviewed global fact or preference.",
+      "project": null
+    },
+    {
+      "content": "Replace this placeholder with one reviewed Studio fact.",
+      "project": "Studio"
+    }
+  ]
+}
