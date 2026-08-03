@@ -3,14 +3,32 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.auth import validate_auth_configuration
+from backend.auth import (
+    LOGIN_COOLDOWN_SECONDS,
+    LOGIN_FAILURE_LIMIT,
+    MIN_SESSION_SECRET_LENGTH,
+    login_retry_after,
+    record_failed_login,
+    reset_login_throttle,
+    validate_auth_configuration,
+)
 from backend.main import app
+
+
+TEST_SESSION_SECRET = "test-session-secret-with-at-least-32-characters"
+
+
+@pytest.fixture(autouse=True)
+def isolated_login_throttle():
+    reset_login_throttle()
+    yield
+    reset_login_throttle()
 
 
 @pytest.fixture
 def private_client(monkeypatch):
     monkeypatch.setenv("MOOTOS_PASSWORD", "correct-horse")
-    monkeypatch.setenv("MOOTOS_SESSION_SECRET", "test-secret-that-is-long-enough")
+    monkeypatch.setenv("MOOTOS_SESSION_SECRET", TEST_SESSION_SECRET)
     monkeypatch.delenv("MOOTOS_ALLOW_PUBLIC", raising=False)
     monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
     monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN", raising=False)
@@ -52,6 +70,61 @@ def test_wrong_password_is_rejected(private_client):
     assert "mootos_session" not in private_client.cookies
 
 
+def test_login_throttle_is_process_global_and_ignores_forwarded_ip(private_client):
+    for attempt in range(LOGIN_FAILURE_LIMIT):
+        response = private_client.post(
+            "/auth/login",
+            json={"password": "wrong-password"},
+            headers={"X-Forwarded-For": f"198.51.100.{attempt + 1}"},
+        )
+        expected = 401 if attempt < LOGIN_FAILURE_LIMIT - 1 else 429
+        assert response.status_code == expected
+
+    assert response.json()["detail"] == "Too many login attempts. Try again shortly."
+    assert response.headers["Retry-After"] == str(LOGIN_COOLDOWN_SECONDS)
+
+    blocked_correct_password = private_client.post(
+        "/auth/login",
+        json={"password": "correct-horse"},
+        headers={"X-Forwarded-For": "203.0.113.50"},
+    )
+    assert blocked_correct_password.status_code == 429
+    assert "mootos_session" not in private_client.cookies
+
+
+def test_login_throttle_expires_without_permanent_lockout():
+    for _ in range(LOGIN_FAILURE_LIMIT):
+        retry_after = record_failed_login(now=100.0)
+
+    assert retry_after == LOGIN_COOLDOWN_SECONDS
+    assert login_retry_after(now=159.1) == 1
+    assert login_retry_after(now=160.0) == 0
+
+
+def test_successful_login_resets_failure_budget(private_client):
+    for _ in range(LOGIN_FAILURE_LIMIT - 1):
+        assert private_client.post(
+            "/auth/login",
+            json={"password": "wrong-password"},
+        ).status_code == 401
+
+    assert private_client.post(
+        "/auth/login",
+        json={"password": "correct-horse"},
+    ).status_code == 200
+
+    for _ in range(LOGIN_FAILURE_LIMIT - 1):
+        assert private_client.post(
+            "/auth/login",
+            json={"password": "wrong-password"},
+        ).status_code == 401
+
+    assert private_client.post(
+        "/auth/login",
+        json={"password": "wrong-password"},
+    ).status_code == 429
+
+
 def test_correct_password_unlocks_interface_and_api(private_client):
     login = private_client.post(
         "/auth/login",
@@ -69,6 +142,39 @@ def test_correct_password_unlocks_interface_and_api(private_client):
         json={"content": "Replacement"},
     ).status_code == 404
     assert private_client.get("/memories/missing/history").status_code == 404
+
+
+def test_private_html_and_json_are_no_store(private_client):
+    login_page = private_client.get("/login")
+    unauthenticated_api = private_client.get("/projects")
+
+    assert login_page.status_code == 200
+    assert login_page.headers["Cache-Control"] == "no-store"
+    assert unauthenticated_api.status_code == 401
+    assert unauthenticated_api.headers["Cache-Control"] == "no-store"
+
+    private_client.post(
+        "/auth/login",
+        json={"password": "correct-horse"},
+    )
+    authenticated_api = private_client.get("/projects")
+    assert authenticated_api.status_code == 200
+    assert authenticated_api.headers["Cache-Control"] == "no-store"
+
+
+def test_core_security_headers_cover_public_and_private_responses(private_client):
+    responses = [
+        private_client.get("/health"),
+        private_client.get("/login"),
+        private_client.get("/projects"),
+    ]
+
+    for response in responses:
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["X-Frame-Options"] == "DENY"
+        assert response.headers["Referrer-Policy"] == "same-origin"
+
+    assert "Cache-Control" not in responses[0].headers
 
 
 def test_logout_clears_private_session(private_client):
@@ -103,6 +209,22 @@ def test_partial_auth_configuration_fails_closed(monkeypatch):
 
     with pytest.raises(RuntimeError, match="must be configured together"):
         validate_auth_configuration()
+
+
+def test_short_session_secret_fails_closed(monkeypatch):
+    monkeypatch.setenv("MOOTOS_PASSWORD", "configured")
+    monkeypatch.setenv(
+        "MOOTOS_SESSION_SECRET",
+        "x" * (MIN_SESSION_SECRET_LENGTH - 1),
+    )
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN", raising=False)
+
+    with pytest.raises(RuntimeError, match="must be at least 32 characters"):
+        validate_auth_configuration()
+
+    monkeypatch.setenv("MOOTOS_SESSION_SECRET", "x" * MIN_SESSION_SECRET_LENGTH)
+    validate_auth_configuration()
 
 
 def test_railway_without_auth_configuration_fails_closed(monkeypatch):
