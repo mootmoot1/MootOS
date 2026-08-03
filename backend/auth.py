@@ -45,8 +45,10 @@ def public_access_allowed() -> bool:
 
 
 def permanent_memory_delete_allowed() -> bool:
-    """Allow hard delete locally, but require an explicit Railway override."""
-    return not running_on_railway() or _environment_flag("MOOTOS_ALLOW_HARD_DELETE")
+    """Allow hard delete locally, but require exact Railway approval."""
+    if not running_on_railway():
+        return True
+    return os.getenv("MOOTOS_ALLOW_HARD_DELETE", "").strip().lower() == "true"
 
 
 def auth_enabled() -> bool:
