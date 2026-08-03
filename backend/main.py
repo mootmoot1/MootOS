@@ -12,8 +12,12 @@ from pydantic import BaseModel, Field
 from backend.auth import (
     auth_enabled,
     clear_session_cookie,
+    login_retry_after,
     password_matches,
+    permanent_memory_delete_allowed,
+    record_failed_login,
     request_is_authenticated,
+    reset_login_throttle,
     set_session_cookie,
     validate_auth_configuration,
 )
@@ -79,9 +83,14 @@ PUBLIC_PATHS = {
     "/login",
     "/manifest.webmanifest",
 }
+CACHEABLE_PUBLIC_PATHS = {"/health", "/ready", "/manifest.webmanifest"}
 HTML_PATHS = {"/", "/chat", "/memory", "/docs", "/redoc"}
 MAX_MEMORY_CONTENT_LENGTH = 10_000
 MAX_MEMORY_SEARCH_LENGTH = 500
+LOGIN_THROTTLED_DETAIL = "Too many login attempts. Try again shortly."
+HARD_DELETE_DISABLED_DETAIL = (
+    "Permanent memory deletion is disabled on Railway. Archive the memory instead."
+)
 
 validate_auth_configuration()
 validate_database_configuration()
@@ -179,6 +188,20 @@ async def require_private_session(request: Request, call_next):
     )
 
 
+@app.middleware("http")
+async def apply_http_security_headers(request: Request, call_next):
+    """Add fixed browser protections and prevent private response caching."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+
+    path = request.url.path
+    if path not in CACHEABLE_PUBLIC_PATHS and not path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 def _build_model_instructions(project: Optional[str], query: str = "") -> str:
     """Build identity plus keyword-ranked active memory context."""
     memories = retrieve_context_memories(project=project, query=query, limit=20)
@@ -245,11 +268,29 @@ def login_page(request: Request):
 @app.post("/auth/login", include_in_schema=False)
 def login(credentials: LoginRequest):
     """Create a signed browser session after a valid password."""
-    if auth_enabled() and not password_matches(credentials.password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect password",
-        )
+    if auth_enabled():
+        retry_after = login_retry_after()
+        if retry_after:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=LOGIN_THROTTLED_DETAIL,
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        if not password_matches(credentials.password):
+            retry_after = record_failed_login()
+            if retry_after:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=LOGIN_THROTTLED_DETAIL,
+                    headers={"Retry-After": str(retry_after)},
+                )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect password",
+            )
+
+        reset_login_throttle()
 
     response = JSONResponse({"success": True})
     if auth_enabled():
@@ -435,7 +476,13 @@ def get_memory(memory_id: str) -> dict[str, Any]:
 
 @app.delete("/memories/{memory_id}")
 def delete_memory(memory_id: str) -> dict[str, Any]:
-    """Delete a standalone active memory without breaking lifecycle history."""
+    """Delete a standalone active memory only when hard delete is permitted."""
+    if not permanent_memory_delete_allowed():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=HARD_DELETE_DISABLED_DETAIL,
+        )
+
     try:
         removed = remove_memory(memory_id)
     except MemoryHistoryProtectedError as error:
