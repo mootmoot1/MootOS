@@ -14,6 +14,7 @@ These documents describe the code and deployment that exist today.
 - [`RAILWAY_STORAGE_AND_READINESS.md`](RAILWAY_STORAGE_AND_READINESS.md) — fail-closed production database-path rules, liveness/readiness separation, high-risk override, and deployment verification
 - [`CHAT_PROVIDER_PIPELINE.md`](CHAT_PROVIDER_PIPELINE.md) — atomic provider-backed turns, bounded provider calls, generic errors, concurrency boundary, and browser retry behavior
 - [`MODEL_INPUT_AND_CAPABILITIES.md`](MODEL_INPUT_AND_CAPABILITIES.md) — deterministic provider-input budgets, ranked context trimming, capability honesty, and privacy-safe diagnostics
+- [`PRIVATE_HTTP_BOUNDARY.md`](PRIVATE_HTTP_BOUNDARY.md) — login cooldown, session-secret minimum, no-store responses, browser security headers, and Railway hard-delete policy
 - [`API_REFERENCE.md`](API_REFERENCE.md) — current HTTP routes, request fields, response shapes, and errors
 - [`DATA_AND_PERSISTENCE.md`](DATA_AND_PERSISTENCE.md) — SQLite layout, database paths, Railway volume rules, backup guidance, migrations, and memory lifecycle persistence
 - [`FOUNDATION_HARDENING.md`](FOUNDATION_HARDENING.md) — centralized SQLite settings, schema migrations, production auth safety, validation, and deployment checks
@@ -33,6 +34,7 @@ These documents explain how to deploy, verify, recover, and maintain the live sy
 - [`RAILWAY_STORAGE_AND_READINESS.md`](RAILWAY_STORAGE_AND_READINESS.md) — production volume validation, readiness checks, and wrong-database incident response
 - [`CHAT_PROVIDER_PIPELINE.md`](CHAT_PROVIDER_PIPELINE.md) — provider/chat failure behavior, retry safety, verification, and incident response
 - [`MODEL_INPUT_AND_CAPABILITIES.md`](MODEL_INPUT_AND_CAPABILITIES.md) — current input limits, context-selection behavior, capability boundaries, and change rules
+- [`PRIVATE_HTTP_BOUNDARY.md`](PRIVATE_HTTP_BOUNDARY.md) — Railway preparation, login cooldown behavior, response-header checks, permanent-delete override, and rollback
 - [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md) — WAL-safe manual snapshot, off-volume transfer, restore drill, and production restore safeguards
 
 ## 3. Architecture history
@@ -51,6 +53,7 @@ These documents preserve why important technical choices were made.
 - [`ADR-020-railway-storage-and-readiness.md`](ADR-020-railway-storage-and-readiness.md)
 - [`ADR-021-atomic-chat-provider-pipeline.md`](ADR-021-atomic-chat-provider-pipeline.md)
 - [`ADR-022-deterministic-model-input-and-capabilities.md`](ADR-022-deterministic-model-input-and-capabilities.md)
+- [`ADR-023-private-http-boundary.md`](ADR-023-private-http-boundary.md)
 
 The repository root also contains:
 
@@ -85,9 +88,10 @@ For operating the live Railway deployment:
 2. `docs/RAILWAY_STORAGE_AND_READINESS.md`
 3. `docs/CHAT_PROVIDER_PIPELINE.md`
 4. `docs/MODEL_INPUT_AND_CAPABILITIES.md`
-5. `docs/DATA_AND_PERSISTENCE.md`
-6. `docs/FOUNDATION_HARDENING.md`
-7. `docs/PHONE_DEPLOYMENT.md`
+5. `docs/PRIVATE_HTTP_BOUNDARY.md`
+6. `docs/DATA_AND_PERSISTENCE.md`
+7. `docs/FOUNDATION_HARDENING.md`
+8. `docs/PHONE_DEPLOYMENT.md`
 
 For planning a future feature:
 
