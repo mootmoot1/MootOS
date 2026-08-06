@@ -1,14 +1,14 @@
 # Curated bootstrap profile import
 
-This document defines the planned Version 0.1 workflow for importing a small, reviewed set of Moot facts and preferences into existing long-term memory.
+This document defines the Version 0.1 workflow implemented on the draft branch for importing a small, reviewed set of Moot facts and preferences into existing long-term memory.
 
-The implementation belongs on:
+The implementation is on:
 
 ```text
 feature/moot-bootstrap-profile-v0.1
 ```
 
-Until the branch is merged and production-verified, this document describes the approved target behavior rather than current production capability.
+Until the branch is merged and production-verified, this is a reviewed draft capability rather than current production behavior.
 
 ## Goal
 
@@ -51,18 +51,38 @@ Rules:
 
 A safe placeholder example is stored in `docs/bootstrap-profile.example.json`. It contains no real Moot profile information.
 
-## Planned user flow
+## Implemented user flow
 
-1. Open the protected profile-import page.
-2. Paste private JSON or select a local JSON file.
-3. Press **Preview**.
-4. Review every exact entry and its scope.
-5. Resolve any invalid, duplicate, archived, or superseded conflicts.
-6. Press **Import profile** only after the preview is correct.
-7. Confirm the imported rows appear on the existing Memory page.
-8. Use normal Correct, Forget, Restore, and Search controls afterward.
+1. Open authenticated `GET /profile`.
+2. Paste private JSON or select a local `.json` file.
+3. Press **Preview profile**.
+4. The browser parses JSON locally and sends the manifest to protected `POST /profile/preview`.
+5. Review every exact entry and scope under Ready, Already active, or Blocked.
+6. Resolve invalid or blocked entries before continuing.
+7. Press **Import reviewed profile** and confirm the exact batch summary.
+8. The browser sends the same reviewed manifest to protected `POST /profile/import`.
+9. Confirm imported rows on the existing Memory page.
+10. Use normal Correct, Forget, Restore, and Search controls afterward.
 
-The browser must render profile content through `textContent`, not HTML.
+The browser renders profile values through DOM `textContent`, never `innerHTML`.
+
+## Application composition
+
+The existing verified app remains in `backend/main.py`.
+
+`backend/application.py` is the composition entrypoint used by Railway. It:
+
+- imports the existing app
+- includes the profile API router from `backend/profile_routes.py`
+- serves the authenticated `/profile` page
+
+Railway launches:
+
+```text
+python -m uvicorn backend.application:app --host 0.0.0.0 --port $PORT
+```
+
+The existing `/ready` health-check path remains unchanged.
 
 ## Preview behavior
 
@@ -82,7 +102,7 @@ Duplicate entries inside the submitted manifest are validation errors.
 Preview does not:
 
 - write memories
-- call OpenAI
+- call OpenAI or another model provider
 - spend model credits
 - create a conversation
 - store the submitted manifest as a file
@@ -102,17 +122,21 @@ A repeated successful import becomes a safe no-op because the entries are alread
 
 ## Privacy and security
 
-- The page and APIs remain inside the existing private-session boundary.
+- The page and APIs stay inside the existing private-session middleware.
+- HTML requests without a session redirect to login.
+- API requests without a session return `401`.
 - Responses receive the existing `Cache-Control: no-store` and browser-security headers.
-- Profile content must not be printed to logs or error messages.
+- Profile content is not printed to logs or storage-error responses.
 - The repository contains no real profile manifest.
 - The browser sends profile JSON only to the authenticated MootOS backend.
 - The backend does not send the manifest to the model provider.
+- File selection remains local to the browser until Moot explicitly previews the content.
 
 ## Error behavior
 
-Expected failures should be specific without echoing private content:
+Expected failures are specific without echoing private content:
 
+- malformed browser JSON → local readable error
 - unsupported manifest version → `422`
 - blank or oversized content → `422`
 - too many or zero entries → `422`
@@ -121,9 +145,9 @@ Expected failures should be specific without echoing private content:
 - archived or superseded lifecycle conflict → `409`
 - storage failure → fixed `503` response and complete rollback
 
-## Automated verification target
+## Automated verification
 
-Tests should prove:
+The branch includes tests proving:
 
 - preview writes nothing
 - import inserts all ready rows atomically
@@ -134,15 +158,17 @@ Tests should prove:
 - missing projects are rejected
 - global and project scopes remain distinct
 - memory type is forced to `bootstrap_profile`
-- profile operations do not call the model provider
-- profile routes require authentication
+- the API router maps validation, conflict, and storage errors safely
+- the profile page and static assets are served
+- profile operations require authentication
 - private response headers remain active
-- the browser uses safe text rendering
-- no real profile facts appear in the repository
+- the browser uses `textContent` and no `innerHTML`
+- the browser calls only the profile preview/import endpoints for this workflow
+- Railway launches the composed application entrypoint
 
 ## Controlled production verification target
 
-After merge and Railway deployment:
+After explicit merge approval and Railway deployment:
 
 1. `/ready` and `/health` remain healthy.
 2. Private login still works.
@@ -156,7 +182,7 @@ After merge and Railway deployment:
 10. A brand-new chat can recall a relevant imported active memory.
 11. The result survives a Railway rebuild.
 
-Production verification should use disposable generic entries before importing Moot's real curated profile.
+Production verification must use disposable generic entries before importing Moot's real curated profile.
 
 ## Explicitly out of scope
 
