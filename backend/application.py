@@ -7,7 +7,7 @@ workflow while keeping the existing chat and memory implementation unchanged.
 from fastapi.responses import FileResponse
 
 from backend.main import FRONTEND_DIR, app
-from backend.profile_api import router as profile_router
+from backend.profile_routes import router as profile_router
 
 
 app.include_router(profile_router)
