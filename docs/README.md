@@ -55,6 +55,7 @@ These documents preserve why important technical choices were made.
 - [`ADR-021-atomic-chat-provider-pipeline.md`](ADR-021-atomic-chat-provider-pipeline.md)
 - [`ADR-022-deterministic-model-input-and-capabilities.md`](ADR-022-deterministic-model-input-and-capabilities.md)
 - [`ADR-023-private-http-boundary.md`](ADR-023-private-http-boundary.md)
+- [`ADR-024-curated-bootstrap-profile-import.md`](ADR-024-curated-bootstrap-profile-import.md)
 
 The repository root also contains:
 
@@ -65,6 +66,8 @@ ADRs should not be silently rewritten to make history look cleaner. When a decis
 
 ## 4. Planning and governance
 
+- [`BOOTSTRAP_PROFILE_IMPORT.md`](BOOTSTRAP_PROFILE_IMPORT.md) — proposed private, previewed, atomic import workflow for a curated Moot bootstrap profile
+- [`bootstrap-profile.example.json`](bootstrap-profile.example.json) — public placeholder manifest containing no real profile facts
 - [`../ROADMAP.md`](../ROADMAP.md) — planned versions and future capabilities
 - [`../V0.1_REQUIREMENTS.md`](../V0.1_REQUIREMENTS.md) — Version 0.1 release criteria
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md) — branch, testing, approval, security, and documentation rules

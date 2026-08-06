@@ -2,7 +2,7 @@
 builder = "RAILPACK"
 
 [deploy]
-startCommand = "python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
+startCommand = "python -m uvicorn backend.application:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/ready"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"

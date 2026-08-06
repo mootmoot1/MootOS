@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MootOS">
+  <title>Profile import · MootOS</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/deployment.css">
+  <link rel="stylesheet" href="/static/profile.css">
+</head>
+<body class="profile-page">
+  <div class="profile-shell">
+    <header class="profile-header">
+      <div>
+        <p class="eyebrow">MootOS v0.1</p>
+        <h1>Bootstrap profile</h1>
+        <p class="profile-intro">
+          Privately review a curated JSON profile before adding it to long-term memory.
+        </p>
+      </div>
+      <div class="profile-header-actions">
+        <a class="secondary-button profile-link-button" href="/memory">Review memories</a>
+        <a class="secondary-button profile-link-button" href="/chat">Back to chat</a>
+        <form class="logout-form" action="/auth/logout" method="post">
+          <button class="text-button" type="submit">Log out</button>
+        </form>
+      </div>
+    </header>
+
+    <section class="profile-warning" aria-label="Privacy notice">
+      <strong>Your real profile stays private.</strong>
+      <span>
+        Paste it here or choose a local JSON file. MootOS sends it only to the authenticated private server; the repository contains no real profile facts.
+      </span>
+    </section>
+
+    <main class="profile-grid">
+      <section class="profile-card profile-input-card">
+        <div class="profile-card-heading">
+          <div>
+            <p class="eyebrow">Step 1</p>
+            <h2>Provide reviewed JSON</h2>
+          </div>
+          <label class="secondary-button profile-file-button" for="profileFileInput">
+            Choose file
+          </label>
+          <input id="profileFileInput" type="file" accept="application/json,.json" hidden>
+        </div>
+
+        <label class="profile-field-label" for="profileJsonInput">Profile manifest</label>
+        <textarea
+          id="profileJsonInput"
+          class="profile-json-input"
+          rows="18"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder='{"version":1,"entries":[{"content":"A reviewed fact.","project":null}]}'
+        ></textarea>
+
+        <p class="profile-file-name" id="profileFileName">No local file selected.</p>
+        <div class="error-banner profile-error" id="profileInputError" role="alert" hidden></div>
+
+        <div class="profile-actions">
+          <button class="secondary-button" id="clearProfileButton" type="button">Clear</button>
+          <button class="primary-button" id="previewProfileButton" type="button">Preview profile</button>
+        </div>
+      </section>
+
+      <section class="profile-card profile-preview-card" aria-live="polite">
+        <div class="profile-card-heading">
+          <div>
+            <p class="eyebrow">Step 2</p>
+            <h2>Review preview</h2>
+          </div>
+        </div>
+
+        <p class="profile-preview-empty" id="profilePreviewEmpty">
+          Nothing has been previewed. MootOS will not import until you review the result and confirm.
+        </p>
+
+        <div id="profilePreviewContent" hidden>
+          <div class="profile-counts" id="profileCounts"></div>
+          <section class="profile-preview-section" id="profileReadySection" hidden>
+            <h3>Ready to import</h3>
+            <div class="profile-entry-list" id="profileReadyList"></div>
+          </section>
+          <section class="profile-preview-section" id="profileActiveSection" hidden>
+            <h3>Already active</h3>
+            <div class="profile-entry-list" id="profileActiveList"></div>
+          </section>
+          <section class="profile-preview-section profile-blocked-section" id="profileBlockedSection" hidden>
+            <h3>Blocked by memory history</h3>
+            <p>These entries match something previously corrected or archived. Resolve them from the Memory page instead of silently recreating them.</p>
+            <div class="profile-entry-list" id="profileBlockedList"></div>
+          </section>
+        </div>
+
+        <div class="success-banner profile-success" id="profileSuccess" role="status" hidden></div>
+        <div class="error-banner profile-error" id="profileImportError" role="alert" hidden></div>
+
+        <div class="profile-import-actions">
+          <button class="primary-button" id="importProfileButton" type="button" disabled>
+            Import reviewed profile
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <section class="profile-safety-note" aria-label="Import boundaries">
+      <strong>Preview first. Import once. Keep lifecycle decisions intact.</strong>
+      <span>
+        Import is atomic, skips equivalent active memories, blocks archived or corrected equivalents, and never calls the model provider.
+      </span>
+    </section>
+  </div>
+
+  <dialog class="profile-confirm-dialog" id="profileConfirmDialog" aria-labelledby="profileConfirmTitle">
+    <form class="profile-confirm-form" id="profileConfirmForm">
+      <p class="eyebrow">Final confirmation</p>
+      <h2 id="profileConfirmTitle">Import this reviewed profile?</h2>
+      <p id="profileConfirmSummary"></p>
+      <p class="profile-confirm-warning">
+        Ready entries will become active long-term memories. Already-active entries will be skipped.
+      </p>
+      <div class="profile-dialog-actions">
+        <button class="secondary-button" id="cancelProfileImportButton" type="button">Cancel</button>
+        <button class="primary-button" id="confirmProfileImportButton" type="submit">Confirm import</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/profile.js" defer></script>
+</body>
+</html>
