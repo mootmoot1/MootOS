@@ -36,6 +36,14 @@ def test_concept_expansion_keeps_literal_terms_first():
     assert len(expanded) == len(set(expanded))
 
 
+def test_overlapping_concept_groups_union_aliases_instead_of_overwriting():
+    recording = set(expand_query_concepts(("recording",)))
+    tracking = set(expand_query_concepts(("tracking",)))
+
+    assert {"daw", "protools", "software", "studio", "session"} <= recording
+    assert {"daw", "protools", "software", "studio", "session"} <= tracking
+
+
 def test_recording_software_query_recalls_daw_memory(clean_db):
     daw_memory = create_memory(
         "My main DAW is Pro Tools Ultimate.",
@@ -52,6 +60,18 @@ def test_recording_software_query_recalls_daw_memory(clean_db):
         "Studio",
         "What recording software do I use professionally?",
     )
+
+    assert results[0]["id"] == daw_memory["id"]
+
+
+def test_recording_alone_recalls_daw_memory_after_overlap_union(clean_db):
+    daw_memory = create_memory(
+        "My main DAW is Pro Tools Ultimate.",
+        project="Studio",
+        memory_type="bootstrap_profile",
+    )
+
+    results = retrieve_context_memories("Studio", "recording")
 
     assert results[0]["id"] == daw_memory["id"]
 
