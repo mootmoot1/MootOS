@@ -41,10 +41,14 @@ _CONCEPT_GROUPS = (
     frozenset({"deploy", "deployment", "railway", "production"}),
     frozenset({"memory", "remember", "recall", "context", "profile"}),
 )
-_CONCEPT_ALIASES: dict[str, frozenset[str]] = {}
+_concept_alias_sets: dict[str, set[str]] = {}
 for _group in _CONCEPT_GROUPS:
     for _token in _group:
-        _CONCEPT_ALIASES[_token] = _group - {_token}
+        _concept_alias_sets.setdefault(_token, set()).update(_group - {_token})
+_CONCEPT_ALIASES: dict[str, frozenset[str]] = {
+    token: frozenset(aliases)
+    for token, aliases in _concept_alias_sets.items()
+}
 
 
 def _normalize_token(token: str) -> str:
