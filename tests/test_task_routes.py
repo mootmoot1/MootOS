@@ -1,7 +1,5 @@
 """HTTP boundary tests for Task v0.1."""
 
-import os
-
 import pytest
 from fastapi.testclient import TestClient
 
