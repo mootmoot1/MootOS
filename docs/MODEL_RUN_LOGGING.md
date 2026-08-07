@@ -12,6 +12,8 @@ The branch currently includes:
 - dedicated `backend/runs.py` storage helpers
 - success/failure lifecycle tests
 - privacy tests proving the table has no prompt/response/content columns
+- a closed `data_exposure` classification set
+- explicit terminal-state protection and non-negative metric validation
 - ADR-025 documenting the Run/Task/Approval architecture boundary
 
 The next slice wires the existing `/chat` model-generation path into these helpers.
@@ -22,13 +24,18 @@ The next slice wires the existing `/chat` model-generation path into these helpe
 prepare chat turn
     -> identify configured provider/model
     -> create Run(status=started)
+       if Run creation fails: stop; do not call provider
     -> call model provider
         -> provider failure:
-             finalize Run(status=failed, sanitized error class)
+             best-effort finalize Run(status=failed, sanitized error class)
              do not save chat turn
         -> provider success:
              atomically save user + assistant chat messages
-             finalize Run(status=succeeded, link saved message IDs)
+             if chat persistence fails:
+                 best-effort finalize Run(status=failed, ChatStorageError)
+                 return storage error
+             if chat persistence succeeds:
+                 finalize Run(status=succeeded, link saved message IDs)
     -> return existing chat response
 ```
 
@@ -70,33 +77,51 @@ Use conversation/message IDs to locate normal conversation content when an authe
 | `input_tokens` | Provider-reported input tokens when available |
 | `output_tokens` | Provider-reported output tokens when available |
 | `cost_usd` | Provider-reported or reliably calculated cost only when available |
-| `data_exposure` | Broad exposure category; v0.1 model runs use `model_provider` |
+| `data_exposure` | Closed broad classification: `local`, `model_provider`, or `tool_external` |
+
+`input_tokens`, `output_tokens`, and `cost_usd` remain nullable. A finalizer call that has no new metric value must not erase a previously recorded value.
 
 ## Failure behavior
 
 ### Provider/configuration failure
 
-If execution has started and the provider fails, finalize the Run as failed. Do not store the raw provider exception message.
+If execution has started and the provider fails, finalize the Run as failed when possible. Do not store the raw provider exception message. A secondary failure while finalizing the Run must not replace the original provider error returned to the caller.
 
 ### Run-start storage failure
 
-Once chat is wired to Runs, MootOS should not silently make an unlogged provider call if the Run cannot be created. Return a safe service error before calling the model.
+MootOS must fail closed. If the Run cannot be created, return a safe service error before calling the model. No unlogged provider request is allowed on the normal chat path.
 
 ### Chat-commit failure after model success
 
-This is the important edge case for the integration slice. The model may return successfully but the conversation turn may fail to commit. The Run must not claim the overall chat execution succeeded. Finalize it as failed with a sanitized storage error class or otherwise use a clearly documented terminal state. The implementation and tests must make that behavior explicit before merge.
+The model may return successfully but the conversation turn may fail to commit. The Run must not claim the overall chat execution succeeded. The integration finalizes the Run as failed with a sanitized storage exception class when possible, then preserves the existing chat storage error behavior.
+
+### Stuck `started` runs
+
+A process crash or hard termination can leave a Run in `started`. That row is evidence that an attempt began but no terminal outcome was recorded. In v0.1, operators should inspect old rows with `status = 'started'` during production verification. A later recovery/sweeper feature may mark abandoned attempts, but this PR does not invent that lifecycle yet.
+
+## Data-exposure classification
+
+The v0.1 closed set is:
+
+- `local` — execution remains within MootOS/local infrastructure
+- `model_provider` — request context is sent to the configured model provider
+- `tool_external` — reserved for a future external tool executor
+
+These values are classifications only. They must never contain prompt text, recipient addresses, filenames, secrets, or other private payload data.
 
 ## Production verification plan
 
 After merge and Railway migration:
 
-1. `/ready` reports ready at the new schema version.
+1. `/ready` reports ready at schema version 3.
 2. Normal chat still works.
-3. A successful model request creates one succeeded Run.
+3. A successful model request creates exactly one succeeded Run.
 4. The Run references the saved conversation/user/assistant message IDs.
-5. A controlled mocked provider failure creates one failed Run in tests without saving messages.
-6. Run rows contain no raw prompt/response text.
-7. Existing memory/profile/retrieval behavior remains unchanged.
+5. Provider failure creates one failed Run without saving the failed chat turn.
+6. A forced chat-storage failure after model success leaves the Run failed, never succeeded.
+7. Run rows contain no raw prompt/response text.
+8. No old `started` rows remain after ordinary successful test traffic.
+9. Existing memory/profile/retrieval behavior remains unchanged.
 
 ## Not in v0.1
 
@@ -107,6 +132,7 @@ After merge and Railway migration:
 - approvals
 - operation-spec hashing
 - inbound observations/webhooks
+- abandoned-run sweeper
 - cost estimation when provider usage is unavailable
 
 Those should build on this spine rather than being mixed into this PR.
