@@ -27,6 +27,7 @@ REQUIRED_COLUMNS = {
     "conversations": {"id", "title", "project", "created_at", "updated_at"},
     "messages": {"id", "conversation_id", "role", "content", "provider", "model", "created_at"},
     "runs": {"id", "run_type", "status", "conversation_id", "user_message_id", "assistant_message_id", "provider", "model", "started_at", "finished_at", "duration_ms", "error_class", "input_tokens", "output_tokens", "cost_usd", "data_exposure"},
+    "tasks": {"id", "title", "project", "status", "due_at", "created_at", "updated_at", "completed_at", "cancelled_at"},
     "schema_migrations": {"version", "name", "applied_at"},
 }
 
@@ -90,10 +91,29 @@ def _migration_003_model_runs(connection: sqlite3.Connection) -> None:
     connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_status_started_at ON runs (status, started_at DESC)")
 
 
+def _migration_004_tasks(connection: sqlite3.Connection) -> None:
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL CHECK (length(trim(title)) > 0 AND length(title) <= 500),
+            project TEXT,
+            status TEXT NOT NULL CHECK (status IN ('open', 'completed', 'cancelled')),
+            due_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            completed_at TEXT,
+            cancelled_at TEXT
+        )
+    """)
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status_due_at ON tasks (status, due_at, created_at DESC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_project_status_due_at ON tasks (project, status, due_at, created_at DESC)")
+
+
 MIGRATIONS = (
     Migration(1, "initial_schema", _migration_001_initial_schema),
     Migration(2, "memory_lifecycle", _migration_002_memory_lifecycle),
     Migration(3, "model_runs", _migration_003_model_runs),
+    Migration(4, "tasks", _migration_004_tasks),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -123,6 +143,16 @@ def _verify_schema(connection: sqlite3.Connection) -> None:
     invalid_run = connection.execute("""SELECT run_type, status, data_exposure FROM runs WHERE run_type NOT IN ('model', 'tool') OR status NOT IN ('started', 'succeeded', 'failed') OR (data_exposure IS NOT NULL AND data_exposure NOT IN ('local', 'model_provider', 'tool_external')) LIMIT 1""").fetchone()
     if invalid_run is not None:
         raise RuntimeError("Database schema is incompatible: runs contains unsupported run metadata")
+    invalid_task = connection.execute("""
+        SELECT status
+        FROM tasks
+        WHERE status NOT IN ('open', 'completed', 'cancelled')
+           OR length(trim(title)) = 0
+           OR length(title) > 500
+        LIMIT 1
+    """).fetchone()
+    if invalid_task is not None:
+        raise RuntimeError("Database schema is incompatible: tasks contains unsupported task metadata")
 
 
 def run_migrations(database_path: Optional[DatabasePath] = None) -> int:
