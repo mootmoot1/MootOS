@@ -4,21 +4,20 @@
 
 Record one structured execution row for every normal AI model generation without changing the visible chat experience or duplicating private chat content.
 
-## Current implementation slice
+## Current implementation
 
-The branch currently includes:
+The branch includes:
 
 - schema migration 003 for `runs`
 - dedicated `backend/runs.py` storage helpers
-- success/failure lifecycle tests
+- normal `/chat` model-generation integration
+- success/failure lifecycle and integration tests
 - privacy tests proving the table has no prompt/response/content columns
 - a closed `data_exposure` classification set
 - explicit terminal-state protection and non-negative metric validation
 - ADR-025 documenting the Run/Task/Approval architecture boundary
 
-The next slice wires the existing `/chat` model-generation path into these helpers.
-
-## Intended model-call flow
+## Model-call flow
 
 ```text
 prepare chat turn
@@ -36,6 +35,9 @@ prepare chat turn
                  return storage error
              if chat persistence succeeds:
                  finalize Run(status=succeeded, link saved message IDs)
+                 if finalization itself fails:
+                     return the already-saved chat normally
+                     leave the Run in started for later inspection/repair
     -> return existing chat response
 ```
 
@@ -89,15 +91,19 @@ If execution has started and the provider fails, finalize the Run as failed when
 
 ### Run-start storage failure
 
-MootOS must fail closed. If the Run cannot be created, return a safe service error before calling the model. No unlogged provider request is allowed on the normal chat path.
+MootOS fails closed. If the Run cannot be created, return a safe service error before calling the model. No unlogged provider request is allowed on the normal chat path.
 
 ### Chat-commit failure after model success
 
 The model may return successfully but the conversation turn may fail to commit. The Run must not claim the overall chat execution succeeded. The integration finalizes the Run as failed with a sanitized storage exception class when possible, then preserves the existing chat storage error behavior.
 
+### Run finalization failure after chat success
+
+Once the user and assistant messages are durably committed, an audit-finalization failure must not force the user to resend the same message and risk duplicating the conversation. MootOS returns the saved chat normally and leaves the Run in `started`. That incomplete Run is intentionally detectable and can be repaired by a later operational recovery feature.
+
 ### Stuck `started` runs
 
-A process crash or hard termination can leave a Run in `started`. That row is evidence that an attempt began but no terminal outcome was recorded. In v0.1, operators should inspect old rows with `status = 'started'` during production verification. A later recovery/sweeper feature may mark abandoned attempts, but this PR does not invent that lifecycle yet.
+A process crash, hard termination, or post-commit finalization failure can leave a Run in `started`. That row is evidence that an attempt began but no terminal outcome was recorded. In v0.1, operators should inspect old rows with `status = 'started'` during production verification. A later recovery/sweeper feature may mark abandoned attempts, but this PR does not invent that lifecycle yet.
 
 ## Data-exposure classification
 
@@ -119,9 +125,10 @@ After merge and Railway migration:
 4. The Run references the saved conversation/user/assistant message IDs.
 5. Provider failure creates one failed Run without saving the failed chat turn.
 6. A forced chat-storage failure after model success leaves the Run failed, never succeeded.
-7. Run rows contain no raw prompt/response text.
-8. No old `started` rows remain after ordinary successful test traffic.
-9. Existing memory/profile/retrieval behavior remains unchanged.
+7. Run-start failure prevents the model provider call entirely.
+8. Run rows contain no raw prompt/response text.
+9. No old `started` rows remain after ordinary successful test traffic.
+10. Existing memory/profile/retrieval behavior remains unchanged.
 
 ## Not in v0.1
 
