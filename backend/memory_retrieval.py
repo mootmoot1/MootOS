@@ -1,4 +1,4 @@
-"""Understandable keyword retrieval for active MootOS memories."""
+"""Understandable deterministic retrieval for active MootOS memories."""
 
 import re
 from typing import Any, Iterable, Optional, Sequence
@@ -12,87 +12,47 @@ from backend.memory import (
 
 MAX_CONTEXT_MEMORIES = 20
 MAX_QUERY_TOKENS = 40
+MAX_EXPANDED_QUERY_TOKENS = 120
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 _STOP_WORDS = frozenset(
     {
-        "a",
-        "about",
-        "an",
-        "and",
-        "are",
-        "as",
-        "at",
-        "be",
-        "been",
-        "but",
-        "by",
-        "can",
-        "could",
-        "did",
-        "do",
-        "does",
-        "for",
-        "from",
-        "had",
-        "has",
-        "have",
-        "he",
-        "her",
-        "hers",
-        "him",
-        "his",
-        "how",
-        "i",
-        "if",
-        "in",
-        "into",
-        "is",
-        "it",
-        "its",
-        "me",
-        "my",
-        "of",
-        "on",
-        "or",
-        "our",
-        "ours",
-        "s",
-        "she",
-        "should",
-        "t",
-        "that",
-        "the",
-        "their",
-        "theirs",
-        "them",
-        "then",
-        "there",
-        "these",
-        "they",
-        "this",
-        "those",
-        "to",
-        "was",
-        "we",
-        "were",
-        "what",
-        "when",
-        "where",
-        "which",
-        "who",
-        "why",
-        "will",
-        "with",
-        "would",
-        "you",
-        "your",
-        "yours",
+        "a", "about", "an", "and", "are", "as", "at", "be", "been", "but",
+        "by", "can", "could", "did", "do", "does", "for", "from", "had", "has",
+        "have", "he", "her", "hers", "him", "his", "how", "i", "if", "in",
+        "into", "is", "it", "its", "me", "my", "of", "on", "or", "our",
+        "ours", "s", "she", "should", "t", "that", "the", "their", "theirs",
+        "them", "then", "there", "these", "they", "this", "those", "to", "was",
+        "we", "were", "what", "when", "where", "which", "who", "why", "will",
+        "with", "would", "you", "your", "yours",
     }
 )
 
+# Small, explicit concept groups improve recall without sending private memory to a
+# model or embedding provider. Keep groups narrow enough that every relationship
+# is understandable in code review.
+_CONCEPT_GROUPS = (
+    frozenset({"daw", "software", "recording", "record", "tracking", "protools"}),
+    frozenset({"car", "vehicle", "auto", "automobile"}),
+    frozenset({"studio", "recording", "session", "tracking"}),
+    frozenset({"mix", "mixing", "mixer", "engineer", "engineering"}),
+    frozenset({"mic", "microphone"}),
+    frozenset({"social", "content", "reel", "video", "shortform"}),
+    frozenset({"phone", "mobile", "iphone"}),
+    frozenset({"deploy", "deployment", "railway", "production"}),
+    frozenset({"memory", "remember", "recall", "context", "profile"}),
+)
+_concept_alias_sets: dict[str, set[str]] = {}
+for _group in _CONCEPT_GROUPS:
+    for _token in _group:
+        _concept_alias_sets.setdefault(_token, set()).update(_group - {_token})
+_CONCEPT_ALIASES: dict[str, frozenset[str]] = {
+    token: frozenset(aliases)
+    for token, aliases in _concept_alias_sets.items()
+}
+
 
 def _normalize_token(token: str) -> str:
-    """Apply intentionally small normalization without pretending to understand synonyms."""
+    """Apply intentionally small lexical normalization."""
     normalized = token.casefold()
     if len(normalized) > 4 and normalized.endswith("ies"):
         return normalized[:-3] + "y"
@@ -134,6 +94,21 @@ def tokenize_keywords(text: Optional[str]) -> tuple[str, ...]:
     return tuple(unique)
 
 
+def expand_query_concepts(tokens: Sequence[str]) -> tuple[str, ...]:
+    """Append reviewed concept aliases while preserving the literal query first."""
+    expanded = list(tokens)
+    seen = set(tokens)
+    for token in tokens:
+        for alias in sorted(_CONCEPT_ALIASES.get(token, ())):
+            if alias in seen:
+                continue
+            seen.add(alias)
+            expanded.append(alias)
+            if len(expanded) >= MAX_EXPANDED_QUERY_TOKENS:
+                return tuple(expanded)
+    return tuple(expanded)
+
+
 def _contains_sequence(candidate: Sequence[str], query: Sequence[str]) -> bool:
     if not query or len(query) > len(candidate):
         return False
@@ -157,29 +132,47 @@ def _scope_rank(memory: dict[str, Any], project: Optional[str]) -> int:
 
 def _match_score(
     memory: dict[str, Any],
-    query_tokens: Sequence[str],
+    literal_query_tokens: Sequence[str],
+    expanded_query_tokens: Sequence[str],
 ) -> Optional[int]:
-    if not query_tokens:
+    if not literal_query_tokens:
         return None
 
-    query_set = set(query_tokens)
+    literal_set = set(literal_query_tokens)
+    expanded_set = set(expanded_query_tokens)
+    alias_only = expanded_set - literal_set
+
     content_sequence = _keyword_sequence(memory.get("content"))
     content_tokens = set(content_sequence)
     project_tokens = set(_keyword_sequence(memory.get("project")))
     type_tokens = set(_keyword_sequence(memory.get("memory_type")))
 
-    content_matches = query_set & content_tokens
-    project_matches = query_set & project_tokens
-    type_matches = query_set & type_tokens
-    if not (content_matches or project_matches or type_matches):
+    literal_content = literal_set & content_tokens
+    literal_project = literal_set & project_tokens
+    literal_type = literal_set & type_tokens
+    semantic_content = alias_only & content_tokens
+    semantic_project = alias_only & project_tokens
+    semantic_type = alias_only & type_tokens
+
+    if not (
+        literal_content
+        or literal_project
+        or literal_type
+        or semantic_content
+        or semantic_project
+        or semantic_type
+    ):
         return None
 
-    phrase_bonus = 20 if _contains_sequence(content_sequence, query_tokens) else 0
+    phrase_bonus = 20 if _contains_sequence(content_sequence, literal_query_tokens) else 0
     return (
         phrase_bonus
-        + (len(content_matches) * 5)
-        + (len(project_matches) * 3)
-        + len(type_matches)
+        + (len(literal_content) * 6)
+        + (len(literal_project) * 4)
+        + (len(literal_type) * 2)
+        + (len(semantic_content) * 2)
+        + len(semantic_project)
+        + len(semantic_type)
     )
 
 
@@ -189,12 +182,13 @@ def _recency_value(memory: dict[str, Any]) -> str:
 
 def _rank_matches(
     memories: Iterable[dict[str, Any]],
-    query_tokens: Sequence[str],
+    literal_query_tokens: Sequence[str],
+    expanded_query_tokens: Sequence[str],
     project: Optional[str],
 ) -> list[dict[str, Any]]:
     scored: list[tuple[int, int, str, str, dict[str, Any]]] = []
     for memory in memories:
-        score = _match_score(memory, query_tokens)
+        score = _match_score(memory, literal_query_tokens, expanded_query_tokens)
         if score is None:
             continue
         scored.append(
@@ -225,11 +219,7 @@ def _rank_fallback(
     memories: Iterable[dict[str, Any]],
     project: Optional[str],
 ) -> list[dict[str, Any]]:
-    fallback = [
-        memory
-        for memory in memories
-        if _fallback_is_allowed(memory, project)
-    ]
+    fallback = [memory for memory in memories if _fallback_is_allowed(memory, project)]
     fallback.sort(
         key=lambda memory: (
             _scope_rank(memory, project),
@@ -249,9 +239,15 @@ def rank_memories(
     include_fallback: bool,
     limit: Optional[int] = None,
 ) -> list[dict[str, Any]]:
-    """Rank keyword matches and optionally append safe recent fallback memories."""
-    query_tokens = tokenize_keywords(query)
-    matches = _rank_matches(memories, query_tokens, project)
+    """Rank literal and concept matches, then optionally append safe fallback."""
+    literal_query_tokens = tokenize_keywords(query)
+    expanded_query_tokens = expand_query_concepts(literal_query_tokens)
+    matches = _rank_matches(
+        memories,
+        literal_query_tokens,
+        expanded_query_tokens,
+        project,
+    )
 
     ranked = list(matches)
     if include_fallback:
@@ -261,7 +257,7 @@ def rank_memories(
             for memory in _rank_fallback(memories, project)
             if memory["id"] not in matched_ids
         )
-    elif not query_tokens:
+    elif not literal_query_tokens:
         ranked = list(memories)
 
     if limit is None:
