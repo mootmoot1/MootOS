@@ -72,6 +72,11 @@ from backend.model_router import (
     ModelProviderError,
     get_model_router,
 )
+from backend.runs import (
+    finish_model_run_failure,
+    finish_model_run_success,
+    start_model_run,
+)
 
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -91,6 +96,7 @@ LOGIN_THROTTLED_DETAIL = "Too many login attempts. Try again shortly."
 HARD_DELETE_DISABLED_DETAIL = (
     "Permanent memory deletion is disabled on Railway. Archive the memory instead."
 )
+RUN_START_FAILED_DETAIL = "MootOS could not record model execution. Please retry."
 
 validate_auth_configuration()
 validate_database_configuration()
@@ -249,6 +255,24 @@ def _chat_response(
             "model": model,
         },
     }
+
+
+def _router_run_metadata(router: Any) -> tuple[Optional[str], Optional[str]]:
+    """Return configured provider/model metadata without exposing request content."""
+    provider_name = getattr(router, "provider_name", None)
+    providers = getattr(router, "providers", None)
+    provider = providers.get(provider_name) if providers and provider_name else None
+    return provider_name, getattr(provider, "model", None)
+
+
+def _safe_finish_failed_run(run_id: str, error: BaseException) -> None:
+    """Best-effort terminal logging without hiding the primary chat failure."""
+    try:
+        finish_model_run_failure(run_id, error)
+    except Exception:
+        # The original provider/storage failure remains the user-visible truth.
+        # A stale started row can be detected operationally and repaired later.
+        return None
 
 
 @app.get("/", include_in_schema=False)
@@ -597,6 +621,19 @@ def chat(request: ChatRequest) -> dict[str, Any]:
             ]
             model_messages.append({"role": "user", "content": request.message})
 
+            configured_provider, configured_model = _router_run_metadata(router)
+            try:
+                run = start_model_run(
+                    conversation_id=conversation["id"],
+                    provider=configured_provider,
+                    model=configured_model,
+                )
+            except Exception as error:
+                raise HTTPException(
+                    status_code=503,
+                    detail=RUN_START_FAILED_DETAIL,
+                ) from error
+
             try:
                 model_response = router.generate(
                     messages=model_messages,
@@ -606,11 +643,13 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                     ),
                 )
             except ModelConfigurationError as error:
+                _safe_finish_failed_run(run["id"], error)
                 raise HTTPException(
                     status_code=503,
                     detail="MootOS model provider is not configured",
                 ) from error
             except ModelProviderError as error:
+                _safe_finish_failed_run(run["id"], error)
                 raise HTTPException(
                     status_code=502,
                     detail=(
@@ -618,15 +657,37 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                         "Your message was not saved."
                     ),
                 ) from error
+            except Exception as error:
+                _safe_finish_failed_run(run["id"], error)
+                raise
 
-            saved_turn = commit_chat_turn(
-                conversation=conversation,
-                is_new=prepared["is_new"],
-                user_content=request.message,
-                assistant_content=model_response.text,
-                provider=model_response.provider,
-                model=model_response.model,
-            )
+            try:
+                saved_turn = commit_chat_turn(
+                    conversation=conversation,
+                    is_new=prepared["is_new"],
+                    user_content=request.message,
+                    assistant_content=model_response.text,
+                    provider=model_response.provider,
+                    model=model_response.model,
+                )
+            except ChatStorageError as error:
+                _safe_finish_failed_run(run["id"], error)
+                raise
+
+            try:
+                finish_model_run_success(
+                    run["id"],
+                    conversation_id=saved_turn["conversation"]["id"],
+                    user_message_id=saved_turn["user_message"]["id"],
+                    assistant_message_id=saved_turn["assistant_message"]["id"],
+                    provider=model_response.provider,
+                    model=model_response.model,
+                )
+            except Exception:
+                # The chat turn is already durably committed. Do not make the user
+                # resend it because audit finalization failed; the started Run is
+                # intentionally detectable for later repair.
+                pass
     except ChatConversationNotFoundError as error:
         raise HTTPException(status_code=404, detail="Conversation not found") from error
     except ChatProjectMismatchError as error:

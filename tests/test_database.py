@@ -171,7 +171,7 @@ def test_memory_lifecycle_migration_preserves_existing_rows(tmp_path):
             (memory_id, "Keep this row", None, "test", created_at),
         )
 
-    assert initialize_database(database_path) == 2
+    assert initialize_database(database_path) == LATEST_SCHEMA_VERSION
 
     with database_connection(database_path) as connection:
         row = connection.execute(
