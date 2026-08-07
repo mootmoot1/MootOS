@@ -4,7 +4,7 @@
 
 Give MootOS a durable place for intentions and commitments without storing them as long-term memory.
 
-Task v0.1 is intentionally small. It creates the lifecycle and database shape that later reminders, triggers, approvals, and tools can build on.
+Task v0.1 is intentionally small. It creates the lifecycle and HTTP boundary that later reminders, triggers, approvals, and tools can build on.
 
 ## Current implementation
 
@@ -12,10 +12,12 @@ The branch includes:
 
 - schema migration 004 for `tasks`
 - `backend/tasks.py` storage/lifecycle helpers
+- `backend/task_routes.py` authenticated HTTP API
+- production-app composition through `backend.application`
 - project scope canonicalization
 - timezone-aware due-time validation and UTC normalization
 - terminal-state protection
-- migration and lifecycle tests
+- migration, storage, and route tests
 - ADR-026 documenting the Task/Run/Approval boundary
 
 ## Task lifecycle
@@ -27,6 +29,20 @@ open
 ```
 
 `completed` and `cancelled` are terminal in v0.1.
+
+## HTTP API
+
+The Task routes use the existing MootOS authentication middleware and private-response cache protections.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/tasks` | Create an open Task |
+| `GET` | `/tasks` | List Tasks, optionally by status/project |
+| `GET` | `/tasks/{task_id}` | Read one Task |
+| `POST` | `/tasks/{task_id}/complete` | Complete an open Task |
+| `POST` | `/tasks/{task_id}/cancel` | Cancel an open Task |
+
+List queries support `status`, `project`, and a bounded `limit` from 1–500.
 
 ## Storage fields
 
@@ -101,10 +117,10 @@ Before calling Task v0.1 complete:
 1. `/ready` succeeds after schema version 4 migration.
 2. Existing normal chat still works and produces model Runs.
 3. Existing memories/profile retrieval remain intact.
-4. Create one test Task through the eventual authenticated Task API.
+4. Create one test Task through the authenticated `POST /tasks` API.
 5. Read it back and confirm canonical project scope and UTC due time.
 6. Complete it and verify `completed_at` is populated.
-7. Verify a second terminal transition is rejected.
+7. Verify a second terminal transition is rejected with `409`.
 8. Confirm task creation does not create or modify a Memory.
 
 ## Not in this slice
