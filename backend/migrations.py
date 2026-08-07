@@ -44,6 +44,24 @@ REQUIRED_COLUMNS = {
         "model",
         "created_at",
     },
+    "runs": {
+        "id",
+        "run_type",
+        "status",
+        "conversation_id",
+        "user_message_id",
+        "assistant_message_id",
+        "provider",
+        "model",
+        "started_at",
+        "finished_at",
+        "duration_ms",
+        "error_class",
+        "input_tokens",
+        "output_tokens",
+        "cost_usd",
+        "data_exposure",
+    },
     "schema_migrations": {"version", "name", "applied_at"},
 }
 
@@ -175,9 +193,54 @@ def _migration_002_memory_lifecycle(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migration_003_model_runs(connection: sqlite3.Connection) -> None:
+    """Add append-oriented execution records for model and future tool attempts."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS runs (
+            id TEXT PRIMARY KEY,
+            run_type TEXT NOT NULL CHECK (run_type IN ('model', 'tool')),
+            status TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed')),
+            conversation_id TEXT,
+            user_message_id TEXT,
+            assistant_message_id TEXT,
+            provider TEXT,
+            model TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            duration_ms INTEGER CHECK (duration_ms IS NULL OR duration_ms >= 0),
+            error_class TEXT,
+            input_tokens INTEGER CHECK (input_tokens IS NULL OR input_tokens >= 0),
+            output_tokens INTEGER CHECK (output_tokens IS NULL OR output_tokens >= 0),
+            cost_usd REAL CHECK (cost_usd IS NULL OR cost_usd >= 0),
+            data_exposure TEXT
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_runs_started_at
+        ON runs (started_at DESC)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_runs_conversation_id_started_at
+        ON runs (conversation_id, started_at DESC)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_runs_status_started_at
+        ON runs (status, started_at DESC)
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "initial_schema", _migration_001_initial_schema),
     Migration(2, "memory_lifecycle", _migration_002_memory_lifecycle),
+    Migration(3, "model_runs", _migration_003_model_runs),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -239,6 +302,20 @@ def _verify_schema(connection: sqlite3.Connection) -> None:
         raise RuntimeError(
             "Database schema is incompatible: memories.status contains "
             f"unsupported value {invalid_memory_status['status']!r}"
+        )
+
+    invalid_run = connection.execute(
+        """
+        SELECT run_type, status
+        FROM runs
+        WHERE run_type NOT IN ('model', 'tool')
+           OR status NOT IN ('started', 'succeeded', 'failed')
+        LIMIT 1
+        """
+    ).fetchone()
+    if invalid_run is not None:
+        raise RuntimeError(
+            "Database schema is incompatible: runs contains unsupported run type/status"
         )
 
 
