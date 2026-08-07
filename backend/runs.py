@@ -12,6 +12,14 @@ RUN_TYPE_TOOL = "tool"
 RUN_STATUS_STARTED = "started"
 RUN_STATUS_SUCCEEDED = "succeeded"
 RUN_STATUS_FAILED = "failed"
+DATA_EXPOSURE_LOCAL = "local"
+DATA_EXPOSURE_MODEL_PROVIDER = "model_provider"
+DATA_EXPOSURE_TOOL_EXTERNAL = "tool_external"
+VALID_DATA_EXPOSURES = {
+    DATA_EXPOSURE_LOCAL,
+    DATA_EXPOSURE_MODEL_PROVIDER,
+    DATA_EXPOSURE_TOOL_EXTERNAL,
+}
 RUN_COLUMNS = """
     id,
     run_type,
@@ -40,13 +48,25 @@ class RunAlreadyFinishedError(ValueError):
     """Raised when a terminal run is finalized again."""
 
 
+class RunValidationError(ValueError):
+    """Raised when run metadata does not match the supported closed set."""
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
 def _duration_ms(started_at: str, finished_at: datetime) -> int:
-    started = datetime.fromisoformat(started_at)
+    try:
+        started = datetime.fromisoformat(started_at)
+    except (TypeError, ValueError) as error:
+        raise RunValidationError("Run start timestamp is invalid") from error
     return max(0, int((finished_at - started).total_seconds() * 1000))
+
+
+def _validate_optional_nonnegative(name: str, value: Optional[float]) -> None:
+    if value is not None and value < 0:
+        raise RunValidationError(f"{name} must be non-negative")
 
 
 def _get_run(connection, run_id: str) -> Optional[dict[str, Any]]:
@@ -62,7 +82,7 @@ def start_model_run(
     conversation_id: Optional[str],
     provider: Optional[str],
     model: Optional[str],
-    data_exposure: Optional[str] = "model_provider",
+    data_exposure: Optional[str] = DATA_EXPOSURE_MODEL_PROVIDER,
 ) -> dict[str, Any]:
     """Persist a started model run before the provider request begins.
 
@@ -70,6 +90,9 @@ def start_model_run(
     chat is not committed until model generation succeeds, but a failed provider
     attempt still needs an audit record.
     """
+    if data_exposure is not None and data_exposure not in VALID_DATA_EXPOSURES:
+        raise RunValidationError("Unsupported data exposure classification")
+
     started_at = _utc_now().isoformat()
     run = {
         "id": str(uuid.uuid4()),
@@ -90,6 +113,7 @@ def start_model_run(
         "data_exposure": data_exposure,
     }
     with database_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         connection.execute(
             """
             INSERT INTO runs (
@@ -122,6 +146,9 @@ def finish_model_run_success(
     cost_usd: Optional[float] = None,
 ) -> dict[str, Any]:
     """Finalize one started model run after chat persistence succeeds."""
+    _validate_optional_nonnegative("input_tokens", input_tokens)
+    _validate_optional_nonnegative("output_tokens", output_tokens)
+    _validate_optional_nonnegative("cost_usd", cost_usd)
     finished_at = _utc_now()
     with database_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -143,9 +170,9 @@ def finish_model_run_success(
                 finished_at = ?,
                 duration_ms = ?,
                 error_class = NULL,
-                input_tokens = ?,
-                output_tokens = ?,
-                cost_usd = ?
+                input_tokens = COALESCE(?, input_tokens),
+                output_tokens = COALESCE(?, output_tokens),
+                cost_usd = COALESCE(?, cost_usd)
             WHERE id = ? AND status = ?
             """,
             (
