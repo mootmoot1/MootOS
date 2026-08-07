@@ -32,7 +32,7 @@ def clean_db():
 
 
 def test_schema_migrates_to_model_runs(clean_db):
-    assert get_schema_version() == LATEST_SCHEMA_VERSION == 3
+    assert get_schema_version() == LATEST_SCHEMA_VERSION == 4
     with database_connection() as connection:
         columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(runs)").fetchall()
@@ -47,11 +47,12 @@ def test_schema_migrates_to_model_runs(clean_db):
 
 def test_real_schema_two_file_upgrades_without_losing_existing_rows(tmp_path: Path):
     database_path = tmp_path / "schema-two.db"
-    assert run_migrations(database_path) == 3
+    assert run_migrations(database_path) == LATEST_SCHEMA_VERSION == 4
     connection = sqlite3.connect(database_path)
     try:
-        connection.execute("DELETE FROM schema_migrations WHERE version = 3")
+        connection.execute("DELETE FROM schema_migrations WHERE version >= 3")
         connection.execute("DROP TABLE runs")
+        connection.execute("DROP TABLE tasks")
         connection.execute(
             "INSERT INTO memories (id, content, project, memory_type, created_at, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             ("existing-memory", "keep me", None, "test", "2026-01-01T00:00:00+00:00", "active", "2026-01-01T00:00:00+00:00"),
@@ -60,12 +61,13 @@ def test_real_schema_two_file_upgrades_without_losing_existing_rows(tmp_path: Pa
     finally:
         connection.close()
 
-    assert run_migrations(database_path) == 3
+    assert run_migrations(database_path) == LATEST_SCHEMA_VERSION == 4
     connection = sqlite3.connect(database_path)
     try:
         row = connection.execute("SELECT content FROM memories WHERE id = 'existing-memory'").fetchone()
         assert row[0] == "keep me"
         assert connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='runs'").fetchone()
+        assert connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'").fetchone()
     finally:
         connection.close()
 
