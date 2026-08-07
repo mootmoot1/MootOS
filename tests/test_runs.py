@@ -32,8 +32,7 @@ def clean_db():
 
 
 def test_schema_migrates_to_model_runs(clean_db):
-    assert get_schema_version() == LATEST_SCHEMA_VERSION
-    assert LATEST_SCHEMA_VERSION >= 3
+    assert get_schema_version() == LATEST_SCHEMA_VERSION == 4
     with database_connection() as connection:
         columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(runs)").fetchall()
@@ -48,7 +47,7 @@ def test_schema_migrates_to_model_runs(clean_db):
 
 def test_real_schema_two_file_upgrades_without_losing_existing_rows(tmp_path: Path):
     database_path = tmp_path / "schema-two.db"
-    assert run_migrations(database_path) == LATEST_SCHEMA_VERSION
+    assert run_migrations(database_path) == LATEST_SCHEMA_VERSION == 4
     connection = sqlite3.connect(database_path)
     try:
         connection.execute("DELETE FROM schema_migrations WHERE version >= 3")
@@ -62,7 +61,7 @@ def test_real_schema_two_file_upgrades_without_losing_existing_rows(tmp_path: Pa
     finally:
         connection.close()
 
-    assert run_migrations(database_path) == LATEST_SCHEMA_VERSION
+    assert run_migrations(database_path) == LATEST_SCHEMA_VERSION == 4
     connection = sqlite3.connect(database_path)
     try:
         row = connection.execute("SELECT content FROM memories WHERE id = 'existing-memory'").fetchone()
@@ -106,100 +105,83 @@ def test_success_finalization_preserves_existing_metrics_when_new_values_omitted
     assert completed["cost_usd"] == 0.25
 
 
-def test_failed_model_run_stores_error_class_only(clean_db):
-    run = start_model_run(conversation_id=None, provider="openai", model="gpt-test")
-    error = RuntimeError("secret provider detail must not be stored")
+def test_failed_model_run_records_error_class_not_private_message(clean_db):
+    run = start_model_run(conversation_id="not-yet-persisted-conversation", provider="openai", model="gpt-test")
+    error = RuntimeError("private provider detail that must not be stored")
     failed = finish_model_run_failure(run["id"], error)
     assert failed["status"] == "failed"
     assert failed["error_class"] == "RuntimeError"
-    assert "secret" not in str(failed)
+    assert "private provider detail" not in repr(failed)
     assert failed["finished_at"] is not None
     assert failed["duration_ms"] >= 0
 
 
-def test_double_finalization_is_rejected(clean_db):
+def test_terminal_run_cannot_be_finalized_failure_after_success(clean_db):
     run = start_model_run(conversation_id=None, provider="openai", model="gpt-test")
     finish_model_run_success(run["id"])
     with pytest.raises(RunAlreadyFinishedError):
-        finish_model_run_failure(run["id"], RuntimeError("late failure"))
+        finish_model_run_failure(run["id"], RuntimeError("later failure"))
 
 
-def test_double_success_finalization_is_rejected(clean_db):
+def test_terminal_run_cannot_be_finalized_success_twice(clean_db):
     run = start_model_run(conversation_id=None, provider="openai", model="gpt-test")
     finish_model_run_success(run["id"])
     with pytest.raises(RunAlreadyFinishedError):
         finish_model_run_success(run["id"])
 
 
-def test_finish_missing_run_raises_not_found(clean_db):
+def test_finishing_unknown_run_raises_not_found(clean_db):
     with pytest.raises(RunNotFoundError):
         finish_model_run_success("missing-run")
+    with pytest.raises(RunNotFoundError):
+        finish_model_run_failure("missing-run", RuntimeError("ignored"))
 
 
-def test_invalid_run_type_is_rejected(clean_db):
+def test_run_constraints_reject_invalid_status_and_type(clean_db):
+    with pytest.raises(sqlite3.IntegrityError):
+        with database_connection() as connection:
+            connection.execute("INSERT INTO runs (id, run_type, status, started_at) VALUES ('bad-status', 'model', 'made-up', '2026-01-01T00:00:00+00:00')")
+    with pytest.raises(sqlite3.IntegrityError):
+        with database_connection() as connection:
+            connection.execute("INSERT INTO runs (id, run_type, status, started_at) VALUES ('bad-type', 'other', 'started', '2026-01-01T00:00:00+00:00')")
+
+
+def test_invalid_data_exposure_is_rejected_before_insert(clean_db):
     with pytest.raises(RunValidationError):
-        start_model_run(conversation_id=None, provider="openai", model="gpt-test", run_type="agent")
+        start_model_run(conversation_id=None, provider="openai", model="gpt-test", data_exposure="private prompt text")
+    assert list_runs() == []
 
 
-def test_invalid_data_exposure_is_rejected(clean_db):
+def test_data_exposure_default_and_explicit_override(clean_db):
+    default_run = start_model_run(conversation_id=None, provider="openai", model="gpt-test")
+    local_run = start_model_run(conversation_id=None, provider="local", model="local-test", data_exposure=DATA_EXPOSURE_LOCAL)
+    assert default_run["data_exposure"] == "model_provider"
+    assert local_run["data_exposure"] == "local"
+
+
+def test_negative_metrics_are_rejected(clean_db):
+    run = start_model_run(conversation_id=None, provider="openai", model="gpt-test")
     with pytest.raises(RunValidationError):
-        start_model_run(conversation_id=None, provider="openai", model="gpt-test", data_exposure="prompt: secret")
+        finish_model_run_success(run["id"], input_tokens=-1)
+    with pytest.raises(RunValidationError):
+        finish_model_run_success(run["id"], output_tokens=-1)
+    with pytest.raises(RunValidationError):
+        finish_model_run_success(run["id"], cost_usd=-0.01)
+    assert get_run(run["id"])["status"] == "started"
 
 
-def test_data_exposure_default_and_override(clean_db):
-    default = start_model_run(conversation_id=None, provider="openai", model="gpt-test")
-    explicit = start_model_run(
-        conversation_id=None, provider="local", model="test", data_exposure=DATA_EXPOSURE_LOCAL
-    )
-    assert default["data_exposure"] == "model_provider"
-    assert explicit["data_exposure"] == "local"
+def test_list_runs_can_filter_by_conversation_without_private_content(clean_db):
+    first = start_model_run(conversation_id="conversation-a", provider="openai", model="model-a")
+    second = start_model_run(conversation_id="conversation-b", provider="openai", model="model-b")
+    results = list_runs(conversation_id="conversation-a")
+    assert [item["id"] for item in results] == [first["id"]]
+    assert second["id"] not in {item["id"] for item in results}
+    assert get_run(first["id"])["data_exposure"] == "model_provider"
 
 
-def test_negative_metrics_are_rejected_by_schema(clean_db):
-    with pytest.raises(sqlite3.IntegrityError):
-        with database_connection() as connection:
-            connection.execute(
-                """INSERT INTO runs (
-                    id, run_type, status, started_at, input_tokens, data_exposure
-                ) VALUES (?, 'model', 'started', ?, -1, 'model_provider')""",
-                ("negative", "2026-01-01T00:00:00+00:00"),
-            )
-
-
-def test_schema_rejects_unsupported_status(clean_db):
-    with pytest.raises(sqlite3.IntegrityError):
-        with database_connection() as connection:
-            connection.execute(
-                """INSERT INTO runs (
-                    id, run_type, status, started_at, data_exposure
-                ) VALUES (?, 'model', 'abandoned', ?, 'model_provider')""",
-                ("bad-status", "2026-01-01T00:00:00+00:00"),
-            )
-
-
-def test_schema_rejects_unsupported_run_type(clean_db):
-    with pytest.raises(sqlite3.IntegrityError):
-        with database_connection() as connection:
-            connection.execute(
-                """INSERT INTO runs (
-                    id, run_type, status, started_at, data_exposure
-                ) VALUES (?, 'agent', 'started', ?, 'model_provider')""",
-                ("bad-type", "2026-01-01T00:00:00+00:00"),
-            )
-
-
-def test_list_runs_clamps_limit(clean_db):
-    for index in range(3):
-        start_model_run(conversation_id=None, provider="openai", model=f"model-{index}")
-    assert len(list_runs(limit=1)) == 1
+def test_list_runs_clamps_limit_between_one_and_five_hundred(clean_db):
+    first = start_model_run(conversation_id=None, provider="openai", model="one")
+    start_model_run(conversation_id=None, provider="openai", model="two")
     assert len(list_runs(limit=0)) == 1
-    assert len(list_runs(limit=9999)) == 3
-
-
-def test_get_and_list_runs(clean_db):
-    first = start_model_run(conversation_id="c1", provider="openai", model="m1")
-    second = start_model_run(conversation_id="c2", provider="openai", model="m2")
-    finish_model_run_failure(second["id"], ValueError("private"))
-    assert get_run(first["id"])["id"] == first["id"]
-    failed = list_runs(status="failed")
-    assert [item["id"] for item in failed] == [second["id"]]
+    assert len(list_runs(limit=9999)) == 2
+    assert get_run(first["id"]) is not None
