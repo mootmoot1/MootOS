@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from backend.db import database_connection
+from backend.time_utils import normalize_optional_utc_datetime
 
 
 TASK_STATUS_OPEN = "open"
@@ -43,18 +44,7 @@ def _normalize_title(title: str) -> str:
 
 
 def _normalize_due_at(due_at: Optional[str]) -> Optional[str]:
-    if due_at is None:
-        return None
-    value = due_at.strip()
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as error:
-        raise ValueError("Task due_at must be an ISO 8601 datetime") from error
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError("Task due_at must include a timezone")
-    return parsed.astimezone(timezone.utc).isoformat()
+    return normalize_optional_utc_datetime(due_at, field_name="Task due_at")
 
 
 def _get_project_name(connection: sqlite3.Connection, project: str) -> str:
