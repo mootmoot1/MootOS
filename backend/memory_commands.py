@@ -116,7 +116,11 @@ def parse_memory_correction_command(message: str) -> Optional[MemoryCorrectionCo
 
 
 def parse_memory_save_command(message: str) -> Optional[MemorySaveCommand]:
-    """Parse only clear imperative save commands, never ordinary questions."""
+    """Parse clear persistent-memory writes, including explicit corrections."""
+    correction = parse_memory_correction_command(message)
+    if correction is not None:
+        return MemorySaveCommand(content=correction.content)
+
     text = _strip_optional_please(message)
     for prefix in COMMAND_PREFIXES:
         content = _content_after_prefix(text, prefix)
