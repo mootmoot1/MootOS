@@ -1,9 +1,12 @@
 # MootOS Operations Runbook
 
+**Last reviewed:** August 8, 2026  
 **Environment:** Railway production deployment  
-**Application model:** One FastAPI service, one replica, one attached SQLite volume
+**Application model:** One FastAPI service, one process, one replica, one attached SQLite volume  
+**Production entrypoint:** `backend.application:app`  
+**Current schema:** `4 — tasks`
 
-This runbook explains how to operate the live MootOS deployment without guessing.
+This is a **current operational document**. Historical deployment records and old ADRs may describe earlier schemas or entrypoints; use this runbook for the live post-PR-30 operating shape.
 
 ## 1. Production components
 
@@ -13,27 +16,57 @@ This runbook explains how to operate the live MootOS deployment without guessing
 - Railway volume: `mootos-volume`
 - Volume mount: `/data`
 - Production database: `/data/mootos.db`
-- Current schema version: `1 — initial_schema`
-- Public health endpoint: `/health`
-- Private interface: `/chat`
+- Current schema version: `4 — tasks`
+- Public liveness endpoint: `/health`
+- Public deployment-readiness endpoint: `/ready`
+- Private chat interface: `/chat`
+- Private memory interface: `/memory`
+- Private profile interface: `/profile`
 - Login interface: `/login`
 - One Railway replica
 
-Railway automatically deploys commits merged into `main`.
+Railway launches the composed application with:
 
-## 2. Required private variables
+```text
+python -m uvicorn backend.application:app --host 0.0.0.0 --port $PORT
+```
+
+`railway.toml` uses `/ready` as the deployment health check. `/health` is process liveness only; it is not a substitute for database/schema readiness.
+
+## 2. Current durable schema
+
+Migrations are ordered and applied at startup:
+
+1. `initial_schema`
+2. `memory_lifecycle`
+3. `model_runs`
+4. `tasks`
+
+Durable tables/domains include:
+
+- `schema_migrations`
+- `projects`
+- `memories`
+- `conversations`
+- `messages`
+- `runs`
+- `tasks`
+
+Do not edit `schema_migrations` manually to force compatibility.
+
+## 3. Required private variables
 
 Normal private production requires:
 
 ```text
 AI_PROVIDER=openai
 OPENAI_API_KEY=<secret>
-OPENAI_MODEL=gpt-5-mini
+OPENAI_MODEL=<configured model>
 MOOTOS_PASSWORD=<secret>
-MOOTOS_SESSION_SECRET=<long random secret>
+MOOTOS_SESSION_SECRET=<long random secret of at least 32 characters>
 ```
 
-Railway supplies:
+Railway supplies deployment metadata such as:
 
 ```text
 PORT
@@ -42,34 +75,83 @@ RAILWAY_PUBLIC_DOMAIN
 RAILWAY_VOLUME_MOUNT_PATH
 ```
 
-Do not set this for normal private production:
+Normal Railway production should not enable:
 
 ```text
 MOOTOS_ALLOW_PUBLIC=true
+MOOTOS_ALLOW_UNSAFE_DATABASE_PATH=true
+MOOTOS_ALLOW_HARD_DELETE=true
 ```
 
-That variable is an explicit high-risk override allowing Railway to start without password protection.
+Those are deliberate high-risk overrides for specific recovery/development cases, not normal production settings.
 
-## 3. Normal release process
+## 4. Normal release process
 
 1. Create one focused branch.
-2. Make the intended changes.
-3. Add tests.
-4. Update relevant documentation in the same PR.
+2. Make the intended change.
+3. Add or update tests.
+4. Update current documentation when behavior or architecture changes.
 5. Open a draft PR.
-6. Review the plain-language summary and risk.
-7. Wait for GitHub Actions.
-8. Moot explicitly approves the merge.
-9. Merge into `main`.
-10. Railway builds automatically.
-11. Wait until Railway reports online.
-12. Confirm `/health`.
-13. Log in and manually test the changed behavior.
-14. For database work, verify old and new data.
+6. Review the diff and plain-language risk.
+7. Wait for exact-head GitHub Actions.
+8. Use independent read-only review for meaningful behavior changes.
+9. Moot explicitly approves the merge.
+10. Merge into `main`.
+11. Railway deploys from `main`.
+12. Confirm `/ready` succeeds.
+13. Confirm `/health` succeeds.
+14. Log in and manually test the changed behavior.
+15. For schema/storage work, verify existing and new data.
 
-A green health check proves startup, not complete user-facing correctness.
+A green `/ready` proves the running code can open the configured database and recognizes the current schema. It does not prove every user-facing feature works.
 
-## 4. Expected health response
+## 5. Post-deployment smoke test
+
+1. Open the Railway domain.
+2. Confirm the login page appears.
+3. Confirm an incorrect password is rejected.
+4. Log in successfully.
+5. Confirm older conversations load.
+6. Confirm saved active memories remain available.
+7. Send a short normal chat message and receive an assistant response.
+8. Refresh/reopen the conversation and confirm the turn persisted.
+9. Confirm `/memory` opens.
+10. If the release touched profile support, confirm `/profile` opens.
+11. If the release touched Tasks, exercise the intended Task API/chat behavior with disposable data.
+12. Log out and confirm protected routes require authentication.
+
+## 6. Current behavior boundaries
+
+MootOS currently has:
+
+- normal OpenAI-backed chat through a replaceable provider boundary
+- atomic successful normal chat persistence
+- persistent conversations and projects
+- long-term memory save/retrieval/lifecycle controls
+- reviewed bootstrap-profile preview/import
+- structured model Run logging
+- Task create/list/get/complete/cancel
+- explicit chat-driven Task creation
+
+MootOS currently does **not** have:
+
+- a background scheduler
+- reminder delivery
+- recurring reminders/tasks
+- conditional trigger execution
+- Redis/Celery or a distributed queue
+- a separate worker
+- external write-capable tools
+- approval execution workflows
+- multiple application replicas
+
+An optional Task `due_at` value is stored scheduling metadata only. It does not cause anything to fire automatically.
+
+## 7. Readiness and liveness
+
+### `/health`
+
+Expected success shape:
 
 ```json
 {
@@ -77,90 +159,60 @@ A green health check proves startup, not complete user-facing correctness.
 }
 ```
 
-The public health endpoint must not expose secrets, database paths, private data, provider configuration, or environment values.
+This is intentionally minimal process liveness.
 
-## 5. Post-deployment smoke test
+### `/ready`
 
-1. Open the Railway domain.
-2. Confirm the login page appears.
-3. Confirm an incorrect password is rejected.
-4. Log in.
-5. Confirm older conversations are listed.
-6. Open an older conversation and confirm messages load.
-7. Confirm saved memories remain.
-8. Send a short message.
-9. Confirm an assistant response returns.
-10. Refresh and reopen the conversation.
-11. Log out and confirm protected routes require login.
+Railway uses `/ready` for deployment readiness. Readiness verifies the configured production database can be opened without silently creating a replacement and that the schema matches the version supported by the running application.
 
-## 6. Hardening deployment verification
+A readiness failure should return a generic error and must not expose secrets, database paths, private content, schema details, or provider configuration to unauthenticated callers.
 
-After merging the foundation-hardening PR:
-
-1. Confirm Railway reaches online status.
-2. Confirm the existing password still works.
-3. Open at least one conversation created before hardening.
-4. Confirm its messages remain.
-5. Confirm at least one older memory remains.
-6. Create one new conversation or memory.
-7. Redeploy once.
-8. Confirm old and new data remain.
-
-The first hardened startup creates `schema_migrations` and records migration version 1. It does not intentionally drop or replace existing data.
-
-## 7. Startup failures after hardening
+## 8. Startup failures
 
 ### Railway says auth variables are required
 
-Expected error meaning:
-
-- Railway metadata was detected.
-- Both `MOOTOS_PASSWORD` and `MOOTOS_SESSION_SECRET` were absent.
-- MootOS refused to start publicly.
+MootOS detected Railway but normal private auth configuration is missing.
 
 Response:
 
-1. Confirm both variables exist on the correct Railway service.
-2. Restore missing values.
-3. Redeploy.
-4. Do not bypass the protection with `MOOTOS_ALLOW_PUBLIC=true` unless a public deployment is deliberately intended.
+1. Confirm both `MOOTOS_PASSWORD` and `MOOTOS_SESSION_SECRET` exist on the correct service.
+2. Confirm the session secret meets the current minimum length.
+3. Restore the correct values.
+4. Redeploy.
+5. Do not use `MOOTOS_ALLOW_PUBLIC=true` as a shortcut.
 
-### Auth variables must be configured together
+### Database storage validation fails
 
-Exactly one private auth variable is present.
+Normal Railway production requires the attached volume. MootOS should fail closed instead of silently falling back to a repository-local database.
 
 Response:
 
-- Configure both values, or remove both only in local non-Railway development.
+1. Confirm `mootos-volume` still exists.
+2. Confirm it is attached to the correct service at `/data`.
+3. Confirm `RAILWAY_VOLUME_MOUNT_PATH` resolves to an existing directory.
+4. Confirm no unsafe database-path override was added accidentally.
+5. Do not create significant new data until the active database is understood.
 
 ### Database schema is newer than this MootOS build
 
-The database migration version is higher than the deployed code understands.
-
-Response:
-
 1. Stop rollback attempts.
-2. Identify the application version that created the newer schema.
-3. Deploy a compatible or newer application build.
-4. Do not edit `schema_migrations` to force startup.
-5. Treat data rollback as a separate high-risk operation.
+2. Identify which application version created the newer schema.
+3. Deploy schema-compatible or newer code.
+4. Do not edit `schema_migrations` manually.
+5. Treat database restoration as a separate high-risk operation.
 
 ### Database migration fails
 
-Check Railway logs for the first migration error.
-
-Response:
-
-1. Do not repeatedly restart without understanding the failure.
-2. Keep the volume attached.
+1. Check the first migration error in Railway logs.
+2. Keep the production volume attached.
 3. Do not delete the database or migration table.
-4. Determine whether the transaction rolled back.
-5. Prepare a focused fix or restore plan.
+4. Determine whether the migration transaction rolled back.
+5. Prepare a focused fix or verified restore plan.
 6. Verify data before reopening normal use.
 
-## 8. SQLite operational notes
+## 9. SQLite operational notes
 
-MootOS now uses:
+Every application connection uses the shared policy including:
 
 ```text
 foreign_keys = ON
@@ -178,200 +230,152 @@ mootos.db-shm
 
 Do not delete those files while the application is running.
 
-A five-second busy timeout reduces short lock failures. Repeated `database is locked` errors still require investigation.
+Keep production at one Railway replica. WAL improves SQLite concurrency for the current architecture; it does not provide multi-replica coordination.
 
-Keep one Railway replica. WAL does not make SQLite safe for multiple application replicas.
-
-## 9. Persistence verification
+## 10. Persistence verification
 
 Use after storage, migration, volume, or deployment changes:
 
-1. Create a unique test conversation or memory.
-2. Include the date and `persistence test`.
-3. Confirm it exists.
-4. Redeploy.
-5. Wait for online status.
-6. Log in.
-7. Confirm the exact test data remains.
-8. Confirm older data remains too.
+1. Create disposable recognizable data appropriate to the changed subsystem.
+2. Confirm it exists.
+3. Redeploy/rebuild.
+4. Wait for `/ready` and `/health`.
+5. Log in.
+6. Confirm the test data remains.
+7. Confirm older data remains too.
 
-Production data survived three deployments before hardening. Repeat verification after hardening is merged.
+For memory lifecycle work, verify active/superseded/archived behavior rather than only row existence. For Tasks, verify lifecycle state and project/due-time normalization. For Runs, verify expected audit rows without relying on private prompt/response duplication.
 
-## 10. Common incidents
+## 11. Common incidents
 
 ### Application does not build
 
-Check:
+Check dependency installation, Python compatibility, syntax/import errors, GitHub Actions, and changed file paths. Do not repeatedly deploy the same failing commit.
 
-- Dependency installation
-- Python compatibility
-- Syntax or import errors
-- GitHub Actions
-- Changed file paths
-
-Do not repeatedly deploy the same failing commit. Revert or prepare a focused fix.
-
-### Application builds but never becomes healthy
+### Application builds but never becomes ready
 
 Check:
 
-- Start command in `railway.toml`
-- Railway `PORT`
-- Auth startup validation
-- Migration errors
-- Database permissions
-- Volume attachment
-- Database schema compatibility
+- `railway.toml`
+- `PORT`
+- `backend.application:app` import/composition
+- auth startup validation
+- volume attachment
+- storage-path validation
+- migration errors
+- database permissions
+- schema compatibility
 
-Expected start command:
+Expected production start command:
 
 ```text
-python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+python -m uvicorn backend.application:app --host 0.0.0.0 --port $PORT
 ```
 
 ### Login fails
 
-Check:
+Check both private auth variables, the current browser domain, and whether the process-global login cooldown is active after repeated failures. Rotating `MOOTOS_SESSION_SECRET` intentionally invalidates existing signed sessions.
 
-- `MOOTOS_PASSWORD` is on the correct service
-- `MOOTOS_SESSION_SECRET` is also present
-- No accidental spaces were added
-- The browser is using the current domain
+### OpenAI-backed chat fails
 
-To invalidate all sessions, rotate `MOOTOS_SESSION_SECRET` and redeploy.
+Check `AI_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_MODEL`, provider billing/availability, Railway network access, and sanitized application logs. Never expose provider keys or private model input while troubleshooting.
 
-### OpenAI requests fail
+### Old data appears missing
 
-Check:
+Treat this as a storage incident. Confirm the volume, mount path, service attachment, database resolution, and unsafe override variables before creating more production data.
 
-- `AI_PROVIDER=openai`
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
-- Provider billing and availability
-- Railway network access
-- `/chat` error details
+### Reads work but writes fail
 
-Never expose the key while troubleshooting.
+Check Railway logs for SQLite errors, available volume space, file permissions, repeated busy-timeout failures, unexpected processes, and whether the error is actually provider-related rather than storage-related.
 
-### Old conversations disappear
-
-Treat as a storage incident.
-
-Immediately check:
-
-- Volume still exists
-- Volume is attached to MootOS
-- Mount is exactly `/data`
-- `RAILWAY_VOLUME_MOUNT_PATH` exists
-- `MOOTOS_DATABASE_PATH` is not overriding the path
-- Service was not duplicated without the volume
-
-Avoid creating significant new data until the active database is understood. A second empty database can make recovery more confusing.
-
-### New writes fail while reads work
-
-Check:
-
-- Railway logs for SQLite errors
-- Available volume space
-- File permissions
-- Repeated lock timeouts
-- Long-running requests or unexpected processes
-- Provider errors versus database errors
-
-## 11. Rollback
+## 12. Rollback
 
 Preferred code rollback:
 
-1. Revert the breaking commit through a PR, or select a known-good Railway deployment.
-2. Confirm the selected code supports the current schema version.
+1. Revert through a focused PR or select a known-good Railway deployment.
+2. Confirm the selected code supports the current database schema.
 3. Deploy.
-4. Verify health, login, chat, and persistence.
+4. Verify `/ready`, `/health`, login, chat, and persistence.
 
-Do not roll back by deleting the database, detaching the volume, or editing migration history.
+Do not roll back by deleting the database, detaching the volume, or rewriting migration history.
 
-Code rollback and data rollback are separate operations. A future migration may make older code incompatible.
+Code rollback and data rollback are separate operations.
 
-## 12. Volume safety
+## 13. Volume safety
 
 Never casually:
 
-- Delete `mootos-volume`
-- Detach it
-- Change the mount path
-- Mount an empty volume at `/data`
-- Set an unrelated `MOOTOS_DATABASE_PATH`
-- Scale above one replica
-- Delete WAL files while running
-- Edit `schema_migrations`
+- delete `mootos-volume`
+- detach or replace it
+- change its mount path
+- mount an empty replacement at `/data`
+- add an unrelated database-path override
+- scale above one application replica
+- delete WAL/SHM files while running
+- edit `schema_migrations`
 
-Before volume or destructive database changes:
+Before destructive storage changes, create a verified backup, record the current schema, define rollback, test separately, and get explicit approval.
 
-- Create a verified backup
-- Record the current path and schema version
-- Define rollback
-- Test the replacement separately
-- Receive explicit approval
-
-## 13. Backup and restore status
+## 14. Backup and restore status
 
 Current state:
 
-- Redeployment persistence is verified.
-- One WAL-safe production snapshot was downloaded off-volume with a matching SHA-256.
-- A separate restore copy passed integrity, application startup, conversation-read, and memory-read checks on August 1, 2026.
-- Automatic backup, retention, and recurring restore verification are not implemented.
-- Automatic production restore and point-in-time recovery are not implemented.
+- normal redeployment persistence has been verified
+- a WAL-safe production snapshot was copied off-volume and hash-verified
+- an isolated restore copy passed integrity/application-read checks
+- automated encrypted backups are not implemented
+- retention automation is not implemented
+- recurring restore verification is not implemented
+- automatic production restore and point-in-time recovery are not implemented
 
-See [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md) and [`BACKUP_RESTORE_VERIFICATION_2026-08-01.md`](BACKUP_RESTORE_VERIFICATION_2026-08-01.md). A future backup feature must continue to include restore testing.
+See `MANUAL_BACKUP_AND_RESTORE.md` and the dated backup/restore verification record.
 
-## 14. Security incident response
+## 15. Security incident response
 
 If a secret may be exposed:
 
 1. Revoke or rotate it immediately.
-2. Update Railway.
+2. Update Railway variables.
 3. Redeploy.
-4. Review GitHub history and PRs.
-5. Review provider and service logs.
-6. Rotate related secrets when appropriate.
+4. Review GitHub history/PRs and relevant provider/service logs.
+5. Rotate related credentials when appropriate.
 
 Examples:
 
 - OpenAI key: revoke and replace.
-- Session secret: replace to invalidate all cookies.
-- Login password: replace, and consider rotating the session secret.
+- Session secret: replace to invalidate signed sessions.
+- Login password: replace; consider also rotating the session secret.
 
-## 15. Before declaring resolution
+## 16. Before declaring an incident resolved
 
 Confirm:
 
 - Railway is online
+- `/ready` succeeds
 - `/health` succeeds
-- Login works
-- Unauthenticated APIs are blocked
-- Chat returns a real response
-- Existing conversations remain
-- Existing memories remain
-- New writes work
-- Volume is attached at `/data`
-- Schema version is supported
-- No secrets were committed
-- Resolution is documented
+- login works
+- unauthenticated private APIs are blocked
+- normal chat works
+- existing conversations and memories remain
+- new writes work
+- the volume is attached at `/data`
+- schema 4 is supported by the deployed build
+- no secrets were committed
+- the resolution is documented
 
-## 16. Escalation rule
+## 17. Escalation rule
 
 Stop and investigate when:
 
-- The source of truth is uncertain
-- Two database files may exist
-- A migration partially failed
-- The schema is newer than the application
-- A volume was deleted or replaced
-- Secrets may be exposed
-- Data appears corrupted
-- Rollback could destroy newer data
+- the active source of truth is uncertain
+- two database files may exist
+- a migration may have partially failed
+- the schema is newer than the code
+- a volume was deleted or replaced
+- secrets may be exposed
+- data appears corrupted
+- rollback could destroy newer data
 
-Speed matters less than avoiding irreversible damage.
+Avoid irreversible recovery shortcuts.
 
-See [`FOUNDATION_HARDENING.md`](FOUNDATION_HARDENING.md) and [`DATA_AND_PERSISTENCE.md`](DATA_AND_PERSISTENCE.md).
+See `DATA_AND_PERSISTENCE.md`, `FOUNDATION_HARDENING.md`, `RAILWAY_STORAGE_AND_READINESS.md`, and `PRIVATE_HTTP_BOUNDARY.md` for deeper implementation details.
