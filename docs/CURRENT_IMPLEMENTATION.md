@@ -1,665 +1,239 @@
 # MootOS Current Implementation
 
-**Applies to:** Version 0.1 on `feature/memory-keyword-retrieval-v0.1`  
-**Production base:** PR #16 merged and production-verified  
-**Schema:** `2 — memory_lifecycle`  
-**Purpose:** Describe what the code actually does, separate from future plans.
+**Applies to:** `main` after PR #30  
+**Last synchronized:** August 8, 2026  
+**Schema:** `4 — tasks`  
+**Purpose:** Describe what the running code does now. Historical ADRs and verification records remain valid for their original checkpoints but are not substitutes for this file.
 
 ## 1. Runtime shape
 
-MootOS runs as one FastAPI application process.
+MootOS runs as one FastAPI application process. Production uses `backend.application:app` on one Railway service and one replica.
 
-Production uses one Railway service and one replica. The same process:
+The process:
 
-- Serves the mobile chat and memory interfaces
-- Handles login and session validation
-- Exposes JSON APIs
-- Runs schema migrations during startup
-- Reads and writes SQLite
-- Detects explicit memory-save commands
-- Ranks active memory using deterministic keywords
-- Searches active or archived memory through a protected read-only request body
-- Builds model instructions from active memories
-- Calls the configured AI provider for normal conversation
-- Handles correction, archive, and restore internally without a model call
-- Returns responses to the browser
+- serves chat, memory, profile, static assets, login, health, and readiness
+- authenticates the private browser session
+- runs ordered SQLite migrations at startup
+- reads/writes the persistent SQLite database
+- handles deterministic memory and Task commands
+- prepares model-backed chat without writing first
+- calls the configured model provider
+- atomically commits successful normal chat turns
+- records model Runs
 
-There are no microservices, background workers, task queues, cache servers, vector databases, or multiple application replicas.
+There is no background worker, task queue, Redis, vector database, scheduler, reminder delivery loop, external-tool executor, or multi-replica coordination system.
 
-The keyword branch adds no schema migration and no external retrieval service.
-
-## 2. Current modules
+## 2. Application composition
 
 ### `backend/main.py`
 
-Responsibilities:
+Owns the core FastAPI app, auth/security middleware, health/readiness, memory/project/conversation APIs, normal `/chat`, memory command routing, model instruction construction, provider calls, and Run integration.
 
-- Creates the FastAPI application
-- Mounts frontend static files
-- Validates auth configuration during import
-- Initializes the database through the migration runner
-- Defines request models and routes
-- Applies authentication middleware
-- Serves the protected `/chat` and `/memory` interfaces
-- Resolves normal conversations and stores normal chat messages
-- Routes explicit memory-save commands to the atomic chat-memory operation
-- Exposes memory correction, history, archive, and restore APIs
-- Exposes `GET /memories` for normal active or archived listings
-- Exposes read-only `POST /memories/search` so private terms stay out of request URLs
-- Passes the current user request to the retrieval layer
-- Builds model instructions from identity rules and ranked active memories
-- Sends ordinary chat requests to the configured model provider
+### `backend/application.py`
 
-### `backend/auth.py`
+Is the Railway composition entrypoint. It imports the core app, adds feature routers such as profile and Task APIs, serves the profile interface, and currently contains the narrow middleware used to intercept explicit chat Task-create commands before ordinary `/chat` handling.
 
-Responsibilities:
+### Frontend
 
-- Requires password and session secret together
-- Detects Railway through Railway environment metadata
-- Refuses Railway startup when both private auth values are absent
-- Permits public Railway startup only when `MOOTOS_ALLOW_PUBLIC=true`
-- Compares passwords using constant-time comparison
-- Creates and verifies signed session tokens
-- Sets and clears HTTP-only cookies
-- Uses secure cookies automatically on Railway
+Plain HTML/CSS/JavaScript. The browser talks only to MootOS APIs; provider keys never go to browser JavaScript. Stored private values are rendered using safe text assignment rather than HTML interpretation.
 
-Current auth boundary:
+## 3. Storage and schema
 
-- One configured password
-- One application-wide session secret
-- No user accounts or roles
-- No password-reset workflow
-- No login rate limiting
-- No server-side session database
-
-### `backend/db.py`
-
-Responsibilities:
-
-- Resolves the SQLite path
-- Creates the database parent directory
-- Opens every application SQLite connection
-- Applies one consistent connection policy
-- Provides commit, rollback, close, and row handling
-
-Database path priority:
-
-1. `MOOTOS_DATABASE_PATH`
-2. `RAILWAY_VOLUME_MOUNT_PATH/mootos.db`
-3. Repository-local `data/mootos.db`
-
-Every connection applies:
-
-```text
-foreign_keys = ON
-journal_mode = WAL
-synchronous = NORMAL
-busy_timeout = 5000 milliseconds
-connection timeout = 5 seconds
-row_factory = sqlite3.Row
-```
-
-### `backend/migrations.py`
-
-Responsibilities:
-
-- Defines ordered numbered migrations
-- Creates and reads `schema_migrations`
-- Serializes migration work with `BEGIN IMMEDIATE`
-- Applies unapplied migrations in order
-- Verifies required tables, columns, status values, and foreign keys
-- Rejects an incompatible or newer unknown schema
-- Seeds the five default projects during the initial migration
+SQLite remains the source of truth for durable application state.
 
 Current migrations:
 
-```text
-1 — initial_schema
-2 — memory_lifecycle
-```
+1. `initial_schema`
+2. `memory_lifecycle`
+3. `model_runs`
+4. `tasks`
 
-Migration 2 adds:
+Current tables:
 
-```text
-status
-updated_at
-replaces_memory_id
-superseded_by_id
-```
+- `schema_migrations`
+- `projects`
+- `memories`
+- `conversations`
+- `messages`
+- `runs`
+- `tasks`
 
-Existing memories are preserved, set active, and receive `updated_at = created_at`.
+`backend/migrations.py` owns schema order and compatibility verification.
 
-The keyword branch reuses schema 2 and adds no migration 3.
+`backend/db.py` owns connection policy. Connections use foreign keys, WAL mode, `synchronous=NORMAL`, row objects, and busy/connection timeouts. Railway storage fails closed when the expected persistent volume is not available unless an explicit high-risk override is configured.
 
-### `backend/memory.py`
+## 4. Authentication and HTTP boundary
 
-Responsibilities:
+MootOS is single-user and password protected in production.
 
-- Creates and lists projects
-- Creates, lists, retrieves, filters, and protects memories
-- Validates projects inside the same connection used for the operation
-- Corrects an active memory through append-and-supersede
-- Traverses correction history
-- Archives one exact latest active memory
-- Restores one exact latest archived memory
-- Prevents hard deletion from breaking history or recoverability
+Current protections include:
 
-Memory lifecycle values:
+- password plus signed-session-secret configuration
+- fail-closed Railway auth configuration
+- minimum session-secret length
+- HTTP-only signed session cookie
+- secure cookie on Railway
+- process-global failed-login cooldown
+- `Cache-Control: no-store` on private/dynamic responses
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Referrer-Policy: same-origin`
+- Railway hard-delete disabled by default
+
+`/health`, `/ready`, the login endpoints, manifest, and static assets have intentional public behavior. The application remains single-user; there are no accounts, roles, OAuth identities, or distributed sessions.
+
+## 5. Normal model-backed chat
+
+For ordinary chat:
+
+1. explicit deterministic write commands are checked first
+2. model configuration is validated
+3. the conversation and recent history are prepared without a database write
+4. active long-term memories are ranked for context
+5. conversation/capability guidance and model-input budgets are applied
+6. a model Run is started
+7. the provider is called outside a SQLite write transaction
+8. on provider success, a short atomic transaction saves the optional new conversation, user message, assistant message, and conversation timestamp
+9. the Run is finalized with success metadata and linked message IDs
+10. provider/storage failures return sanitized errors and do not commit a half chat turn
+
+Existing conversations are protected by an in-process per-conversation lock. This is intentionally sufficient only for the current one-process/one-replica deployment.
+
+## 6. Model provider and input boundary
+
+The current external provider is OpenAI through `backend/model_router.py`, using the Responses API with provider-side storage disabled.
+
+The provider boundary is replaceable. Code-owned model input includes:
+
+- fixed MootOS identity/capability rules
+- conversation guidance
+- recent conversation messages
+- ranked active memory context
+
+The input budget is deterministic and preserves the current request and fixed instructions while dropping older/less-important optional context first. Diagnostics are count-based and avoid logging private prompt content.
+
+The model is explicitly told not to claim external actions or capabilities the running system does not actually have.
+
+## 7. Long-term memory
+
+### Storage
+
+Memories include content, optional project, memory type/source, lifecycle timestamps, and correction links.
+
+Lifecycle states:
 
 - `active`
 - `superseded`
 - `archived`
 
-Only active rows are eligible for ordinary model context. Archived and superseded rows remain available through their intended review paths but never enter normal recall.
+Only active memories enter normal recall.
 
-Default projects:
+### Explicit saves
 
-- MootOS
-- Studio
-- Social Media
-- Cars
-- Personal
+Commands such as `Remember that ...` and `Save this to memory: ...` are parsed deterministically. The complete user-message + memory + confirmation turn is committed in one SQLite transaction and does not call the model provider.
 
-### `backend/memory_retrieval.py`
+### Intelligent explicit correction
 
-Responsibilities:
-
-- Normalizes the current request into understandable keywords
-- Case-folds and extracts letters and numbers
-- Removes a small documented English stop-word set
-- Applies limited plural normalization
-- Removes repeated query terms before applying the 40-keyword limit
-- Scans complete stored memory content
-- Scores matches against content, project name, and memory type/source
-- Adds a bonus for a contiguous multi-keyword content phrase
-- Applies project-focus ordering
-- Appends only safe recent fallback memory
-- Caps ordinary context at 20 active memories
-- Searches active or archived normal listings without exposing superseded rows
-
-Project-chat ranking:
-
-1. Matching-project keyword matches
-2. Global keyword matches
-3. Relevant other-project keyword matches
-4. Recent matching-project and global fallback
-
-Unrelated other-project memory is not used as fallback.
-
-No-project ranking:
-
-1. Keyword matches from all active memories, ordered by match strength and recency without a global-scope bonus
-2. Recent active fallback from all projects
-
-Keyword retrieval does not:
-
-- Call OpenAI
-- Spend extra model credits
-- Mutate database state
-- Infer synonyms
-- Correct spelling
-- Use embeddings
-- Use a vector database
-- Use SQLite FTS5
-
-### `backend/memory_commands.py`
-
-Responsibilities:
-
-- Detects clear imperative save commands at the beginning of a message
-- Extracts the content that should become long-term memory
-- Rejects incomplete phrases and punctuation-only content
-- Avoids treating ordinary questions as save commands
-
-Supported command families include:
+PR #29 added deterministic correction phrases such as:
 
 ```text
-Remember that ...
-Remember ...
-Save this ...
-Save this to memory: ...
-Save to long-term memory: ...
+Actually, my test phrase is green turbo 88. Remember that instead.
 ```
 
-The parser is deterministic. It does not ask the model to decide whether a write occurred.
+The parser identifies the correction command. MootOS searches active memory in the allowed scope, requires exactly one strong target, refuses zero/ambiguous matches, and uses the shared memory correction lifecycle.
 
-Not supported:
+Correction creates a new active row, marks the prior version superseded, preserves both history links, and keeps the replacement in the original memory scope. Project conversations can correct a unique global memory because global memory is also visible in their context; unrelated other-project memory is excluded from correction targeting.
 
-- Natural-language `Forget that ...`
-- Natural-language `Update that ...`
-- Vague phrases such as `keep that in mind`
-- Automatic extraction of memories from normal conversation
+### Review/archive/restore
 
-### `backend/chat_memory.py`
+The protected memory UI supports search, correction, recoverable archive/forget, and restore. Hard deletion is intentionally constrained and is disabled on Railway by default.
 
-Responsibilities:
+## 8. Memory retrieval
 
-- Handles the complete explicit-memory chat turn in one SQLite transaction
-- Loads or creates the target conversation
-- Validates project focus
-- Stores the user command
-- Stores the active `explicit_chat` memory row
-- Stores the deterministic assistant confirmation
-- Rolls back the complete turn when any insert fails
+`backend/memory_retrieval.py` performs local deterministic retrieval. It uses literal keywords plus a small reviewed concept/alias layer; literal terms retain stronger weight than alias-only matches.
 
-For a new chat, a failed memory or confirmation write leaves no conversation, message, or memory row. For an existing chat, a failed write leaves the prior conversation unchanged.
+It does not use embeddings, a vector database, an external retrieval service, or an extra model call.
 
-### `backend/conversation.py`
+Project conversations treat projects as focus lenses rather than permanent walls. Active matching-project/global memory is prioritized, relevant other-project memory may match, and unrelated other-project fallback is prevented.
 
-Responsibilities:
+## 9. Curated bootstrap profile
 
-- Creates and lists conversations
-- Loads one conversation and its messages
-- Adds user and assistant messages
-- Updates conversation timestamps
-- Checks conversation existence in the same transaction used to add a message
+The profile feature provides a protected preview/import workflow for reviewed Version 1 manifests.
 
-Current message roles:
+It validates a bounded set of entries, canonicalizes projects, detects exact-scope duplicates, separates ready/already-active/blocked entries, and imports the complete accepted batch atomically as `bootstrap_profile` memories.
 
-- `user`
-- `assistant`
+Real private profile facts are not committed to the repository and the submitted manifest is not sent to the model provider.
 
-Assistant messages may store provider and model names.
+## 10. Runs
 
-### `backend/model_router.py`
+Migration 3 added `runs` as the execution/audit spine.
 
-Responsibilities:
+A Run records execution metadata such as type, status, provider/model, timestamps, sanitized failure class, optional token/cost metadata, data-exposure classification, and links to conversation/user/assistant message IDs.
 
-- Defines the normalized model response
-- Defines the provider protocol
-- Selects and validates the configured provider
-- Calls the provider
-- Converts provider failures into application errors
+Runs intentionally do not duplicate prompt or response content.
 
-Current external provider:
+Current `run_type` values support `model` and future `tool`; current application integration is primarily model-provider execution. Runs are not Tasks and do not grant execution authority.
 
-- OpenAI
+## 11. Tasks
 
-Current OpenAI behavior:
+Migration 4 added durable Tasks.
 
-- Uses the OpenAI Python SDK
-- Uses the Responses API
-- Sends instructions separately from conversation messages
-- Uses `store=False`
-- Returns normalized text, provider, and model metadata
+Current Task fields:
 
-### `frontend/`
+- `id`
+- `title`
+- optional `project`
+- `status`
+- optional `due_at`
+- `created_at`
+- `updated_at`
+- `completed_at`
+- `cancelled_at`
 
-The frontend is plain HTML, CSS, and JavaScript.
+Task states are `open`, `completed`, and `cancelled`. Due times, when supplied through the Task API, must be timezone-aware and are normalized to UTC.
 
-The chat interface provides:
+Task is intention, not execution authority. The lifecycle prevents a terminal Task from being completed/cancelled again.
 
-- Login and logout
-- User and assistant message bubbles
-- Text composer
-- Project selection
-- New conversation control
-- Saved conversation history
-- Loading and error states
-- Installable web-app metadata
-- A Memories control linking to `/memory`
+## 12. Chat-driven Task creation
 
-The Memory interface provides:
-
-- A protected page at `/memory`
-- Keyword Search and Clear controls
-- Active and Archived views
-- All, Global-only, and exact-project scope filters
-- Memory content
-- Global or project scope
-- Project name
-- Memory type or source label
-- Original or corrected version label
-- Active or archived status
-- Creation date
-- **Correct** and **Forget** on active memory cards
-- **Restore** on archived memory cards
-- Explicit dialogs displaying the selected memory
-- Refresh, loading, empty, success, and error states
-- A direct return link to chat
-
-When search is empty, the browser loads `GET /memories` with optional lifecycle status and exact project parameters. When search is nonblank, it submits `query`, `status`, and optional `project` in the JSON body of protected read-only `POST /memories/search`. This keeps private search text out of request URLs and ordinary URL logs.
-
-The browser preserves the request-generation guard so an older response cannot overwrite a newer search or filter selection.
-
-The browser creates DOM nodes and assigns database values and search labels through `textContent`. It does not render saved memory content as HTML.
-
-The browser sends explicit `POST` mutations only for correction, archive, and restore. Search also uses POST but is read-only. The script contains no memory `DELETE`, `PATCH`, or `PUT` request.
-
-## 3. Database schema
-
-MootOS uses one SQLite file.
-
-### `schema_migrations`
-
-| Column | Meaning |
-|---|---|
-| `version` | Applied numeric schema version |
-| `name` | Migration name |
-| `applied_at` | UTC application timestamp |
-
-### `projects`
-
-| Column | Meaning |
-|---|---|
-| `id` | UUID text primary key |
-| `name` | Unique project name, case-insensitive |
-| `description` | Optional description |
-| `created_at` | UTC timestamp text |
-
-### `memories`
-
-| Column | Meaning |
-|---|---|
-| `id` | UUID text primary key |
-| `content` | Memory text |
-| `project` | Optional project name; `NULL` means global |
-| `memory_type` | Optional category; chat saves use `explicit_chat` |
-| `created_at` | Original version timestamp |
-| `status` | `active`, `superseded`, or `archived` |
-| `updated_at` | Latest lifecycle-change timestamp |
-| `replaces_memory_id` | Prior version replaced by this row |
-| `superseded_by_id` | Newer version that replaced this row |
-
-The correction self-links are application-managed. SQLite cannot add those self-referential constraints to the existing table through a simple `ALTER TABLE` migration.
-
-Keyword retrieval creates no table, index, or stored ranking value.
-
-### `conversations`
-
-| Column | Meaning |
-|---|---|
-| `id` | UUID text primary key |
-| `title` | Conversation title |
-| `project` | Optional project name |
-| `created_at` | UTC timestamp text |
-| `updated_at` | Latest stored-message timestamp |
-
-### `messages`
-
-| Column | Meaning |
-|---|---|
-| `id` | UUID text primary key |
-| `conversation_id` | Owning conversation ID |
-| `role` | `user` or `assistant` |
-| `content` | Message text |
-| `provider` | Optional provider or internal handler name |
-| `model` | Optional model or internal handler version |
-| `created_at` | UTC timestamp text |
-
-The messages table has an enforced foreign key to conversations.
-
-## 4. Startup flow
-
-1. Python imports `backend.main`.
-2. Auth configuration is validated.
-3. Railway without auth values fails unless explicit public access is configured.
-4. FastAPI is created.
-5. Database initialization delegates to the migration runner.
-6. The runner opens a hardened SQLite connection.
-7. It acquires `BEGIN IMMEDIATE`.
-8. It creates or reads `schema_migrations`.
-9. It rejects incompatible or newer unknown schemas.
-10. It applies each missing migration in order.
-11. It verifies schema 2.
-12. It commits and closes the connection.
-13. The application becomes available.
-
-## 5. Normal chat and ranked-retrieval flow
-
-1. `POST /chat` receives `message` and optional `project` or `conversation_id`.
-2. The memory-command parser checks the message.
-3. When no save command is found, the model router verifies provider configuration.
-4. MootOS validates or creates the conversation.
-5. The user message is stored.
-6. Up to 20 recent messages are loaded chronologically.
-7. The current user message is passed to `retrieve_context_memories`.
-8. The retrieval layer loads active memories only.
-9. Query keywords are normalized, duplicate terms are removed, and at most 40 unique terms remain.
-10. Complete stored memory content, project name, and source are scored.
-11. Matches are ranked by project focus when a project exists, then match score and recency.
-12. Safe fallback fills remaining context slots.
-13. At most 20 memories are added to model instructions.
-14. The provider generates a response.
-15. The assistant response is saved with provider metadata.
-16. The API returns both stored messages and the conversation ID.
-
-Provider failure behavior:
-
-- Missing provider configuration returns HTTP `503` before a new normal conversation is created.
-- Provider request failure returns HTTP `502`.
-- A provider failure after the user message is stored can leave an unmatched user message.
-
-## 6. Explicit memory-save flow
-
-For a recognized command such as:
+PR #30 added deterministic Task creation through normal chat for narrow explicit commands such as:
 
 ```text
-Remember that my favorite tea is jasmine.
+Create a task to call Mike
+Add task: export stems
 ```
 
-MootOS performs this flow:
+The command parser is deliberately strict to avoid stealing ordinary messages such as `Create a task manager` or `Add task list to the sidebar`.
 
-1. Extracts the memory content.
-2. Rejects incomplete, punctuation-only, or longer-than-10,000-character content.
-3. Opens one SQLite transaction.
-4. Validates or creates the conversation inside that transaction.
-5. Stores the user's original command.
-6. Writes the extracted content to `memories` as active.
-7. Uses the conversation project when one exists; otherwise stores a global memory.
-8. Sets `memory_type` to `explicit_chat`.
-9. Stores a deterministic assistant confirmation.
-10. Commits all records together and returns success.
+For a recognized command, MootOS resolves/creates the conversation, stores the user message, creates the Task through the shared Task storage logic, stores a deterministic assistant confirmation, and commits the turn atomically. A Task created inside a project conversation inherits that canonical project.
 
-If conversation creation, the user message, the memory row, or the confirmation fails, the transaction rolls back. No partial explicit-memory chat turn remains.
+`Remind me ...` is deliberately **not** intercepted because scheduler/reminder delivery does not exist yet.
 
-The explicit save path does not call OpenAI.
+## 13. Current failure boundaries
 
-Its assistant message records:
+- Migrations fail closed on incompatible/newer schemas.
+- Railway persistent-storage configuration fails closed.
+- Provider failures do not commit a normal chat turn.
+- Explicit memory writes/corrections and chat Task creation use atomic database transactions.
+- Model Run failures store sanitized exception class rather than raw private error strings.
+- Network response loss can remain ambiguous to the browser; automatic blind resend is intentionally avoided.
 
-```text
-provider = mootos
-model = memory-command-v1
-```
+## 14. What is not implemented
 
-## 7. Correction flow
+Current code does not provide:
 
-Correction is not an in-place edit.
+- scheduler/reminder delivery
+- recurrence or conditional triggers
+- background jobs
+- email/calendar/messaging/tool integrations
+- approval UI or frozen-operation records
+- autonomous tool execution
+- multiple Railway replicas
+- multi-user accounts/roles
+- vector search/embeddings
+- automatic long-term-memory extraction from ordinary conversation
+- voice or vision
 
-1. Moot selects one active memory and confirms corrected content.
-2. The backend starts `BEGIN IMMEDIATE`.
-3. It reloads the selected row inside the transaction.
-4. It rejects a missing, inactive, blank, or unchanged correction.
-5. It inserts a new active row preserving project and memory type.
-6. It links the new row backward through `replaces_memory_id`.
-7. It marks the old row superseded and links it forward through `superseded_by_id`.
-8. Both changes commit or both roll back.
+## 15. Next proposed design problem
 
-Normal lists and model context use only the active replacement. `GET /memories/{id}/history` returns the complete chain oldest first and detects cycles or broken links.
-
-## 8. Recoverable forget flow
-
-1. Moot selects one active memory and presses **Forget**.
-2. The dialog displays the exact selected content and explains recoverability.
-3. After confirmation, the browser posts to `/memories/{id}/archive`.
-4. The backend starts `BEGIN IMMEDIATE`.
-5. It reloads the row and requires it to remain the latest active version.
-6. It changes status to archived and updates `updated_at`.
-7. The transaction commits or rolls back.
-8. The browser reloads the active list.
-
-Archived rows immediately leave active lists and model context. The row is not deleted, and correction links remain unchanged.
-
-## 9. Restore flow
-
-1. Moot switches the Memory page to Archived.
-2. Moot selects one archived row and presses **Restore**.
-3. The dialog displays the exact selected content.
-4. After confirmation, the browser posts to `/memories/{id}/restore`.
-5. The backend starts `BEGIN IMMEDIATE`.
-6. It reloads the row and requires it to remain the latest archived version.
-7. It changes status to active and updates `updated_at`.
-8. The transaction commits or rolls back.
-9. The browser reloads the archived list.
-
-The same row returns to normal active listings, search, and model context.
-
-## 10. Listing and keyword-search behavior
-
-`GET /memories` defaults to active rows and provides unsearched normal listings.
-
-Supported status values:
-
-```text
-active
-archived
-```
-
-Optional GET parameter:
-
-```text
-project=<exact project name>
-```
-
-Superseded rows are intentionally available only through direct retrieval and correction history.
-
-For an exact project filter, the API returns only rows assigned to that project. The browser's Global-only filter loads the selected lifecycle list and displays rows whose project is `NULL`.
-
-Keyword search uses protected read-only:
-
-```text
-POST /memories/search
-```
-
-JSON body:
-
-```json
-{
-  "query": "keyword phrase",
-  "status": "active",
-  "project": "Cars"
-}
-```
-
-The query is required after trimming and limited to 500 characters. Status must be active or archived. Project is optional and exact. Superseded rows cannot appear.
-
-The POST method is used for privacy, not mutation: search terms stay out of request URLs, browser history, and ordinary URL access logs. The endpoint does not modify SQLite or call the model provider.
-
-## 11. Hard-delete boundary
-
-The legacy `DELETE /memories/{id}` endpoint is not exposed in the browser.
-
-It can delete only a standalone unlinked active row. It rejects:
-
-- Archived rows
-- Superseded rows
-- Rows with `replaces_memory_id`
-- Rows with `superseded_by_id`
-
-This prevents permanent deletion from breaking correction history or recoverability.
-
-## 12. Authentication flow
-
-### Local development
-
-When Railway metadata is absent and both auth variables are absent, auth is disabled.
-
-### Private deployment
-
-When both auth variables are present:
-
-1. Protected browser routes, including `/chat` and `/memory`, redirect to `/login`.
-2. Protected APIs, including `POST /memories/search`, return HTTP `401` without a valid cookie.
-3. Correct login creates a signed 30-day cookie.
-4. Logout deletes the cookie.
-
-### Railway fail-closed behavior
-
-When Railway metadata is present:
-
-- Both private auth values are required by default.
-- Missing both values causes startup failure.
-- Public startup requires `MOOTOS_ALLOW_PUBLIC=true`.
-
-## 13. Production deployment
-
-- Builder: Railpack
-- Server: Uvicorn
-- Bind address: `0.0.0.0`
-- Port: Railway `PORT`
-- Health check: `/health`
-- Restart on failure
-- One replica
-- Volume mount: `/data`
-- Database: `/data/mootos.db`
-
-Production verification is complete for:
-
-- Persistent conversations and explicit saves
-- Memory review filters
-- Migration 2
-- Preserved correction
-- Recoverable forget and restore
-- Corrected and restored active-memory persistence through rebuilds
-
-Keyword retrieval remains branch-only until PR #17 is reviewed, merged, deployed, and manually verified.
-
-## 14. Test coverage
-
-The full suite covers:
-
-- SQLite PRAGMAs and migrations
-- Existing-data preservation and incompatible-schema rejection
-- Foreign keys and concurrent writes
-- Memory CRUD and persistence
-- Project validation and filtering
-- Conversation creation and continuation
-- Explicit memory-command parsing and boundary variants
-- Atomic explicit-save rollback
-- Save in one chat and recall in a brand-new chat
-- Active-only model context
-- Migration 2 data preservation
-- Atomic correction and correction history
-- Competing corrections and forced rollback
-- Archive, restore, and hard-delete protection
-- Competing lifecycle operations
-- Authentication boundaries
-- Memory page rendering and browser mutation restrictions
-- Keyword normalization and unique-query cap
-- Complete long-memory scanning
-- Project, global, and relevant other-project ordering
-- No-project match-strength ordering
-- No unrelated other-project fallback
-- Archived and superseded exclusion from ranked context
-- Active and archived search separation
-- Exact project search
-- Blank, oversized, and unsupported-status search rejection
-- Private body-based search and authentication
-- Query-aware model instructions
-
-The first keyword-branch GitHub Actions run collected 103 tests. One presentation regression failed because the safety-note heading no longer included the established phrase `Forget is recoverable`; the phrase was restored. Internal review then added ranking-edge and private-search regression tests. Exact-final-head CI remains required.
-
-## 15. Current limitations
-
-- Single-user deployment
-- One Railway replica
-- SQLite source of truth
-- OpenAI is the only implemented external provider
-- No background task system
-- No runtime tools
-- No voice or vision
-- No automatic encrypted backups or retention
-- No semantic search, embeddings, FTS5, synonym expansion, or typo correction
-- Keyword ranking reads the eligible personal memory list into application code
-- No duplicate detection
-- No natural-language correction or forget
-- No permanent-delete or secure-erasure UI
-- No full browser correction-history viewer
-
-## 16. Source of truth
-
-- GitHub stores code, tests, and documentation.
-- Railway `/data/mootos.db` stores production conversations and memories.
-- OpenAI generates normal chat responses but is not MootOS's history database.
-- Active memory rows are the only long-term-memory versions eligible for ordinary model context.
-- Documentation must distinguish merged production behavior from feature-branch behavior.
+Scheduler / Reminder v0.1 is the next proposed capability. The design should remain small but must explicitly solve durable due state, timezone semantics, restart recovery, duplicate-fire prevention/idempotency, delivery status, offline catch-up, cancellation/update behavior, and testable time. It must not blur Task (intention), Run (execution record), and future approval/external-action boundaries.
