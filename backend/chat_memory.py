@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from backend.db import database_connection
 from backend.memory_commands import parse_memory_correction_command
-from backend.memory_retrieval import rank_memories
+from backend.memory_retrieval import rank_memories, tokenize_keywords
 
 
 class ConversationNotFoundError(ValueError):
@@ -196,6 +196,15 @@ def _active_memories_in_scope(
     return [dict(row) for row in rows]
 
 
+def _strong_correction_match(candidate: dict[str, Any], content: str) -> bool:
+    query_tokens = set(tokenize_keywords(content))
+    candidate_tokens = set(tokenize_keywords(candidate.get("content")))
+    shared = query_tokens & candidate_tokens
+    if len(shared) >= 2:
+        return True
+    return len(shared) == 1 and len(query_tokens) <= 2
+
+
 def _select_correction_target(
     connection: sqlite3.Connection,
     content: str,
@@ -207,6 +216,9 @@ def _select_correction_target(
         project,
         include_fallback=False,
     )
+    candidates = [
+        candidate for candidate in candidates if _strong_correction_match(candidate, content)
+    ]
     if not candidates:
         raise MemoryCorrectionTargetNotFoundError(
             "I could not identify an existing memory to replace. Save it as a new memory or make the correction more specific."
@@ -224,11 +236,6 @@ def _replace_memory(
     content: str,
 ) -> dict[str, Any]:
     corrected_content = content.strip()
-    if corrected_content == original["content"]:
-        raise MemoryCorrectionAmbiguousError(
-            "The corrected memory is the same as the current memory."
-        )
-
     now = datetime.now(timezone.utc).isoformat()
     replacement = {
         "id": str(uuid.uuid4()),
@@ -349,21 +356,22 @@ def correct_explicit_memory_chat(
                 str(error),
             )
 
+        corrected_content = memory_content.strip()
+        if corrected_content == target["content"]:
+            return _correction_clarification_turn(
+                connection,
+                conversation,
+                request_message,
+                "The corrected memory is the same as the current memory.",
+            )
+
         user_message = _insert_message(
             connection,
             conversation_id=conversation["id"],
             role="user",
             content=request_message,
         )
-        try:
-            replacement = _replace_memory(connection, target, memory_content)
-        except (MemoryCorrectionTargetNotFoundError, MemoryCorrectionAmbiguousError) as error:
-            return _correction_clarification_turn(
-                connection,
-                conversation,
-                request_message,
-                str(error),
-            )
+        replacement = _replace_memory(connection, target, corrected_content)
 
         memory_scope = replacement["project"] or "Global"
         confirmation = (
