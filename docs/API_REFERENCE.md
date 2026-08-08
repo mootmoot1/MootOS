@@ -1,132 +1,95 @@
 # MootOS API Reference
 
 **Version:** 0.1  
-**Base URL:** Railway service domain in production or `http://127.0.0.1:8000` locally
+**Applies to:** `main` after PR #30  
+**Production app:** `backend.application:app`
 
-This reference documents current FastAPI behavior on `feature/memory-keyword-retrieval-v0.1`. Planned endpoints are not included.
+All private application/API routes are protected by the signed-session boundary when production auth is configured. `/health`, `/ready`, login/logout, manifest, and static assets have intentional public behavior.
 
-## Authentication behavior
-
-When `MOOTOS_PASSWORD` and `MOOTOS_SESSION_SECRET` are configured, application routes require the signed `mootos_session` cookie.
-
-Unauthenticated protected JSON requests return HTTP `401`:
-
-```json
-{
-  "detail": "Authentication required"
-}
-```
-
-Browser requests for protected HTML redirect to `/login`.
-
-Railway refuses to start without private auth unless `MOOTOS_ALLOW_PUBLIC=true` is deliberately configured.
-
-## Common response pattern
-
-Most application APIs return:
-
-```json
-{
-  "success": true,
-  "data": {}
-}
-```
-
-FastAPI request validation errors normally return HTTP `422`.
-
-## Interface and health
-
-### `GET /`
-
-Redirects to `/chat` with HTTP `307`.
-
-### `GET /chat`
-
-Serves the main chat interface.
-
-### `GET /memory`
-
-Serves the protected memory search, review, correction, recoverable-forget, and restore interface.
-
-The browser page reads from `GET /projects`, `GET /memories`, and the read-only `POST /memories/search` endpoint. It can send explicit confirmed `POST` requests for correction, archive, and restore. It does not expose permanent-delete, `PATCH`, or `PUT` controls.
-
-### `GET /login`
-
-Serves the private login page. Redirects to `/chat` when auth is disabled or the request is already authenticated.
-
-### `GET /manifest.webmanifest`
-
-Returns the phone Home Screen web-app manifest.
+## Health and authentication
 
 ### `GET /health`
+Minimal liveness response.
 
-Public Railway health check.
-
-```json
-{
-  "status": "healthy"
-}
-```
-
-The health response intentionally excludes secrets, database paths, provider settings, and private content.
-
-## Authentication
+### `GET /ready`
+Checks that the configured existing database is usable and exactly matches the schema version supported by the running build.
 
 ### `POST /auth/login`
-
-Request:
-
-```json
-{
-  "password": "your private password"
-}
-```
-
-Validation:
-
-- Minimum: 1 character
-- Maximum: 1,000 characters
-
-Success:
+Body:
 
 ```json
-{
-  "success": true
-}
+{"password":"..."}
 ```
 
-Incorrect password returns HTTP `401`:
-
-```json
-{
-  "detail": "Incorrect password"
-}
-```
+Creates the signed browser session after successful authentication. Repeated failures can trigger a temporary process-global cooldown.
 
 ### `POST /auth/logout`
+Clears the browser session.
 
-Deletes the session cookie and redirects to `/login` with HTTP `303`.
+## Browser interfaces
+
+### `GET /chat`
+Mobile chat UI.
+
+### `GET /memory`
+Memory review/search/correct/archive/restore UI.
+
+### `GET /profile`
+Curated bootstrap-profile preview/import UI.
+
+## Chat
+
+### `POST /chat`
+
+Body:
+
+```json
+{
+  "message": "Hello",
+  "conversation_id": null,
+  "project": null
+}
+```
+
+Normal messages use the configured model provider. Narrow deterministic commands can instead use internal storage paths without a model call.
+
+Current deterministic write families include:
+
+```text
+Remember that ...
+Save this to memory: ...
+Actually, ... Remember that instead.
+Create a task to ...
+Add task: ...
+```
+
+Task command interception is deliberately strict. `Remind me ...` is not a scheduler command because no reminder-delivery system exists yet.
+
+Normal successful model-backed chat stores the complete user/assistant pair atomically after provider success. Explicit memory and Task writes use their own atomic storage transactions.
+
+## Conversations
+
+### `POST /conversations`
+
+```json
+{
+  "project": "Studio",
+  "title": "Optional title"
+}
+```
+
+### `GET /conversations`
+Optional exact project filter.
+
+### `GET /conversations/{conversation_id}`
+Returns one conversation and stored messages.
 
 ## Projects
 
-### Project object
-
-```json
-{
-  "id": "uuid",
-  "name": "Studio",
-  "description": "Studio sessions and business operations.",
-  "created_at": "2026-07-31T00:00:00+00:00"
-}
-```
-
 ### `GET /projects`
-
-Lists projects alphabetically.
+Lists projects.
 
 ### `POST /projects`
-
-Request:
 
 ```json
 {
@@ -135,517 +98,141 @@ Request:
 }
 ```
 
-Validation:
-
-- `name`: 1–100 characters
-- `description`: optional, maximum 500 characters
-- Names are unique case-insensitively
-
-Success: HTTP `201`.
-
-Duplicate project: HTTP `409`.
-
-```json
-{
-  "detail": "Project already exists"
-}
-```
-
-There are no project update, rename, or delete endpoints.
+Project names are unique case-insensitively.
 
 ## Memories
 
-### Memory object
-
-```json
-{
-  "id": "uuid",
-  "content": "My favorite tea is jasmine.",
-  "project": "Personal",
-  "memory_type": "explicit_chat",
-  "created_at": "2026-08-01T00:00:00+00:00",
-  "status": "active",
-  "updated_at": "2026-08-01T00:00:00+00:00",
-  "replaces_memory_id": null,
-  "superseded_by_id": null
-}
-```
-
-`project: null` means the memory is global.
-
-Lifecycle values:
-
-- `active`: current version used by normal listings and model context
-- `superseded`: preserved older version replaced by correction
-- `archived`: recoverably forgotten and excluded from normal recall
-
 ### `POST /memories`
 
-Creates a standalone active memory directly through the API.
-
-Request:
-
 ```json
 {
-  "content": "Studio block sessions cost $50 per hour.",
-  "project": "Studio",
-  "memory_type": "project"
-}
-```
-
-Fields:
-
-- `content`: required, 1–10,000 characters
-- `project`: optional existing project
-- `memory_type`: optional free-text category
-
-Success: HTTP `201`.
-
-Unknown project: HTTP `422`.
-
-```json
-{
-  "detail": "Project does not exist"
+  "content": "fact",
+  "project": null,
+  "memory_type": "optional-source"
 }
 ```
 
 ### `GET /memories`
 
-Lists active memories newest first by default.
-
 Optional query parameters:
 
 ```text
 status=active|archived
-project=<exact project name>
+project=<exact existing project>
 ```
 
-Examples:
-
-```text
-GET /memories
-GET /memories?status=archived
-GET /memories?status=active&project=Cars
-```
-
-Rules:
-
-- `active` is the default status.
-- `archived` returns recoverably forgotten rows.
-- Superseded rows are intentionally unavailable through the normal list endpoint.
-- The project filter returns only rows assigned to that exact project. It does not automatically add global rows.
-- Unsupported status returns HTTP `422`.
-- Unknown project returns HTTP `404`.
-
-The `/memory` browser interface uses this endpoint when the search field is empty. Its Global-only option filters rows whose `project` value is `null` after the protected API response is received.
+Superseded versions are intentionally excluded from normal listings.
 
 ### `POST /memories/search`
-
-Performs a read-only keyword search while keeping private search terms out of the URL, browser history, and ordinary URL access logs.
-
-Request:
+Read-only protected search with private terms in the request body:
 
 ```json
 {
-  "query": "black Benz",
+  "query": "search terms",
   "status": "active",
   "project": "Cars"
 }
 ```
 
-Fields:
-
-- `query`: required after trimming, 1–500 characters
-- `status`: `active` or `archived`; defaults to `active`
-- `project`: optional exact existing project
-
-Rules:
-
-- Superseded rows are never returned.
-- The optional project filter searches only rows assigned to that exact project.
-- Keywords match normalized memory content, project name, and memory type or source.
-- Content matches receive the strongest score.
-- A contiguous multi-keyword content phrase receives an additional ranking bonus.
-- Stored memory content is scanned completely.
-- The query is capped at 40 unique normalized keywords after duplicate removal.
-- Blank, oversized, or unsupported-status requests return HTTP `422`.
-- Unknown project returns HTTP `404`.
-- The endpoint reads data only and performs no database mutation.
-- The endpoint does not call the external model provider.
-
-Success: HTTP `200`.
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "uuid",
-      "content": "I drive a black C300 Benz.",
-      "project": "Cars",
-      "status": "active"
-    }
-  ]
-}
-```
-
-The Memory page uses this endpoint only while nonblank search text is present. Search text and returned values are rendered through `textContent`.
-
 ### `GET /memories/{memory_id}`
-
-Returns one exact memory version by ID, including superseded or archived versions. Missing records return HTTP `404`.
+Returns one exact memory version.
 
 ### `GET /memories/{memory_id}/history`
-
-Returns the complete correction chain containing the selected version, ordered oldest to newest.
-
-Example:
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "old-uuid",
-      "content": "My car is silver.",
-      "status": "superseded",
-      "superseded_by_id": "new-uuid"
-    },
-    {
-      "id": "new-uuid",
-      "content": "My car is black.",
-      "status": "active",
-      "replaces_memory_id": "old-uuid"
-    }
-  ]
-}
-```
-
-The newest row may be `active` or `archived`. Missing records return HTTP `404`.
+Returns a complete correction chain oldest first.
 
 ### `POST /memories/{memory_id}/corrections`
 
-Creates a new active version and supersedes the selected active version in one transaction.
-
-Request:
-
 ```json
-{
-  "content": "My car is black."
-}
+{"content":"replacement content"}
 ```
 
-Validation:
-
-- Content is required and trimmed.
-- Maximum length is 10,000 characters.
-- Blank content is rejected.
-- Content identical to the current version is rejected.
-- Only an active memory can be corrected.
-
-Success: HTTP `201`.
-
-```json
-{
-  "success": true,
-  "data": {
-    "superseded": {
-      "id": "old-uuid",
-      "status": "superseded",
-      "superseded_by_id": "new-uuid"
-    },
-    "replacement": {
-      "id": "new-uuid",
-      "status": "active",
-      "replaces_memory_id": "old-uuid"
-    }
-  }
-}
-```
-
-Missing memory returns HTTP `404`. An inactive or unchanged target returns HTTP `409`.
-
-The replacement preserves the selected memory's project and memory type. The endpoint does not call the external model provider.
+Creates a new active version and supersedes the selected active version atomically.
 
 ### `POST /memories/{memory_id}/archive`
-
-Recoverably forgets one exact latest active memory version.
-
-Behavior:
-
-1. Starts a serialized SQLite write transaction.
-2. Reloads the selected row.
-3. Requires it to remain active and have no newer replacement.
-4. Changes `status` to `archived` and updates `updated_at`.
-5. Commits the change or rolls back.
-
-The row disappears from active listings and model context but remains available through `status=archived`, direct retrieval, correction history, and archived keyword search.
-
-Success: HTTP `200`.
-
-Missing memory returns HTTP `404`. An already archived, superseded, or stale target returns HTTP `409`.
+Recoverably removes the selected active memory from normal recall.
 
 ### `POST /memories/{memory_id}/restore`
-
-Restores one exact latest archived memory version.
-
-Behavior:
-
-1. Starts a serialized SQLite write transaction.
-2. Reloads the selected row.
-3. Requires it to remain archived and have no newer replacement.
-4. Changes `status` to `active` and updates `updated_at`.
-5. Commits the change or rolls back.
-
-The same row returns to active listings, active keyword search, and model context. Correction links remain unchanged.
-
-Success: HTTP `200`.
-
-Missing memory returns HTTP `404`. An active, superseded, or stale target returns HTTP `409`.
+Returns a selected archived latest version to active recall.
 
 ### `DELETE /memories/{memory_id}`
+Legacy administrative hard-delete path. It refuses lifecycle/history-protected rows and is disabled on Railway by default unless the explicit high-risk override is enabled.
 
-Legacy administrative hard delete for one unlinked active standalone memory. It is not exposed in the browser and is not the user-facing forget workflow.
+## Bootstrap profile
 
-The endpoint returns HTTP `409` for:
+### `POST /profile/preview`
+Validates/classifies a private Version 1 manifest without mutating storage.
 
-- Archived rows
-- Superseded rows
-- Any row linked into correction history
-
-Missing records return HTTP `404`.
-
-## Conversations
-
-### Conversation object
+Shape:
 
 ```json
 {
-  "id": "uuid",
-  "title": "Build session",
-  "project": "MootOS",
-  "created_at": "2026-07-31T00:00:00+00:00",
-  "updated_at": "2026-07-31T00:05:00+00:00"
+  "version": 1,
+  "entries": [
+    {"content":"...","project":"Personal"}
+  ]
 }
 ```
 
-### Message object
+### `POST /profile/import`
+Revalidates and atomically imports ready entries as `bootstrap_profile` memories. Duplicate/conflicting lifecycle states are handled according to the profile-import rules.
+
+## Tasks
+
+### `POST /tasks`
+Creates one open Task.
 
 ```json
 {
-  "id": "uuid",
-  "conversation_id": "uuid",
-  "role": "assistant",
-  "content": "Response text",
-  "provider": "openai",
-  "model": "gpt-5-mini",
-  "created_at": "2026-07-31T00:05:00+00:00"
+  "title": "call Mike",
+  "project": "Studio",
+  "due_at": "2026-08-09T15:00:00-04:00"
 }
 ```
 
-User messages normally have `provider` and `model` set to `null`.
+`due_at` is optional. When present it must be timezone-aware and is normalized to UTC in storage.
 
-Verified internal memory confirmations use:
+### `GET /tasks`
+Optional query parameters:
 
 ```text
-provider = mootos
-model = memory-command-v1
+status=open|completed|cancelled
+project=<exact existing project>
+limit=1..500
 ```
 
-### `POST /conversations`
+Due Tasks are ordered before unscheduled Tasks; due timestamps sort ascending.
 
-Creates an empty conversation.
+### `GET /tasks/{task_id}`
+Returns one Task.
 
-```json
-{
-  "project": "MootOS",
-  "title": "Build session"
-}
-```
+### `POST /tasks/{task_id}/complete`
+Moves one open Task to completed.
 
-- `project`: optional existing project
-- `title`: optional, 1–100 characters; defaults to `New conversation`
+### `POST /tasks/{task_id}/cancel`
+Moves one open Task to cancelled.
 
-Success: HTTP `201`.
+Completed/cancelled Tasks are terminal in Task v0.1.
 
-### `GET /conversations`
+## Runs
 
-Lists conversations newest first by `updated_at`.
+Runs currently exist as an internal execution/audit table rather than a public CRUD surface. Normal model-provider attempts create/finalize Run records containing execution metadata and optional links to saved conversation messages. Prompt/response bodies are not duplicated into Run rows.
 
-Optional filter:
+## Current schema-related status codes
 
-```text
-GET /conversations?project=MootOS
-```
+Common patterns:
 
-### `GET /conversations/{conversation_id}`
+- `200` successful read/action
+- `201` successful create/import/correction where defined
+- `401` authentication required
+- `404` missing object/project depending on route
+- `409` lifecycle/project conflict
+- `422` invalid request/domain validation
+- `429` login cooldown
+- `502` model provider failure
+- `503` provider/storage/readiness unavailable
 
-Returns one conversation with its complete message history.
+Exact response details are controlled by route code and may intentionally be sanitized at security/storage/provider boundaries.
 
-Missing conversation returns HTTP `404`.
+## Not an API yet
 
-## Chat
-
-### `POST /chat`
-
-Handles either normal model conversation or an explicit long-term-memory save command.
-
-New conversation request:
-
-```json
-{
-  "message": "What should we work on next?",
-  "project": "MootOS"
-}
-```
-
-Existing conversation request:
-
-```json
-{
-  "message": "Continue that plan.",
-  "conversation_id": "uuid"
-}
-```
-
-Fields:
-
-- `message`: required, 1–20,000 characters
-- `conversation_id`: optional
-- `project`: optional
-
-When both `conversation_id` and `project` are supplied, the project must match the existing conversation.
-
-### Normal conversation behavior
-
-When the message is not an explicit save command:
-
-1. The provider configuration is checked.
-2. The conversation is validated or created.
-3. The user message is stored.
-4. Up to 20 recent messages are loaded.
-5. The current request is normalized into understandable keywords.
-6. Up to 20 active memories are ranked by keyword relevance, project focus, and safe recent fallback.
-7. The configured model provider generates a response.
-8. The assistant response is stored and returned.
-
-Retrieval itself does not call the external model provider or spend additional model credits.
-
-Missing provider configuration returns HTTP `503` before a new normal conversation is created.
-
-Provider request failure returns HTTP `502`.
-
-### Explicit memory-save behavior
-
-Recognized command families include:
-
-```text
-Remember that <memory>
-Remember <memory>
-Save this <memory>
-Save this to memory: <memory>
-Save to long-term memory: <memory>
-```
-
-The parser is case-insensitive and requires the command at the beginning of the message. Ordinary questions such as `Do you remember that session?` are not treated as writes.
-
-For a recognized save command:
-
-1. The memory content is extracted.
-2. Content over 10,000 characters is rejected with HTTP `422`.
-3. The conversation is validated or created.
-4. The original user command is stored as a message.
-5. The extracted content is inserted into the `memories` table as active.
-6. The conversation project is used when present; otherwise the memory is global.
-7. `memory_type` is set to `explicit_chat`.
-8. A confirmation is stored and returned only after the database write succeeds.
-
-This path does not call OpenAI.
-
-### Cross-chat recall rules
-
-- Only active memories are supplied to ordinary model context.
-- A project conversation ranks matching-project keyword matches first, global matches next, and relevant other-project matches afterward.
-- After keyword matches, project fallback may include only recent matching-project and global active memories.
-- A no-project conversation ranks all active memories by match strength and recency without a global-scope bonus.
-- No-project fallback may come from every active project.
-- Archived and superseded rows never enter normal context.
-- At most 20 active memories are supplied.
-- Keyword matching is literal and normalized; synonyms and typographical errors are not inferred.
-- Stored memory content is scanned completely.
-- The query uses at most 40 unique normalized keywords after duplicate removal.
-
-### Standard successful chat response
-
-```json
-{
-  "success": true,
-  "data": {
-    "conversation_id": "uuid",
-    "project": "MootOS",
-    "user_message": {},
-    "assistant_message": {},
-    "provider": "openai",
-    "model": "gpt-5-mini"
-  }
-}
-```
-
-### Chat errors
-
-Missing conversation: HTTP `404`.
-
-Project mismatch: HTTP `409`.
-
-Oversized extracted memory: HTTP `422`.
-
-## Browser request boundary
-
-The Memory page can send these confirmed memory mutations:
-
-```text
-POST /memories/{id}/corrections
-POST /memories/{id}/archive
-POST /memories/{id}/restore
-```
-
-It also sends read-only keyword searches through:
-
-```text
-POST /memories/search
-```
-
-The search request body keeps private terms out of the URL and performs no database mutation. The page sends no memory `DELETE`, `PATCH`, or `PUT` request. Stored content, project values, and search labels are rendered through DOM `textContent`.
-
-## Current memory-command and retrieval limitations
-
-Not implemented:
-
-- Natural-language `Forget that ...`
-- Natural-language `Update that ...`
-- Automatic memory extraction from normal conversation
-- Permanent-delete or secure-erasure UI
-- Bulk archive or restore
-- Duplicate detection
-- Conflict resolution beyond exact lifecycle state checks
-- Semantic search, embeddings, FTS5, or synonym expansion
-- Typographical-error correction
-- Full browser correction-history viewer
-
-## FastAPI-generated documentation
-
-When authentication is enabled, `/docs` and `/redoc` are protected.
-
-Repository documentation remains the source of truth.
-
-## API stability
-
-The API is Version 0.1 and may evolve.
-
-Before changing routes, request fields, response fields, auth requirements, or status codes:
-
-- Update tests
-- Update this reference
-- Explain compatibility impact
-- Use a focused pull request
-- Add an ADR for a major API redesign
+There is currently no scheduler/reminder API, recurring schedule API, notification-delivery API, external-tool execution API, approval API, or background-job control API. Do not infer these capabilities from the presence of Task `due_at`.

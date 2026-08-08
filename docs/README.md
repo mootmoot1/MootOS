@@ -1,112 +1,68 @@
 # MootOS Documentation Index
 
-This directory contains the operational and historical documentation for MootOS.
+This directory contains current architecture/operations documentation plus historical ADRs and production-verification records.
 
-The documentation is divided into four types so readers can tell the difference between what exists now, how to operate it, why decisions were made, and what is planned for later.
+## Current source-of-truth reading order
 
-## 1. Current system truth
+For a reviewer trying to understand the repository **as it exists now**, use this order:
 
-These documents describe the code and deployment that exist today.
+1. [`../README.md`](../README.md) — plain-language current system summary
+2. [`CURRENT_CHECKPOINT.md`](CURRENT_CHECKPOINT.md) — latest verified project checkpoint
+3. [`CURRENT_IMPLEMENTATION.md`](CURRENT_IMPLEMENTATION.md) — current architecture and behavior
+4. [`API_REFERENCE.md`](API_REFERENCE.md) — current public/private API surface
+5. [`../V0.1_REQUIREMENTS.md`](../V0.1_REQUIREMENTS.md) — current Version 0.1 requirements/status
+6. [`../ROADMAP.md`](../ROADMAP.md) — current proposed development sequence
+7. `backend/migrations.py` — authoritative current schema version and migration order
 
-- [`CURRENT_CHECKPOINT.md`](CURRENT_CHECKPOINT.md) — latest verified project status and next milestone
-- [`CURRENT_IMPLEMENTATION.md`](CURRENT_IMPLEMENTATION.md) — current modules, request flows, boundaries, and known limitations
-- [`CONVERSATION_REFINEMENT.md`](CONVERSATION_REFINEMENT.md) — provider-independent rules for follow-ups, notes, corrections, uncertainty, capability honesty, context safety, and production verification
-- [`RAILWAY_STORAGE_AND_READINESS.md`](RAILWAY_STORAGE_AND_READINESS.md) — fail-closed production database-path rules, liveness/readiness separation, high-risk override, and deployment verification
-- [`CHAT_PROVIDER_PIPELINE.md`](CHAT_PROVIDER_PIPELINE.md) — atomic provider-backed turns, bounded provider calls, generic errors, concurrency boundary, and browser retry behavior
-- [`MODEL_INPUT_AND_CAPABILITIES.md`](MODEL_INPUT_AND_CAPABILITIES.md) — deterministic provider-input budgets, ranked context trimming, capability honesty, and privacy-safe diagnostics
-- [`PRIVATE_HTTP_BOUNDARY.md`](PRIVATE_HTTP_BOUNDARY.md) — login cooldown, session-secret minimum, no-store responses, browser security headers, and Railway hard-delete policy
-- [`API_REFERENCE.md`](API_REFERENCE.md) — current HTTP routes, request fields, response shapes, and errors
-- [`DATA_AND_PERSISTENCE.md`](DATA_AND_PERSISTENCE.md) — SQLite layout, database paths, Railway volume rules, backup guidance, migrations, and memory lifecycle persistence
-- [`FOUNDATION_HARDENING.md`](FOUNDATION_HARDENING.md) — centralized SQLite settings, schema migrations, production auth safety, validation, and deployment checks
-- [`BACKUP_RESTORE_VERIFICATION_2026-08-01.md`](BACKUP_RESTORE_VERIFICATION_2026-08-01.md) — non-private evidence from the completed pre-migration backup and restore drill
-- [`MEMORY_CORRECTION_PRODUCTION_VERIFICATION_2026-08-01.md`](MEMORY_CORRECTION_PRODUCTION_VERIFICATION_2026-08-01.md) — non-private evidence that migration 2 and correction worked in production and survived a rebuild
-- [`MEMORY_FORGET_RESTORE_PRODUCTION_VERIFICATION_2026-08-01.md`](MEMORY_FORGET_RESTORE_PRODUCTION_VERIFICATION_2026-08-01.md) — non-private evidence that recoverable forget and restore worked in production and survived a rebuild
-- [`MEMORY_KEYWORD_RETRIEVAL_PRODUCTION_VERIFICATION_2026-08-01.md`](MEMORY_KEYWORD_RETRIEVAL_PRODUCTION_VERIFICATION_2026-08-01.md) — non-private evidence that keyword-ranked recall and protected Memory-page search worked in production and survived a rebuild
-- [`PRIVATE_HTTP_BOUNDARY_PRODUCTION_VERIFICATION_2026-08-03.md`](PRIVATE_HTTP_BOUNDARY_PRODUCTION_VERIFICATION_2026-08-03.md) — non-private evidence that PR #23 deployed successfully, private response headers were active, login remained functional, and recoverable memory lifecycle controls still worked
+When these current documents conflict with an older PR verification record, branch-specific guide, or ADR scope statement, treat the older document as a historical snapshot and verify the present behavior against code.
 
-When a statement in a future-looking document conflicts with these files, these files should be treated as the description of the current implementation.
+## Important current checkpoint
 
-## 2. Operations
+As of August 8, 2026:
 
-These documents explain how to deploy, verify, recover, and maintain the live system.
+- current database schema is `4 — tasks`
+- model Run logging exists
+- Task v0.1 exists
+- intelligent explicit chat memory correction exists
+- explicit chat-driven Task creation exists
+- scheduler/reminder delivery does **not** exist
 
-- [`PHONE_DEPLOYMENT.md`](PHONE_DEPLOYMENT.md) — initial Railway and phone setup
-- [`OPERATIONS_RUNBOOK.md`](OPERATIONS_RUNBOOK.md) — routine deployment, health checks, persistence verification, incident response, migration safety, and rollback
-- [`RAILWAY_STORAGE_AND_READINESS.md`](RAILWAY_STORAGE_AND_READINESS.md) — production volume validation, readiness checks, and wrong-database incident response
-- [`CHAT_PROVIDER_PIPELINE.md`](CHAT_PROVIDER_PIPELINE.md) — provider/chat failure behavior, retry safety, verification, and incident response
-- [`MODEL_INPUT_AND_CAPABILITIES.md`](MODEL_INPUT_AND_CAPABILITIES.md) — current input limits, context-selection behavior, capability boundaries, and change rules
-- [`PRIVATE_HTTP_BOUNDARY.md`](PRIVATE_HTTP_BOUNDARY.md) — Railway preparation, login cooldown behavior, response-header checks, permanent-delete override, and rollback
-- [`MANUAL_BACKUP_AND_RESTORE.md`](MANUAL_BACKUP_AND_RESTORE.md) — WAL-safe manual snapshot, off-volume transfer, restore drill, and production restore safeguards
+The next proposed feature is Scheduler / Reminder v0.1, pending independent repository review.
 
-## 3. Architecture history
+## Architecture and feature guides
 
-These documents preserve why important technical choices were made.
+Useful focused documents include:
 
-- [`ADR-011-project-system-v0.1.md`](ADR-011-project-system-v0.1.md)
-- [`ADR-012-conversation-engine-and-model-router.md`](ADR-012-conversation-engine-and-model-router.md)
-- [`ADR-013-mobile-chat-interface.md`](ADR-013-mobile-chat-interface.md)
-- [`ADR-014-secure-phone-deployment.md`](ADR-014-secure-phone-deployment.md)
-- [`ADR-015-foundation-hardening.md`](ADR-015-foundation-hardening.md)
-- [`ADR-016-memory-lifecycle-and-correction.md`](ADR-016-memory-lifecycle-and-correction.md)
-- [`ADR-017-recoverable-memory-forget-and-restore.md`](ADR-017-recoverable-memory-forget-and-restore.md)
-- [`ADR-018-understandable-keyword-memory-retrieval.md`](ADR-018-understandable-keyword-memory-retrieval.md)
-- [`ADR-019-provider-independent-conversation-refinement.md`](ADR-019-provider-independent-conversation-refinement.md)
-- [`ADR-020-railway-storage-and-readiness.md`](ADR-020-railway-storage-and-readiness.md)
-- [`ADR-021-atomic-chat-provider-pipeline.md`](ADR-021-atomic-chat-provider-pipeline.md)
-- [`ADR-022-deterministic-model-input-and-capabilities.md`](ADR-022-deterministic-model-input-and-capabilities.md)
-- [`ADR-023-private-http-boundary.md`](ADR-023-private-http-boundary.md)
-- [`ADR-024-curated-bootstrap-profile-import.md`](ADR-024-curated-bootstrap-profile-import.md)
+- `FOUNDATION_HARDENING.md`
+- `CHAT_PROVIDER_PIPELINE.md`
+- `MODEL_INPUT_AND_CAPABILITIES.md`
+- `PRIVATE_HTTP_BOUNDARY.md`
+- `MODEL_RUN_LOGGING.md`
+- `TASKS.md`
+- bootstrap profile guides
+- memory lifecycle/retrieval guides
 
-The repository root also contains:
+These may describe the specific feature checkpoint at which they were written. Do not automatically read an old statement such as `schema 2` or `no Tasks yet` as a claim about current `main`.
 
-- [`../DECISIONS.md`](../DECISIONS.md) — original high-level decisions
-- [`../ARCHITECTURE.md`](../ARCHITECTURE.md) — long-term architecture vision
+## ADRs
 
-ADRs should not be silently rewritten to make history look cleaner. When a decision changes, add a new ADR and mark the older one as superseded when appropriate.
+ADRs explain why a decision was made at a specific point in development. They should generally remain historically intact rather than being rewritten every time later capabilities are added.
 
-## 4. Planning and governance
+Key later ADRs include:
 
-- [`BOOTSTRAP_PROFILE_IMPORT.md`](BOOTSTRAP_PROFILE_IMPORT.md) — proposed private, previewed, atomic import workflow for a curated Moot bootstrap profile
-- [`bootstrap-profile.example.json`](bootstrap-profile.example.json) — public placeholder manifest containing no real profile facts
-- [`../ROADMAP.md`](../ROADMAP.md) — planned versions and future capabilities
-- [`../V0.1_REQUIREMENTS.md`](../V0.1_REQUIREMENTS.md) — Version 0.1 release criteria
-- [`../CONTRIBUTING.md`](../CONTRIBUTING.md) — branch, testing, approval, security, and documentation rules
-- [`DOCUMENTATION_POLICY.md`](DOCUMENTATION_POLICY.md) — rules for keeping documentation synchronized with the code
+- ADR-020 — Railway storage/readiness
+- ADR-021 — atomic provider chat pipeline
+- ADR-022 — model input/capability boundary
+- ADR-023 — private HTTP boundary
+- ADR-025 — model Run logging / execution-audit direction
+- ADR-026 — Task v0.1 and Task-vs-Run-vs-future-Approval boundary
 
-## Recommended reading order
+## Production verification records
 
-For a new developer or AI coding agent:
+Files with names such as `*_PRODUCTION_VERIFICATION_YYYY-MM-DD.md` are evidence records. They intentionally preserve what was true at that test date. Old schema/version wording in those records is not documentation drift and should not be mass-edited.
 
-1. `README.md`
-2. `docs/CURRENT_CHECKPOINT.md`
-3. `docs/CURRENT_IMPLEMENTATION.md`
-4. `docs/DATA_AND_PERSISTENCE.md`
-5. `docs/FOUNDATION_HARDENING.md`
-6. `CONTRIBUTING.md`
-7. The ADR related to the system being changed
-8. The relevant code and tests
+## Documentation maintenance rule
 
-For operating the live Railway deployment:
+Behavior-changing PRs should update the smallest relevant current docs. Periodic synchronization PRs may update the central source-of-truth files after several rapid feature PRs, but must not rewrite historical evidence to make history look current.
 
-1. `docs/OPERATIONS_RUNBOOK.md`
-2. `docs/RAILWAY_STORAGE_AND_READINESS.md`
-3. `docs/CHAT_PROVIDER_PIPELINE.md`
-4. `docs/MODEL_INPUT_AND_CAPABILITIES.md`
-5. `docs/PRIVATE_HTTP_BOUNDARY.md`
-6. `docs/DATA_AND_PERSISTENCE.md`
-7. `docs/FOUNDATION_HARDENING.md`
-8. `docs/PHONE_DEPLOYMENT.md`
-
-For planning a future feature:
-
-1. `ROADMAP.md`
-2. `V0.1_REQUIREMENTS.md`
-3. `ARCHITECTURE.md`
-4. Existing ADRs
-5. `docs/CURRENT_IMPLEMENTATION.md` to verify what the system actually supports today
-
-## Documentation ownership
-
-Documentation is part of the product, not optional cleanup.
-
-Any pull request that changes behavior, configuration, storage, deployment, security, or architecture should update the relevant documentation in the same pull request. Documentation-only pull requests may improve clarity but must not claim that unimplemented behavior exists.
+Before a large external/AI architecture audit, synchronize the central current docs first, then instruct the reviewer to verify documentation claims against code rather than trusting documentation blindly.

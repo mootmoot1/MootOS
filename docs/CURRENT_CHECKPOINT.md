@@ -1,432 +1,177 @@
 # MootOS Current Checkpoint
 
-**Last updated:** August 1, 2026  
+**Last updated:** August 8, 2026  
 **Repository:** `mootmoot1/MootOS`  
 **Default branch:** `main`  
 **Current release:** Version 0.1 foundation  
-**Production schema:** `2 — memory_lifecycle`
+**Current schema:** `4 — tasks`
 
-## Verified production state
+## Current production topology
 
-MootOS is deployed on Railway and accessible through its private phone-friendly interface.
-
-Verified production facts:
-
-- Railway deploys from `main`.
-- FastAPI is online.
-- Private password login works.
-- OpenAI returns real responses through the backend.
-- Conversations, messages, projects, and memories use SQLite at `/data/mootos.db`.
-- Railway volume `mootos-volume` is attached at `/data`.
-- Railway remains at one replica.
-- Foundation hardening deployed successfully without losing older conversations.
-- Explicit chat memory saves work in production.
-- A global fact saved in one chat was recalled in a completely new chat.
-- The same fact remained available after Railway rebuilds.
-- The protected Memory page works in production.
-- All, Global-only, and exact-project filters work.
-- Migration 2 deployed without losing existing memories or conversations.
-- UI-selected correction works in production.
-- Only the corrected active value was recalled in a new chat.
-- UI-selected recoverable forgetting works in production.
-- An archived memory disappeared from ordinary recall and appeared in Archived.
-- Restoring the exact row returned it to ordinary recall.
-- Corrected and restored active values survived later Railway rebuilds.
-
-Projects are focus lenses, not permanent memory walls. A no-project conversation can use all active saved memory. The current retrieval branch ranks matching-project memory first, global memory next, and relevant other-project memory afterward while preventing unrelated other-project fallback.
-
-Automatic encrypted backups, retention, scheduled restore testing, and point-in-time recovery are not implemented.
-
-## Completed milestones
-
-### PR #2 — Persistent SQLite memory
-
-- Memory create, list, retrieve, filter, and delete APIs
-- UUID IDs and UTC timestamps
-- Persistent SQLite storage
-
-### PR #3 — Minimal project system
-
-- Five default projects
-- Project creation and listing
-- Case-insensitive duplicate protection
-- Project filtering
-- ADR-011
-
-### PR #5 — Conversation engine and model-provider boundary
-
-- Persistent conversations and messages
-- Conversation and chat endpoints
-- Recent history and relevant memories supplied to the model
-- Replaceable provider protocol
-- OpenAI Responses API provider
-- Provider metadata
-- ADR-012
-
-### PR #7 — Mobile chat interface
-
-- Responsive chat interface
-- New Chat control
-- Project selector
-- Saved conversation history
-- Reopening conversations
-- Loading and error states
-- Interface tests
-- ADR-013
-
-### PR #9 — Secure Railway phone deployment
-
-- Railway configuration
-- Public minimal health endpoint
-- Password login and signed sessions
-- Protected application and APIs
-- Secure cookies on Railway
-- Phone Home Screen manifest
-- Railway volume path support
-- Deployment and auth tests
-- ADR-014
-
-### PR #10 — Comprehensive documentation baseline
-
-- Complete README
-- Current implementation and API references
-- Data and persistence guide
-- Operations runbook
-- Documentation policy
-- Updated roadmap and Version 0.1 requirements
-
-### PR #11 — Foundation hardening
-
-Merged into `main` on July 31, 2026.
-
-Squash merge commit:
+MootOS is deployed privately on Railway as:
 
 ```text
-d4c0772e2948e33631a2e3a24a70433ad4ba94c2
+one Railway service
+one FastAPI application process
+one replica
+SQLite/WAL on the Railway volume
+OpenAI for model-backed chat
 ```
 
-Implemented:
+Production launches `backend.application:app` and Railway uses `/ready` for deployment readiness. `/health` remains minimal liveness.
 
-- Central SQLite connection layer
-- Foreign-key enforcement
-- WAL mode
-- `NORMAL` synchronous mode
-- Five-second connection and busy timeouts
-- Versioned migrations and `schema_migrations`
-- Existing-schema compatibility verification
-- Rejection of newer unknown schemas
-- Railway auth fail-closed behavior
-- Explicit public override
-- Exact dependency pins
-- Concurrent-write, migration, and auth safety tests
-- ADR-015 and synchronized documentation
+No Redis, Celery, distributed queue, vector database, background worker, scheduler, reminder-delivery system, external write-capable tool executor, or multi-replica coordination exists today.
 
-Production result:
+## Production-verified capabilities
 
-- Railway deployed successfully.
-- The application remained usable.
-- Conversation history survived the deployment.
+The following have direct production verification recorded in the project history/checkpoint process:
 
-### PR #12 — Chat memory commands
+- private password/session login
+- persistent SQLite on the Railway volume
+- `/health` and `/ready`
+- OpenAI-backed chat through the private phone interface
+- persistent conversations/messages/projects
+- explicit chat memory save and cross-chat recall
+- protected memory review/search
+- memory correction with preserved history
+- recoverable archive/restore
+- active-memory recall surviving Railway rebuilds
+- hardened private HTTP boundary
+- atomic provider-backed chat persistence behavior
+- intelligent explicit memory correction from PR #29, verified through the real phone UI
 
-Merged into `main` on July 31, 2026.
+## Latest production-verified memory milestone
 
-Squash merge commit:
+PR #29 added deterministic explicit memory correction. After merge and Railway deployment, production testing confirmed:
+
+1. an old test memory was saved
+2. a correction using `Actually, ... Remember that instead.` was accepted
+3. a brand-new conversation recalled only the replacement value
+4. the old superseded value did not appear as a conflicting active memory
+
+That verifies the new correction path against the persistent production database and real phone UI.
+
+## Merged on main; production-smoke status tracked separately
+
+The capabilities below are implemented and merged on `main`. Their implementation status should not be confused with a dated production-verification record unless such a record is explicitly added later.
+
+### Curated bootstrap profile import
+
+- protected `/profile` interface
+- preview and atomic import APIs
+- duplicate/lifecycle checks
+- `bootstrap_profile` memory type
+- reviewed manifest stays out of the model-provider path
+- production composition through `backend.application:app`
+
+### PR #27 — Model Run logging v0.1
+
+- migration 3 adds `runs`
+- normal model-provider attempts gain structured execution metadata
+- failures record sanitized exception class metadata rather than prompt/response duplication
+- Runs establish an execution/audit spine separate from Tasks
+
+### PR #28 — Task v0.1
+
+- migration 4 adds `tasks`
+- create/list/get/complete/cancel lifecycle
+- states: open/completed/cancelled
+- optional timezone-aware `due_at` normalized to UTC
+- canonical project scope
+- authenticated Task API routes
+- Task remains intention, not execution authority
+
+### PR #30 — Chat-driven Task creation v0.1
+
+- explicit commands such as `Create a task to call Mike`
+- colon form such as `Add task: export stems`
+- Task inherits the existing conversation project
+- shared Task validation/storage
+- conversation + user message + Task + assistant confirmation commit atomically
+- false-positive task-like ordinary chat remains model chat
+- memory command path regression-tested
+- `Remind me ...` intentionally remains ordinary chat because no scheduler exists
+- CI green and external second-pass review returned SAFE TO MERGE
+
+## Current schema
+
+Migrations are:
+
+1. `initial_schema`
+2. `memory_lifecycle`
+3. `model_runs`
+4. `tasks`
+
+Current durable domains/tables include:
+
+- `schema_migrations`
+- projects
+- conversations/messages
+- memories/history/lifecycle
+- runs
+- tasks
+
+There is no migration 5 on current `main`.
+
+## Current memory boundary
+
+Current memory behavior includes:
+
+- explicit `remember` / `save` writes
+- deterministic explicit correction commands
+- unique strong-match requirement for chat-driven corrections
+- refusal to guess on zero/multiple correction targets
+- append-and-supersede correction history
+- active/superseded/archived lifecycle
+- protected review/search
+- deterministic keyword plus reviewed concept-alias retrieval
+
+There are no embeddings or vector database.
+
+## Current Task boundary
+
+MootOS can create durable Tasks, but `due_at` is only stored scheduling metadata.
+
+Therefore:
 
 ```text
-067ad6f00c9adba8723d7de5706eaea0ff13533a
+Create a task to call Mike
 ```
 
-Implemented:
-
-- Deterministic parser for explicit `remember` and `save` commands
-- Rejection of incomplete, placeholder, and punctuation-only content
-- Atomic explicit-memory chat transaction in `backend/chat_memory.py`
-- New conversation, user message, memory row, and confirmation commit together
-- Complete rollback when the memory or confirmation write fails
-- Save commands bypass OpenAI and do not spend model credits
-- Chat-created memories use memory type `explicit_chat`
-- Internal confirmations use provider `mootos` and model `memory-command-v1`
-- Global memories are available in project chats
-- No-project chat can load all saved memories
-- Existing 10,000-character memory limit
-- Cross-chat recall and rollback regression tests
-- External read-only review followed by verification
-
-Production verification:
-
-1. Railway rebuilt from merged `main`.
-2. The application returned online.
-3. Login and chat worked.
-4. Moot saved a unique fact through an explicit chat memory command.
-5. MootOS returned its deterministic database-backed confirmation.
-6. A brand-new chat recalled the saved fact.
-7. Railway was rebuilt again.
-8. Another new chat recalled the same fact after the rebuild.
-
-### PR #13 — Production verification documentation
-
-Merged into `main` on July 31, 2026.
-
-Squash merge commit:
+can create a Task, while:
 
 ```text
-8376fd9da4fdf685ac39dca453bd23e81c53849c
+Remind me to call Mike tomorrow at 3
 ```
 
-Implemented:
+is still ordinary chat and must not be reported as a scheduled reminder.
 
-- Recorded PR #12 production verification
-- Removed stale draft and pending language
-- Locked the memory-control branch sequence
-- Added a manual WAL-safe SQLite backup and restore procedure
-- Clarified main, WAL, and SHM handling during restore
+**Task = intention/work item. Task does not authorize external execution.**
 
-### PR #14 — Memory review interface
+## Proposed next feature
 
-Merged into `main` on July 31, 2026.
+The next proposed development area is **Scheduler / Reminder v0.1**.
 
-Squash merge commit:
+Before implementation, the design should answer:
 
-```text
-78806da6c9d4ba33f956b65b17c3dbb549031f83
-```
+- reminder schedule/delivery storage model
+- UTC and user-timezone representation
+- relative-time resolution policy
+- restart/offline catch-up
+- duplicate-fire prevention and durable claiming
+- retry/failure/delivery state
+- cancellation and rescheduling
+- whether a small scheduler loop belongs in the current process or another Railway process/service
+- deterministic tests with controlled time
 
-Implemented:
+The scheduler should preserve this separation:
 
-- Protected `GET /memory` browser route
-- Memories controls in chat navigation
-- Active memory cards loaded from the existing API
-- Memory content, scope, project, type/source, and creation date
-- All-memory, Global-only, and exact-project filters
-- Refresh, loading, empty, and error states
-- Mobile responsive layout
-- Safe DOM rendering through `textContent`
-- Stale-request generation guard
+**Task = intention. Run = execution/audit record. Reminder/schedule = future trigger/delivery state.**
 
-Production verification:
+## Documentation status
 
-- Railway deployed successfully.
-- Login and the Memory page worked.
-- Both saved memories appeared.
-- All, Cars, and Global filters worked.
-- Chat and existing conversations remained usable.
-- Cars memory was recalled from a Cars chat and from main/no-project chat, matching the intended focus-lens design.
+PR #31 synchronizes current source-of-truth docs after PR #30 and also updates previously stale live guides such as the operations runbook, bootstrap-profile guide, and Task guide.
 
-### Pre-migration backup and restore gate
+Historical ADRs, old branch-specific documents, and dated production-verification records should remain historically accurate even when they mention older schemas. They must not be mistaken for the current runtime map.
 
-Completed August 1, 2026.
-
-- Schema-1 snapshot created with SQLite's online backup API
-- Private off-volume download
-- Matching SHA-256
-- `PRAGMA integrity_check = ok`
-- Five projects, fifteen conversations, fifty-eight messages, and two memories
-- Isolated MootOS startup against a separate restore copy
-- Known conversation and memory reads
-- Original backup remained unchanged
-
-See [`BACKUP_RESTORE_VERIFICATION_2026-08-01.md`](BACKUP_RESTORE_VERIFICATION_2026-08-01.md).
-
-### PR #15 — Memory correction with preserved history
-
-Merged into `main` on August 1, 2026.
-
-Squash merge commit:
-
-```text
-82938c7dd08339df8cdfc3ee2fd9d9474d168bef
-```
-
-Implemented:
-
-- Migration 2 lifecycle fields: `status`, `updated_at`, `replaces_memory_id`, and `superseded_by_id`
-- Existing memory rows preserved and adopted as active
-- Atomic append-and-supersede correction
-- Active-only normal listing and model context
-- Ordered correction-history API
-- Protection against competing corrections
-- Protection against hard-deleting correction chains
-- Confirmed mobile correction UI
-- ADR-016 and synchronized documentation
-
-Production verification:
-
-- Railway deployed migration 2 successfully.
-- Existing records remained available.
-- A selected memory was corrected through the UI.
-- The replacement appeared as the active corrected version.
-- The prior version remained preserved as superseded history.
-- A fresh no-project chat recalled only the corrected active value.
-- The corrected value survived another Railway rebuild.
-
-See [`MEMORY_CORRECTION_PRODUCTION_VERIFICATION_2026-08-01.md`](MEMORY_CORRECTION_PRODUCTION_VERIFICATION_2026-08-01.md).
-
-### PR #16 — Recoverable memory forget and restore
-
-Merged into `main` on August 1, 2026.
-
-Squash merge commit:
-
-```text
-efd970336ed03535c2704bba2c8dc5655aa63b10
-```
-
-Implemented:
-
-- Reused migration 2; no new schema migration
-- `POST /memories/{id}/archive`
-- `POST /memories/{id}/restore`
-- `GET /memories?status=active|archived`
-- Active and Archived views on the protected Memory page
-- Exact selected-memory Forget and Restore confirmation
-- Archived rows excluded from model context and normal recall
-- Correction chains preserved through archive and restore
-- Archived rows protected from hard deletion
-- Serialized lifecycle writes with `BEGIN IMMEDIATE`
-- Conflict, rollback, and competing-request coverage
-- No browser memory `DELETE`, `PATCH`, or `PUT`
-- ADR-017 and synchronized documentation
-
-Production verification:
-
-- Railway deployed successfully without a schema change.
-- Existing active memories remained visible.
-- One selected memory moved to Archived.
-- A fresh no-project chat no longer recalled the archived value.
-- The exact row appeared in Archived with Restore available.
-- Restoring the row returned it to active recall.
-- A fresh chat recalled the restored value again.
-- The restored state survived another Railway rebuild.
-
-See [`MEMORY_FORGET_RESTORE_PRODUCTION_VERIFICATION_2026-08-01.md`](MEMORY_FORGET_RESTORE_PRODUCTION_VERIFICATION_2026-08-01.md).
-
-## Current work — understandable keyword memory retrieval
-
-Branch:
-
-```text
-feature/memory-keyword-retrieval-v0.1
-```
-
-Draft PR:
-
-```text
-#17 — feat: add understandable keyword memory retrieval
-```
-
-Purpose:
-
-Find useful active memories using deterministic keywords while treating projects as focus lenses rather than hard walls, and add protected keyword search to the Memory page.
-
-Implemented on the branch:
-
-- New `backend/memory_retrieval.py`
-- Pure-Python case, punctuation, stop-word, and limited plural normalization
-- Duplicate removal before a maximum of 40 unique query keywords
-- Complete scanning of stored memory content
-- Matches memory content, project name, and memory type/source
-- Matching-project matches first
-- Global matches second
-- Relevant other-project matches third
-- Project fallback limited to matching-project and global active memory
-- No-project ranking by match strength and recency without global-scope bias
-- No-project fallback across all active memory
-- Maximum 20 context memories
-- Absolute exclusion of archived and superseded rows from model context
-- `GET /memories` retained for unsearched active or archived listings
-- Protected read-only `POST /memories/search` with query, lifecycle status, and optional exact project in the JSON body
-- Search terms kept out of request URLs and ordinary URL access logs
-- Active and Archived browser search
-- Search and Clear controls with mobile layout
-- Search-aware loading, summary, empty, and error states
-- Stored values and search labels rendered through `textContent`
-- No schema migration, embeddings, vector database, FTS5, or extra model-provider call
-- No browser memory `DELETE`, `PATCH`, or `PUT`
-- ADR-018 and synchronized API, roadmap, requirements, implementation, and README documentation
-
-Verification so far:
-
-- Python and JavaScript syntax checks passed during development.
-- Retrieval smoke tests confirmed project → global → relevant other-project ordering.
-- The first GitHub Actions run collected 103 tests.
-- 102 tests passed.
-- One presentation regression failed because the updated safety-note heading removed the exact established phrase `Forget is recoverable`.
-- The wording was restored without removing the new search explanation.
-- Internal review found and fixed complete-memory scanning, no-project scope bias, and repeated-query-budget edge cases.
-- Internal privacy review moved browser search terms from a URL query to a protected JSON request body.
-- Added regression coverage for long memories, no-project match strength, repeated terms, search authentication, exact project search, validation, and absence of URL query terms.
-
-Still required before merge:
-
-- GitHub Actions on the exact final head
-- Complete final diff review
-- External read-only review
-- Plain-language review with Moot
-- Moot's explicit approval for the exact PR
-
-Still required after merge:
-
-- Railway reaches online status
-- Login remains functional
-- Existing active and archived memories remain intact
-- Memory-page search finds content, project-name, and corrected active values
-- Archived search finds archived values without exposing them in Active
-- A project chat recalls a clearly relevant memory from another project
-- An unrelated other-project memory is not used as fallback
-- No-project chat still recalls relevant active memory
-- Retrieval and search behavior survive a Railway rebuild
-
-## Current implementation boundaries
-
-MootOS remains:
-
-- Single user
-- Text chat only
-- One Railway service and replica
-- One SQLite database
-- One implemented external model provider
-- No background queue
-- No local model
-- No runtime tools
-- No multi-agent system
-- No automatic off-volume backups
-
-## Explicitly out of scope for PR #17
-
-- Embeddings or vector search
-- SQLite FTS5 or migration 3
-- Synonym or typo correction
-- Model-based memory selection
-- Automatic memory extraction
-- Natural-language correction or forget
-- Duplicate detection
-- Pagination redesign
-- Full browser history viewer
-
-## Locked sequence
-
-1. Memory review — complete
-2. Memory correction — complete and production-verified
-3. Recoverable forget/archive — complete and production-verified
-4. Keyword retrieval before embeddings — current
-5. Conversation refinement
-6. Curated Moot bootstrap profile
-
-## Operating rules
-
-- One focused purpose per branch and PR
-- No secrets or private backups in GitHub
-- Tests for important behavior
-- Documentation updated in the same PR
-- Major architecture decisions use ADRs
-- One Railway replica while SQLite is live
-- Verified backup and restore drill before destructive or schema-changing production work
-- Never claim a memory was saved unless the complete storage transaction committed
-- Exact selection and confirmation before lifecycle mutations
-- Honest reporting of tests, deployments, and uncertainty
-- Moot explicitly approves merges and high-risk actions
-
-## Immediate decision
-
-Finish exact-head CI and internal review for PR #17, then request external read-only review. Do not merge until Moot explicitly approves the reviewed exact head.
+After PR #31 is reviewed and merged, a full independent repository audit can use the synchronized current docs as orientation while still verifying every important claim against code.
