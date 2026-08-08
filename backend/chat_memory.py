@@ -388,6 +388,7 @@ def save_explicit_memory_chat(
         )
 
     with database_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         conversation = _resolve_conversation(
             connection,
             conversation_id,
