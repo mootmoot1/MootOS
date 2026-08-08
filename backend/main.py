@@ -21,6 +21,11 @@ from backend.auth import (
     set_session_cookie,
     validate_auth_configuration,
 )
+from backend.chat_commands import (
+    COMMAND_MEMORY,
+    COMMAND_TASK,
+    parse_deterministic_chat_command,
+)
 from backend.chat_memory import (
     ConversationNotFoundError,
     ProjectMismatchError,
@@ -36,6 +41,7 @@ from backend.chat_pipeline import (
     conversation_turn_lock,
     prepare_chat_turn,
 )
+from backend.chat_task import create_explicit_task_chat
 from backend.conversation import (
     create_conversation as store_conversation,
     get_conversation as load_conversation,
@@ -64,7 +70,6 @@ from backend.memory import (
     list_projects as load_projects,
     restore_memory as restore_saved_memory,
 )
-from backend.memory_commands import parse_memory_save_command
 from backend.memory_retrieval import retrieve_context_memories, search_memories
 from backend.migrations import LATEST_SCHEMA_VERSION
 from backend.model_router import (
@@ -243,18 +248,18 @@ def _chat_response(
     assistant_message: dict[str, Any],
     provider: Optional[str],
     model: Optional[str],
+    **extra: Any,
 ) -> dict[str, Any]:
-    return {
-        "success": True,
-        "data": {
-            "conversation_id": conversation["id"],
-            "project": conversation["project"],
-            "user_message": user_message,
-            "assistant_message": assistant_message,
-            "provider": provider,
-            "model": model,
-        },
+    data = {
+        "conversation_id": conversation["id"],
+        "project": conversation["project"],
+        "user_message": user_message,
+        "assistant_message": assistant_message,
+        "provider": provider,
+        "model": model,
     }
+    data.update(extra)
+    return {"success": True, "data": data}
 
 
 def _router_run_metadata(router: Any) -> tuple[Optional[str], Optional[str]]:
@@ -566,15 +571,17 @@ def get_conversation(conversation_id: str) -> dict[str, Any]:
 
 @app.post("/chat")
 def chat(request: ChatRequest) -> dict[str, Any]:
-    """Run conversation or an explicit long-term-memory save command."""
-    memory_command = parse_memory_save_command(request.message)
-    if memory_command and len(memory_command.content) > MAX_MEMORY_CONTENT_LENGTH:
-        raise HTTPException(
-            status_code=422,
-            detail="Memory content must be 10,000 characters or fewer",
-        )
+    """Run one deterministic chat command or normal provider-backed conversation."""
+    deterministic_command = parse_deterministic_chat_command(request.message)
 
-    if memory_command is not None:
+    if deterministic_command is not None and deterministic_command.kind == COMMAND_MEMORY:
+        memory_command = deterministic_command.command
+        if len(memory_command.content) > MAX_MEMORY_CONTENT_LENGTH:
+            raise HTTPException(
+                status_code=422,
+                detail="Memory content must be 10,000 characters or fewer",
+            )
+
         try:
             saved_turn = save_explicit_memory_chat(
                 request_message=request.message,
@@ -596,6 +603,32 @@ def chat(request: ChatRequest) -> dict[str, Any]:
             assistant_message=saved_turn["assistant_message"],
             provider="mootos",
             model="memory-command-v1",
+        )
+
+    if deterministic_command is not None and deterministic_command.kind == COMMAND_TASK:
+        task_command = deterministic_command.command
+        try:
+            saved_turn = create_explicit_task_chat(
+                request_message=request.message,
+                task_title=task_command.title,
+                conversation_id=request.conversation_id,
+                project=request.project,
+                title=request.message.strip()[:80],
+            )
+        except ConversationNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ProjectMismatchError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except (ProjectNotFoundError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+        return _chat_response(
+            conversation=saved_turn["conversation"],
+            user_message=saved_turn["user_message"],
+            assistant_message=saved_turn["assistant_message"],
+            provider="mootos",
+            model="task-command-v1",
+            task=saved_turn["task"],
         )
 
     router = get_model_router()
