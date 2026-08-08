@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MootOS">
+  <title>Settings · MootOS</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/deployment.css">
+  <link rel="stylesheet" href="/static/panels.css">
+</head>
+<body class="panel-page">
+  <div class="panel-shell">
+    <header class="panel-header">
+      <div>
+        <p class="eyebrow">MootOS v0.1</p>
+        <h1>Settings</h1>
+        <p class="panel-intro">
+          Current configuration, read-only. Provider, model, and secrets are
+          configured through Railway/environment variables, never through this
+          page or the database.
+        </p>
+      </div>
+
+      <div class="panel-header-actions">
+        <a class="secondary-button panel-nav-button" href="/chat">Chat</a>
+        <a class="secondary-button panel-nav-button" href="/activity">Activity</a>
+        <form class="logout-form" action="/auth/logout" method="post">
+          <button class="text-button" type="submit">Log out</button>
+        </form>
+      </div>
+    </header>
+
+    <div class="error-banner panel-error" id="settingsError" role="alert" hidden></div>
+
+    <div class="panel-status-grid" id="settingsGrid" aria-live="polite">
+      <div class="panel-empty-state">Loading current configuration&hellip;</div>
+    </div>
+
+    <section class="panel-note" aria-label="Why settings are read-only">
+      <strong>Why this page does not let you change the model provider yet.</strong>
+      Runtime-mutable settings would need their own validated storage, and
+      MootOS deliberately keeps provider/model selection in environment
+      variables for now so a setting can never silently diverge from what is
+      actually deployed. To change the provider or model, update
+      <code>AI_PROVIDER</code> / <code>OPENAI_MODEL</code> in Railway and
+      redeploy.
+    </section>
+  </div>
+
+  <script src="/static/settings.js" defer></script>
+</body>
+</html>

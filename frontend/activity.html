@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MootOS">
+  <title>Activity · MootOS</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/deployment.css">
+  <link rel="stylesheet" href="/static/panels.css">
+</head>
+<body class="panel-page">
+  <div class="panel-shell">
+    <header class="panel-header">
+      <div>
+        <p class="eyebrow">MootOS v0.1</p>
+        <h1>Activity</h1>
+        <p class="panel-intro">
+          Recent model runs, tasks, and memory writes. Run rows never contain
+          prompt or response text &mdash; only execution metadata.
+        </p>
+      </div>
+
+      <div class="panel-header-actions">
+        <a class="secondary-button panel-nav-button" href="/chat">Chat</a>
+        <a class="secondary-button panel-nav-button" href="/task">Tasks</a>
+        <a class="secondary-button panel-nav-button" href="/settings">Settings</a>
+        <form class="logout-form" action="/auth/logout" method="post">
+          <button class="text-button" type="submit">Log out</button>
+        </form>
+      </div>
+    </header>
+
+    <div class="error-banner panel-error" id="activityError" role="alert" hidden></div>
+
+    <section aria-label="Recent AI model runs">
+      <p class="panel-summary" id="runsSummary">Loading recent AI runs&hellip;</p>
+      <main class="panel-list" id="runsList" aria-live="polite">
+        <div class="panel-empty-state">Loading&hellip;</div>
+      </main>
+    </section>
+
+    <section aria-label="Recent tasks" style="margin-top: 30px">
+      <p class="panel-summary" id="tasksSummary">Loading recent tasks&hellip;</p>
+      <main class="panel-list" id="tasksList" aria-live="polite">
+        <div class="panel-empty-state">Loading&hellip;</div>
+      </main>
+    </section>
+
+    <section aria-label="Recent memory writes" style="margin-top: 30px">
+      <p class="panel-summary" id="memoriesSummary">Loading recent memories&hellip;</p>
+      <main class="panel-list" id="memoriesList" aria-live="polite">
+        <div class="panel-empty-state">Loading&hellip;</div>
+      </main>
+    </section>
+
+    <section class="panel-note" aria-label="Scope notice">
+      <strong>What this page is, and is not.</strong>
+      This is a read-only recent-activity feed built from existing execution,
+      task, and memory records. It is not a background scheduler and does not
+      trigger anything.
+    </section>
+  </div>
+
+  <script src="/static/activity.js" defer></script>
+</body>
+</html>
