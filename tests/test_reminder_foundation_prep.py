@@ -63,10 +63,8 @@ def test_task_terminal_transition_race_has_exactly_one_winner(clean_db):
             return ("rejected", None)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = [
-            pool.submit(complete).result(),
-            pool.submit(cancel).result(),
-        ]
+        futures = [pool.submit(complete), pool.submit(cancel)]
+        results = [future.result() for future in futures]
 
     winners = [result for result in results if result[0] != "rejected"]
     rejected = [result for result in results if result[0] == "rejected"]
