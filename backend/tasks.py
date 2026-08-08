@@ -75,46 +75,56 @@ def _get_task(connection: sqlite3.Connection, task_id: str) -> Optional[dict[str
     return dict(row) if row else None
 
 
+def create_task_in_connection(
+    connection: sqlite3.Connection,
+    title: str,
+    project: Optional[str] = None,
+    due_at: Optional[str] = None,
+) -> dict[str, Any]:
+    """Create an open task using the caller's existing transaction."""
+    normalized_title = _normalize_title(title)
+    normalized_due_at = _normalize_due_at(due_at)
+
+    canonical_project = None
+    if project is not None:
+        canonical_project = _get_project_name(connection, project)
+
+    now = datetime.now(timezone.utc).isoformat()
+    task = {
+        "id": str(uuid.uuid4()),
+        "title": normalized_title,
+        "project": canonical_project,
+        "status": TASK_STATUS_OPEN,
+        "due_at": normalized_due_at,
+        "created_at": now,
+        "updated_at": now,
+        "completed_at": None,
+        "cancelled_at": None,
+    }
+    connection.execute(
+        """
+        INSERT INTO tasks (
+            id, title, project, status, due_at,
+            created_at, updated_at, completed_at, cancelled_at
+        )
+        VALUES (
+            :id, :title, :project, :status, :due_at,
+            :created_at, :updated_at, :completed_at, :cancelled_at
+        )
+        """,
+        task,
+    )
+    return task
+
+
 def create_task(
     title: str,
     project: Optional[str] = None,
     due_at: Optional[str] = None,
 ) -> dict[str, Any]:
     """Create an open task with optional project scope and due time."""
-    normalized_title = _normalize_title(title)
-    normalized_due_at = _normalize_due_at(due_at)
-
     with database_connection() as connection:
-        canonical_project = None
-        if project is not None:
-            canonical_project = _get_project_name(connection, project)
-
-        now = datetime.now(timezone.utc).isoformat()
-        task = {
-            "id": str(uuid.uuid4()),
-            "title": normalized_title,
-            "project": canonical_project,
-            "status": TASK_STATUS_OPEN,
-            "due_at": normalized_due_at,
-            "created_at": now,
-            "updated_at": now,
-            "completed_at": None,
-            "cancelled_at": None,
-        }
-        connection.execute(
-            """
-            INSERT INTO tasks (
-                id, title, project, status, due_at,
-                created_at, updated_at, completed_at, cancelled_at
-            )
-            VALUES (
-                :id, :title, :project, :status, :due_at,
-                :created_at, :updated_at, :completed_at, :cancelled_at
-            )
-            """,
-            task,
-        )
-    return task
+        return create_task_in_connection(connection, title, project, due_at)
 
 
 def get_task(task_id: str) -> Optional[dict[str, Any]]:
