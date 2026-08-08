@@ -36,6 +36,10 @@ See [`docs/CURRENT_CHECKPOINT.md`](docs/CURRENT_CHECKPOINT.md) for the latest pr
 - Optional timezone-aware Task due timestamps normalized to UTC
 - Explicit chat Task creation such as `Create a task to call Mike` and `Add task: export stems`
 - Project inheritance for chat-created Tasks
+- Mobile Task viewer/creation page at `/task`
+- Read-only Activity page at `/activity` (recent model Runs, Tasks, and memories)
+- Read-only Settings page at `/settings` (current provider/model/schema version; no secrets, no runtime mutation)
+- A direct "add a memory" form on `/memory`, in addition to chat-command and bootstrap-profile saves
 - WAL-mode SQLite with foreign keys, busy timeout, migrations, and schema checks
 - CI across Python 3.9, 3.10, and 3.11
 

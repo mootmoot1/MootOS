@@ -31,7 +31,11 @@ Owns the core FastAPI app, auth/security middleware, health/readiness, memory/pr
 
 ### `backend/application.py`
 
-Is the Railway composition entrypoint. It imports the core app, adds focused feature routers such as profile and Task APIs, and serves the profile interface. It does not intercept `/chat`; deterministic command routing stays inside the validated/authenticated core chat route.
+Is the Railway composition entrypoint. It imports the core app, adds focused feature routers such as profile, Task, activity, and settings APIs, and serves the profile, Task, activity, and settings interface pages. It does not intercept `/chat`; deterministic command routing stays inside the validated/authenticated core chat route.
+
+### `backend/activity_routes.py` and `backend/settings_routes.py`
+
+Add two small, authenticated, read-only route groups: `GET /activity/runs` wraps the existing `backend.runs.list_runs` for the Activity page (recent model-run execution metadata, never prompt/response content), and `GET /settings/status` exposes the currently configured model provider, model, and supported schema version (never secrets) for the Settings page. Neither module adds storage, a settings table, or a mutable configuration path; provider/model configuration remains environment-variable-only.
 
 ### `backend/chat_commands.py`
 
