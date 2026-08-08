@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from backend.db import database_connection
+from backend.memory_commands import parse_memory_correction_command
 from backend.memory_retrieval import rank_memories
 
 
@@ -290,6 +291,103 @@ def _resolve_conversation(
     return _insert_conversation(connection, project, title)
 
 
+def _correction_clarification_turn(
+    connection: sqlite3.Connection,
+    conversation: dict[str, Any],
+    request_message: str,
+    detail: str,
+) -> dict[str, dict[str, Any]]:
+    user_message = _insert_message(
+        connection,
+        conversation_id=conversation["id"],
+        role="user",
+        content=request_message,
+    )
+    assistant_message = _insert_message(
+        connection,
+        conversation_id=conversation["id"],
+        role="assistant",
+        content=detail,
+        provider="mootos",
+        model="memory-command-v1",
+    )
+    return {
+        "conversation": conversation,
+        "user_message": user_message,
+        "assistant_message": assistant_message,
+    }
+
+
+def correct_explicit_memory_chat(
+    *,
+    request_message: str,
+    memory_content: str,
+    conversation_id: Optional[str],
+    project: Optional[str],
+    title: str,
+) -> dict[str, dict[str, Any]]:
+    """Replace one unambiguous active memory and preserve its prior version."""
+    with database_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        conversation = _resolve_conversation(
+            connection,
+            conversation_id,
+            project,
+            title,
+        )
+        try:
+            target = _select_correction_target(
+                connection,
+                memory_content,
+                conversation["project"],
+            )
+        except (MemoryCorrectionTargetNotFoundError, MemoryCorrectionAmbiguousError) as error:
+            return _correction_clarification_turn(
+                connection,
+                conversation,
+                request_message,
+                str(error),
+            )
+
+        user_message = _insert_message(
+            connection,
+            conversation_id=conversation["id"],
+            role="user",
+            content=request_message,
+        )
+        try:
+            replacement = _replace_memory(connection, target, memory_content)
+        except (MemoryCorrectionTargetNotFoundError, MemoryCorrectionAmbiguousError) as error:
+            return _correction_clarification_turn(
+                connection,
+                conversation,
+                request_message,
+                str(error),
+            )
+
+        memory_scope = replacement["project"] or "Global"
+        confirmation = (
+            f"Updated {memory_scope} long-term memory: "
+            f"{replacement['content']}"
+        )
+        assistant_message = _insert_message(
+            connection,
+            conversation_id=conversation["id"],
+            role="assistant",
+            content=confirmation,
+            provider="mootos",
+            model="memory-command-v1",
+        )
+
+        return {
+            "conversation": conversation,
+            "user_message": user_message,
+            "memory": replacement,
+            "superseded_memory": target,
+            "assistant_message": assistant_message,
+        }
+
+
 def save_explicit_memory_chat(
     *,
     request_message: str,
@@ -298,7 +396,17 @@ def save_explicit_memory_chat(
     project: Optional[str],
     title: str,
 ) -> dict[str, dict[str, Any]]:
-    """Save the complete explicit-memory chat turn in one transaction."""
+    """Save or explicitly correct long-term memory in one complete chat turn."""
+    correction = parse_memory_correction_command(request_message)
+    if correction is not None:
+        return correct_explicit_memory_chat(
+            request_message=request_message,
+            memory_content=correction.content,
+            conversation_id=conversation_id,
+            project=project,
+            title=title,
+        )
+
     with database_connection() as connection:
         conversation = _resolve_conversation(
             connection,
@@ -336,58 +444,5 @@ def save_explicit_memory_chat(
             "conversation": conversation,
             "user_message": user_message,
             "memory": saved_memory,
-            "assistant_message": assistant_message,
-        }
-
-
-def correct_explicit_memory_chat(
-    *,
-    request_message: str,
-    memory_content: str,
-    conversation_id: Optional[str],
-    project: Optional[str],
-    title: str,
-) -> dict[str, dict[str, Any]]:
-    """Replace one unambiguous active memory and preserve its prior version."""
-    with database_connection() as connection:
-        connection.execute("BEGIN IMMEDIATE")
-        conversation = _resolve_conversation(
-            connection,
-            conversation_id,
-            project,
-            title,
-        )
-        target = _select_correction_target(
-            connection,
-            memory_content,
-            conversation["project"],
-        )
-        user_message = _insert_message(
-            connection,
-            conversation_id=conversation["id"],
-            role="user",
-            content=request_message,
-        )
-        replacement = _replace_memory(connection, target, memory_content)
-
-        memory_scope = replacement["project"] or "Global"
-        confirmation = (
-            f"Updated {memory_scope} long-term memory: "
-            f"{replacement['content']}"
-        )
-        assistant_message = _insert_message(
-            connection,
-            conversation_id=conversation["id"],
-            role="assistant",
-            content=confirmation,
-            provider="mootos",
-            model="memory-correction-v1",
-        )
-
-        return {
-            "conversation": conversation,
-            "user_message": user_message,
-            "memory": replacement,
-            "superseded_memory": target,
             "assistant_message": assistant_message,
         }
