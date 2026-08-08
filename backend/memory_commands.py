@@ -95,6 +95,7 @@ def _strip_correction_lead_in(content: str) -> str:
 def parse_memory_correction_command(message: str) -> Optional[MemoryCorrectionCommand]:
     """Parse explicit replace-the-old-memory requests without guessing intent."""
     text = _strip_optional_please(message).strip()
+    text = text.rstrip(" \t\r\n?!.,:;-").strip()
     folded = text.casefold()
 
     for suffix in CORRECTION_SUFFIXES:
