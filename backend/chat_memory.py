@@ -6,6 +6,11 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from backend.db import database_connection
+from backend.memory import (
+    MemoryCorrectionConflictError,
+    MemoryNotActiveError,
+    correct_memory_in_connection,
+)
 from backend.memory_commands import parse_memory_correction_command
 from backend.memory_retrieval import rank_memories, tokenize_keywords
 
@@ -188,7 +193,8 @@ def _active_memories_in_scope(
             SELECT id, content, project, memory_type, created_at, status,
                    updated_at, replaces_memory_id, superseded_by_id
             FROM memories
-            WHERE status = 'active' AND project = ? COLLATE NOCASE
+            WHERE status = 'active'
+              AND (project IS NULL OR project = ? COLLATE NOCASE)
             ORDER BY created_at DESC
             """,
             (project,),
@@ -220,60 +226,17 @@ def _select_correction_target(
         candidate for candidate in candidates if _strong_correction_match(candidate, content)
     ]
     if not candidates:
+        scope = "global memory" if project is None else f"{project} or global memory"
         raise MemoryCorrectionTargetNotFoundError(
-            "I could not identify an existing memory to replace. Save it as a new memory or make the correction more specific."
+            f"I could not identify one active memory to replace in {scope}. "
+            "Save it as a new memory or make the correction more specific."
         )
     if len(candidates) > 1:
         raise MemoryCorrectionAmbiguousError(
-            "More than one saved memory could match that correction. Make the correction more specific before I replace anything."
+            "More than one saved memory could match that correction. "
+            "Make the correction more specific before I replace anything."
         )
     return candidates[0]
-
-
-def _replace_memory(
-    connection: sqlite3.Connection,
-    original: dict[str, Any],
-    content: str,
-) -> dict[str, Any]:
-    corrected_content = content.strip()
-    now = datetime.now(timezone.utc).isoformat()
-    replacement = {
-        "id": str(uuid.uuid4()),
-        "content": corrected_content,
-        "project": original["project"],
-        "memory_type": original["memory_type"],
-        "created_at": now,
-        "status": "active",
-        "updated_at": now,
-        "replaces_memory_id": original["id"],
-        "superseded_by_id": None,
-    }
-    connection.execute(
-        """
-        INSERT INTO memories (
-            id, content, project, memory_type, created_at, status, updated_at,
-            replaces_memory_id, superseded_by_id
-        )
-        VALUES (
-            :id, :content, :project, :memory_type, :created_at, :status, :updated_at,
-            :replaces_memory_id, :superseded_by_id
-        )
-        """,
-        replacement,
-    )
-    updated = connection.execute(
-        """
-        UPDATE memories
-        SET status = 'superseded', updated_at = ?, superseded_by_id = ?
-        WHERE id = ? AND status = 'active'
-        """,
-        (now, replacement["id"], original["id"]),
-    )
-    if updated.rowcount != 1:
-        raise MemoryCorrectionTargetNotFoundError(
-            "The memory changed before the correction could be saved. Please retry."
-        )
-    return replacement
 
 
 def _resolve_conversation(
@@ -356,23 +319,32 @@ def correct_explicit_memory_chat(
                 str(error),
             )
 
-        corrected_content = memory_content.strip()
-        if corrected_content == target["content"]:
-            return _correction_clarification_turn(
-                connection,
-                conversation,
-                request_message,
-                "The corrected memory is the same as the current memory.",
-            )
-
         user_message = _insert_message(
             connection,
             conversation_id=conversation["id"],
             role="user",
             content=request_message,
         )
-        replacement = _replace_memory(connection, target, corrected_content)
+        try:
+            correction_result = correct_memory_in_connection(
+                connection,
+                target["id"],
+                memory_content,
+            )
+        except MemoryCorrectionConflictError:
+            return _correction_clarification_turn(
+                connection,
+                conversation,
+                request_message,
+                "The corrected memory is the same as the current memory.",
+            )
+        except MemoryNotActiveError as error:
+            raise MemoryCorrectionTargetNotFoundError(
+                "The memory changed before the correction could be saved. Please retry."
+            ) from error
 
+        replacement = correction_result["replacement"]
+        superseded = correction_result["superseded"]
         memory_scope = replacement["project"] or "Global"
         confirmation = (
             f"Updated {memory_scope} long-term memory: "
@@ -391,7 +363,7 @@ def correct_explicit_memory_chat(
             "conversation": conversation,
             "user_message": user_message,
             "memory": replacement,
-            "superseded_memory": target,
+            "superseded_memory": superseded,
             "assistant_message": assistant_message,
         }
 
