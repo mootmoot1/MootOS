@@ -6,6 +6,13 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from backend.db import database_connection
+from backend.memory import (
+    MemoryCorrectionConflictError,
+    MemoryNotActiveError,
+    correct_memory_in_connection,
+)
+from backend.memory_commands import parse_memory_correction_command
+from backend.memory_retrieval import rank_memories, tokenize_keywords
 
 
 class ConversationNotFoundError(ValueError):
@@ -18,6 +25,14 @@ class ProjectMismatchError(ValueError):
 
 class ProjectNotFoundError(ValueError):
     """Raised when a new memory conversation names an unknown project."""
+
+
+class MemoryCorrectionTargetNotFoundError(ValueError):
+    """Raised when a correction cannot identify an existing active memory."""
+
+
+class MemoryCorrectionAmbiguousError(ValueError):
+    """Raised when a correction matches more than one active memory."""
 
 
 def _canonical_project_name(
@@ -158,6 +173,201 @@ def _insert_memory(
     return memory
 
 
+def _active_memories_in_scope(
+    connection: sqlite3.Connection,
+    project: Optional[str],
+) -> list[dict[str, Any]]:
+    if project is None:
+        rows = connection.execute(
+            """
+            SELECT id, content, project, memory_type, created_at, status,
+                   updated_at, replaces_memory_id, superseded_by_id
+            FROM memories
+            WHERE status = 'active' AND project IS NULL
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+    else:
+        rows = connection.execute(
+            """
+            SELECT id, content, project, memory_type, created_at, status,
+                   updated_at, replaces_memory_id, superseded_by_id
+            FROM memories
+            WHERE status = 'active'
+              AND (project IS NULL OR project = ? COLLATE NOCASE)
+            ORDER BY created_at DESC
+            """,
+            (project,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _strong_correction_match(candidate: dict[str, Any], content: str) -> bool:
+    query_tokens = set(tokenize_keywords(content))
+    candidate_tokens = set(tokenize_keywords(candidate.get("content")))
+    shared = query_tokens & candidate_tokens
+    if len(shared) >= 2:
+        return True
+    return len(shared) == 1 and len(query_tokens) <= 2
+
+
+def _select_correction_target(
+    connection: sqlite3.Connection,
+    content: str,
+    project: Optional[str],
+) -> dict[str, Any]:
+    candidates = rank_memories(
+        _active_memories_in_scope(connection, project),
+        content,
+        project,
+        include_fallback=False,
+    )
+    candidates = [
+        candidate for candidate in candidates if _strong_correction_match(candidate, content)
+    ]
+    if not candidates:
+        scope = "global memory" if project is None else f"{project} or global memory"
+        raise MemoryCorrectionTargetNotFoundError(
+            f"I could not identify one active memory to replace in {scope}. "
+            "Save it as a new memory or make the correction more specific."
+        )
+    if len(candidates) > 1:
+        raise MemoryCorrectionAmbiguousError(
+            "More than one saved memory could match that correction. "
+            "Make the correction more specific before I replace anything."
+        )
+    return candidates[0]
+
+
+def _resolve_conversation(
+    connection: sqlite3.Connection,
+    conversation_id: Optional[str],
+    project: Optional[str],
+    title: str,
+) -> dict[str, Any]:
+    if conversation_id is not None:
+        conversation = _load_conversation(connection, conversation_id)
+        if conversation is None:
+            raise ConversationNotFoundError("Conversation not found")
+
+        if project is not None:
+            existing_project = conversation["project"] or ""
+            if existing_project.casefold() != project.casefold():
+                raise ProjectMismatchError(
+                    "The requested project does not match this conversation"
+                )
+        return conversation
+
+    return _insert_conversation(connection, project, title)
+
+
+def _correction_clarification_turn(
+    connection: sqlite3.Connection,
+    conversation: dict[str, Any],
+    request_message: str,
+    detail: str,
+) -> dict[str, dict[str, Any]]:
+    user_message = _insert_message(
+        connection,
+        conversation_id=conversation["id"],
+        role="user",
+        content=request_message,
+    )
+    assistant_message = _insert_message(
+        connection,
+        conversation_id=conversation["id"],
+        role="assistant",
+        content=detail,
+        provider="mootos",
+        model="memory-command-v1",
+    )
+    return {
+        "conversation": conversation,
+        "user_message": user_message,
+        "assistant_message": assistant_message,
+    }
+
+
+def correct_explicit_memory_chat(
+    *,
+    request_message: str,
+    memory_content: str,
+    conversation_id: Optional[str],
+    project: Optional[str],
+    title: str,
+) -> dict[str, dict[str, Any]]:
+    """Replace one unambiguous active memory and preserve its prior version."""
+    with database_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        conversation = _resolve_conversation(
+            connection,
+            conversation_id,
+            project,
+            title,
+        )
+        try:
+            target = _select_correction_target(
+                connection,
+                memory_content,
+                conversation["project"],
+            )
+        except (MemoryCorrectionTargetNotFoundError, MemoryCorrectionAmbiguousError) as error:
+            return _correction_clarification_turn(
+                connection,
+                conversation,
+                request_message,
+                str(error),
+            )
+
+        try:
+            correction_result = correct_memory_in_connection(
+                connection,
+                target["id"],
+                memory_content,
+            )
+        except MemoryCorrectionConflictError:
+            return _correction_clarification_turn(
+                connection,
+                conversation,
+                request_message,
+                "The corrected memory is the same as the current memory.",
+            )
+        except MemoryNotActiveError as error:
+            raise MemoryCorrectionTargetNotFoundError(
+                "The memory changed before the correction could be saved. Please retry."
+            ) from error
+
+        user_message = _insert_message(
+            connection,
+            conversation_id=conversation["id"],
+            role="user",
+            content=request_message,
+        )
+        replacement = correction_result["replacement"]
+        superseded = correction_result["superseded"]
+        memory_scope = replacement["project"] or "Global"
+        confirmation = (
+            f"Updated {memory_scope} long-term memory: "
+            f"{replacement['content']}"
+        )
+        assistant_message = _insert_message(
+            connection,
+            conversation_id=conversation["id"],
+            role="assistant",
+            content=confirmation,
+            provider="mootos",
+            model="memory-command-v1",
+        )
+
+        return {
+            "conversation": conversation,
+            "user_message": user_message,
+            "memory": replacement,
+            "superseded_memory": superseded,
+            "assistant_message": assistant_message,
+        }
+
+
 def save_explicit_memory_chat(
     *,
     request_message: str,
@@ -166,26 +376,24 @@ def save_explicit_memory_chat(
     project: Optional[str],
     title: str,
 ) -> dict[str, dict[str, Any]]:
-    """Save the complete explicit-memory chat turn in one transaction.
+    """Save or explicitly correct long-term memory in one complete chat turn."""
+    correction = parse_memory_correction_command(request_message)
+    if correction is not None:
+        return correct_explicit_memory_chat(
+            request_message=request_message,
+            memory_content=correction.content,
+            conversation_id=conversation_id,
+            project=project,
+            title=title,
+        )
 
-    Conversation creation, the user message, the memory row, and the assistant
-    confirmation either all commit or all roll back together.
-    """
     with database_connection() as connection:
-        if conversation_id is not None:
-            conversation = _load_conversation(connection, conversation_id)
-            if conversation is None:
-                raise ConversationNotFoundError("Conversation not found")
-
-            if project is not None:
-                existing_project = conversation["project"] or ""
-                if existing_project.casefold() != project.casefold():
-                    raise ProjectMismatchError(
-                        "The requested project does not match this conversation"
-                    )
-        else:
-            conversation = _insert_conversation(connection, project, title)
-
+        conversation = _resolve_conversation(
+            connection,
+            conversation_id,
+            project,
+            title,
+        )
         user_message = _insert_message(
             connection,
             conversation_id=conversation["id"],
