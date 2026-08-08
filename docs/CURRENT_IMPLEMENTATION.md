@@ -15,7 +15,7 @@ The process:
 - authenticates the private browser session
 - runs ordered SQLite migrations at startup
 - reads/writes the persistent SQLite database
-- handles deterministic memory and Task commands
+- handles deterministic memory and Task commands through one ordered `/chat` command dispatcher
 - prepares model-backed chat without writing first
 - calls the configured model provider
 - atomically commits successful normal chat turns
@@ -27,11 +27,15 @@ There is no background worker, task queue, Redis, vector database, scheduler, re
 
 ### `backend/main.py`
 
-Owns the core FastAPI app, auth/security middleware, health/readiness, memory/project/conversation APIs, normal `/chat`, memory command routing, model instruction construction, provider calls, and Run integration.
+Owns the core FastAPI app, auth/security middleware, health/readiness, memory/project/conversation APIs, the authoritative `/chat` route, ordered deterministic memory/Task command dispatch, model instruction construction, provider calls, and Run integration.
 
 ### `backend/application.py`
 
-Is the Railway composition entrypoint. It imports the core app, adds feature routers such as profile and Task APIs, serves the profile interface, and currently contains the narrow middleware used to intercept explicit chat Task-create commands before ordinary `/chat` handling.
+Is the Railway composition entrypoint. It imports the core app, adds focused feature routers such as profile and Task APIs, and serves the profile interface. It does not intercept `/chat`; deterministic command routing stays inside the validated/authenticated core chat route.
+
+### `backend/chat_commands.py`
+
+Owns the small ordered dispatcher that decides whether a validated chat message is an explicit deterministic memory command, Task command, or ordinary model-backed chat. Parsers remain pure and domain-specific; the dispatcher only defines their priority and gives future deterministic command families one consistent entry point.
 
 ### Frontend
 
@@ -86,8 +90,8 @@ Current protections include:
 
 For ordinary chat:
 
-1. explicit deterministic write commands are checked first
-2. model configuration is validated
+1. the validated `/chat` request is checked by the ordered deterministic command dispatcher
+2. if no deterministic command matches, model configuration is validated
 3. the conversation and recent history are prepared without a database write
 4. active long-term memories are ranked for context
 5. conversation/capability guidance and model-input budgets are applied
@@ -205,7 +209,7 @@ Add task: export stems
 
 The command parser is deliberately strict to avoid stealing ordinary messages such as `Create a task manager` or `Add task list to the sidebar`.
 
-For a recognized command, MootOS resolves/creates the conversation, stores the user message, creates the Task through the shared Task storage logic, stores a deterministic assistant confirmation, and commits the turn atomically. A Task created inside a project conversation inherits that canonical project.
+For a recognized command, the authoritative `/chat` route dispatches to the existing atomic Task-chat writer after normal authentication and `ChatRequest` validation. MootOS resolves/creates the conversation, stores the user message, creates the Task through the shared Task storage logic, stores a deterministic assistant confirmation, and commits the turn atomically. A Task created inside a project conversation inherits that canonical project.
 
 `Remind me ...` is deliberately **not** intercepted because scheduler/reminder delivery does not exist yet.
 
