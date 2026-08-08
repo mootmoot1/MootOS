@@ -261,89 +261,98 @@ def get_memory(memory_id: str) -> Optional[dict[str, Any]]:
         return _get_memory(connection, memory_id)
 
 
-def correct_memory(memory_id: str, content: str) -> dict[str, dict[str, Any]]:
-    """Replace one active memory atomically while preserving the old version."""
+def correct_memory_in_connection(
+    connection: sqlite3.Connection,
+    memory_id: str,
+    content: str,
+) -> dict[str, dict[str, Any]]:
+    """Replace one active memory using the caller's existing transaction."""
     corrected_content = content.strip()
     if not corrected_content:
         raise ValueError("Corrected memory content cannot be empty")
 
+    original = _get_memory(connection, memory_id)
+    if original is None:
+        raise MemoryNotFoundError("Memory not found")
+    if original["status"] != MEMORY_STATUS_ACTIVE:
+        raise MemoryNotActiveError("Only an active memory can be corrected")
+    if corrected_content == original["content"]:
+        raise MemoryCorrectionConflictError(
+            "Corrected memory must be different from the current version"
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    replacement = {
+        "id": str(uuid.uuid4()),
+        "content": corrected_content,
+        "project": original["project"],
+        "memory_type": original["memory_type"],
+        "created_at": now,
+        "status": MEMORY_STATUS_ACTIVE,
+        "updated_at": now,
+        "replaces_memory_id": original["id"],
+        "superseded_by_id": None,
+    }
+    connection.execute(
+        """
+        INSERT INTO memories (
+            id,
+            content,
+            project,
+            memory_type,
+            created_at,
+            status,
+            updated_at,
+            replaces_memory_id,
+            superseded_by_id
+        )
+        VALUES (
+            :id,
+            :content,
+            :project,
+            :memory_type,
+            :created_at,
+            :status,
+            :updated_at,
+            :replaces_memory_id,
+            :superseded_by_id
+        )
+        """,
+        replacement,
+    )
+    updated = connection.execute(
+        """
+        UPDATE memories
+        SET status = ?, updated_at = ?, superseded_by_id = ?
+        WHERE id = ? AND status = ?
+        """,
+        (
+            MEMORY_STATUS_SUPERSEDED,
+            now,
+            replacement["id"],
+            original["id"],
+            MEMORY_STATUS_ACTIVE,
+        ),
+    )
+    if updated.rowcount != 1:
+        raise MemoryNotActiveError("Only an active memory can be corrected")
+
+    superseded = _get_memory(connection, original["id"])
+    saved_replacement = _get_memory(connection, replacement["id"])
+    if superseded is None or saved_replacement is None:
+        raise RuntimeError("Memory correction did not persist completely")
+
+    return {
+        "superseded": superseded,
+        "replacement": saved_replacement,
+    }
+
+
+def correct_memory(memory_id: str, content: str) -> dict[str, dict[str, Any]]:
+    """Replace one active memory atomically while preserving the old version."""
     with database_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        original = _get_memory(connection, memory_id)
-        if original is None:
-            raise MemoryNotFoundError("Memory not found")
-        if original["status"] != MEMORY_STATUS_ACTIVE:
-            raise MemoryNotActiveError("Only an active memory can be corrected")
-        if corrected_content == original["content"]:
-            raise MemoryCorrectionConflictError(
-                "Corrected memory must be different from the current version"
-            )
-
-        now = datetime.now(timezone.utc).isoformat()
-        replacement = {
-            "id": str(uuid.uuid4()),
-            "content": corrected_content,
-            "project": original["project"],
-            "memory_type": original["memory_type"],
-            "created_at": now,
-            "status": MEMORY_STATUS_ACTIVE,
-            "updated_at": now,
-            "replaces_memory_id": original["id"],
-            "superseded_by_id": None,
-        }
-        connection.execute(
-            """
-            INSERT INTO memories (
-                id,
-                content,
-                project,
-                memory_type,
-                created_at,
-                status,
-                updated_at,
-                replaces_memory_id,
-                superseded_by_id
-            )
-            VALUES (
-                :id,
-                :content,
-                :project,
-                :memory_type,
-                :created_at,
-                :status,
-                :updated_at,
-                :replaces_memory_id,
-                :superseded_by_id
-            )
-            """,
-            replacement,
-        )
-        updated = connection.execute(
-            """
-            UPDATE memories
-            SET status = ?, updated_at = ?, superseded_by_id = ?
-            WHERE id = ? AND status = ?
-            """,
-            (
-                MEMORY_STATUS_SUPERSEDED,
-                now,
-                replacement["id"],
-                original["id"],
-                MEMORY_STATUS_ACTIVE,
-            ),
-        )
-        if updated.rowcount != 1:
-            raise MemoryNotActiveError("Only an active memory can be corrected")
-
-        superseded = _get_memory(connection, original["id"])
-        saved_replacement = _get_memory(connection, replacement["id"])
-        if superseded is None or saved_replacement is None:
-            raise RuntimeError("Memory correction did not persist completely")
-
-        return {
-            "superseded": superseded,
-            "replacement": saved_replacement,
-        }
+        return correct_memory_in_connection(connection, memory_id, content)
 
 
 def archive_memory(memory_id: str) -> dict[str, Any]:
