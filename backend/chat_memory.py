@@ -319,12 +319,6 @@ def correct_explicit_memory_chat(
                 str(error),
             )
 
-        user_message = _insert_message(
-            connection,
-            conversation_id=conversation["id"],
-            role="user",
-            content=request_message,
-        )
         try:
             correction_result = correct_memory_in_connection(
                 connection,
@@ -343,6 +337,12 @@ def correct_explicit_memory_chat(
                 "The memory changed before the correction could be saved. Please retry."
             ) from error
 
+        user_message = _insert_message(
+            connection,
+            conversation_id=conversation["id"],
+            role="user",
+            content=request_message,
+        )
         replacement = correction_result["replacement"]
         superseded = correction_result["superseded"]
         memory_scope = replacement["project"] or "Global"
