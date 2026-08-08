@@ -8,6 +8,12 @@
   margin: 0;
 }
 
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .sidebar-logout {
   margin-top: auto;
   padding-top: 1rem;

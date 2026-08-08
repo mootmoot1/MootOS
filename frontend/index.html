@@ -29,9 +29,20 @@
         New chat
       </button>
 
-      <form class="memory-nav-form" action="/memory" method="get">
-        <button class="secondary-button memory-nav-button" type="submit">Memories</button>
-      </form>
+      <nav class="sidebar-nav" aria-label="MootOS sections">
+        <form class="memory-nav-form" action="/memory" method="get">
+          <button class="secondary-button memory-nav-button" type="submit">Memories</button>
+        </form>
+        <form class="memory-nav-form" action="/task" method="get">
+          <button class="secondary-button memory-nav-button" type="submit">Tasks</button>
+        </form>
+        <form class="memory-nav-form" action="/activity" method="get">
+          <button class="secondary-button memory-nav-button" type="submit">Activity</button>
+        </form>
+        <form class="memory-nav-form" action="/settings" method="get">
+          <button class="secondary-button memory-nav-button" type="submit">Settings</button>
+        </form>
+      </nav>
 
       <label class="field-label" for="projectSelect">Project</label>
       <select id="projectSelect" class="project-select">
