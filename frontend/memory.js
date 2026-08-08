@@ -28,6 +28,12 @@ const elements = {
   cancelLifecycleButton: document.querySelector("#cancelMemoryLifecycleButton"),
   dismissLifecycleButton: document.querySelector("#dismissMemoryLifecycleButton"),
   confirmLifecycleButton: document.querySelector("#confirmMemoryLifecycleButton"),
+  createForm: document.querySelector("#createMemoryForm"),
+  createContent: document.querySelector("#createMemoryContent"),
+  createProject: document.querySelector("#createMemoryProject"),
+  createType: document.querySelector("#createMemoryType"),
+  createError: document.querySelector("#createMemoryError"),
+  createButton: document.querySelector("#createMemoryButton"),
 };
 
 let memoryRequestGeneration = 0;
@@ -414,10 +420,15 @@ async function loadProjects() {
   const projects = await apiRequest("/projects");
 
   projects.forEach((project) => {
-    const option = document.createElement("option");
-    option.value = `project:${project.name}`;
-    option.textContent = project.name;
-    elements.projectFilter.appendChild(option);
+    const filterOption = document.createElement("option");
+    filterOption.value = `project:${project.name}`;
+    filterOption.textContent = project.name;
+    elements.projectFilter.appendChild(filterOption);
+
+    const createOption = document.createElement("option");
+    createOption.value = project.name;
+    createOption.textContent = project.name;
+    elements.createProject.appendChild(createOption);
   });
 }
 
@@ -490,6 +501,49 @@ async function reloadAfterMutation(successMessage) {
   } catch (error) {
     clearSuccess();
     showError("The change was saved, but the memory list could not be refreshed. Press Refresh to try again.");
+  }
+}
+
+function showCreateError(message) {
+  elements.createError.textContent = message;
+  elements.createError.hidden = false;
+}
+
+function clearCreateError() {
+  elements.createError.textContent = "";
+  elements.createError.hidden = true;
+}
+
+async function submitCreateMemory(event) {
+  event.preventDefault();
+  clearCreateError();
+
+  const content = elements.createContent.value.trim();
+  if (!content) {
+    showCreateError("Memory content cannot be empty.");
+    return;
+  }
+
+  const body = { content };
+  if (elements.createProject.value) {
+    body.project = elements.createProject.value;
+  }
+  const memoryType = elements.createType.value.trim();
+  if (memoryType) {
+    body.memory_type = memoryType;
+  }
+
+  elements.createButton.disabled = true;
+  elements.createButton.textContent = "Saving…";
+  try {
+    await apiRequest("/memories", { method: "POST", body: JSON.stringify(body) });
+    elements.createForm.reset();
+    await reloadAfterMutation("Memory saved.");
+  } catch (error) {
+    showCreateError(error.message);
+  } finally {
+    elements.createButton.disabled = false;
+    elements.createButton.textContent = "Save memory";
   }
 }
 
@@ -587,6 +641,7 @@ async function initialize() {
   }
 }
 
+elements.createForm.addEventListener("submit", submitCreateMemory);
 elements.searchForm.addEventListener("submit", submitSearch);
 elements.clearSearchButton.addEventListener("click", clearSearch);
 elements.statusFilter.addEventListener("change", loadMemories);
