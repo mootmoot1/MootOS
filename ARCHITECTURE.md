@@ -374,12 +374,16 @@ The model router should record which model handled important requests and how mu
 > ADR-034. It keeps the Tool Registry below as the only executable source
 > of truth and adds a Capability layer (a semantic grouping of tools,
 > backed by them, never executing on its own) above it. **V0.3A is
-> implemented on branch `claude/v0.3a-capability-aware-tool-system`,
-> pending merge** — `ToolDefinition` now carries capability/
+> implemented and merged** — `ToolDefinition` now carries capability/
 > side-effect/idempotency/limitation metadata, and the model-facing
 > capability manifest is generated from the live registry instead of
-> hand-maintained (`docs/TOOL_SYSTEM.md` §16, ADR-028/ADR-029). V0.3B
-> onward remain plan only — see that document before extending further.
+> hand-maintained (`docs/TOOL_SYSTEM.md` §16, ADR-028/ADR-029). **V0.3B
+> (structured gap reasoning) is implemented on branch
+> `claude/v0.3b-structured-gap-reasoning`, pending merge** —
+> `backend/gap_reasoning.py` turns a goal into a structured, audited Gap
+> Report without executing anything (`docs/GAP_REASONING.md`, ADR-030).
+> V0.3C onward remain plan only — see that document before extending
+> further.
 
 Tools give MootOS abilities beyond conversation.
 

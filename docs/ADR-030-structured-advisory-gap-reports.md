@@ -2,8 +2,10 @@
 
 ## Status
 
-Accepted. Recorded August 9, 2026, as part of the V0.3/V0.4 architecture
-lock. See `docs/CAPABILITY_ARCHITECTURE.md` §6 (V0.3B).
+Accepted; implemented on branch `claude/v0.3b-structured-gap-reasoning`
+(`backend/gap_reasoning.py`), pending merge. Recorded August 9, 2026, as
+part of the V0.3/V0.4 architecture lock. See `docs/CAPABILITY_ARCHITECTURE.md`
+§6 (V0.3B) and `docs/GAP_REASONING.md` for the concrete result.
 
 ## Context
 

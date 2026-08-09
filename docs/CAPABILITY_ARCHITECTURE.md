@@ -2,10 +2,12 @@
 
 **Status:** Locked architecture for the next major phase. Recorded August 9,
 2026. This document is a plan, not an implementation record. **V0.3A
-(Capability-Aware Tool System) is implemented on branch
-`claude/v0.3a-capability-aware-tool-system`, pending merge** — see
-`docs/TOOL_SYSTEM.md` §16 for what exists in code. V0.3B–V0.3E and
-V0.4A–V0.4D remain plan only, nothing implemented.
+(Capability-Aware Tool System) is implemented and merged** — see
+`docs/TOOL_SYSTEM.md` §16 for what exists in code. **V0.3B (Structured Gap
+Reasoning) is implemented on branch
+`claude/v0.3b-structured-gap-reasoning`, pending merge** — see
+`docs/GAP_REASONING.md`. V0.3C–V0.3E and V0.4A–V0.4D remain plan only,
+nothing implemented.
 **Applies to:** design and build order for everything after V0.2A.
 **Companion documents:** `docs/TOOL_SYSTEM.md` (the current executable Tool
 System), ADR-027 (the V0.2A decision record), ADR-028 through ADR-034 (the
@@ -102,12 +104,9 @@ manifest is never allowed to assert a capability the registry doesn't back.
 
 ### V0.3A — Capability-Aware Tool System
 
-**Implemented on branch `claude/v0.3a-capability-aware-tool-system`,
-pending merge.** See `docs/TOOL_SYSTEM.md` §16 for the concrete result
-(`backend/capability_catalog.py`, extended `ToolDefinition`) and
-ADR-028/ADR-029 for the decisions it carries out. Everything below is the
-plan this implementation follows — the design is settled; only the merge
-is still pending.
+**Implemented and merged.** See `docs/TOOL_SYSTEM.md` §16 for the concrete
+result (`backend/capability_catalog.py`, extended `ToolDefinition`) and
+ADR-028/ADR-029 for the decisions it carries out.
 
 **Purpose:** make MootOS accurately understand what it already has.
 
@@ -132,6 +131,10 @@ do?" from the live registry/catalog — see Definition of Done §10, item 1.
 
 ### V0.3B — Structured Gap Reasoning
 
+**Implemented on branch `claude/v0.3b-structured-gap-reasoning`, pending
+merge.** See `docs/GAP_REASONING.md` for the concrete result
+(`backend/gap_reasoning.py`) and ADR-030 for the decision it carries out.
+
 Natural-language goal interpretation is inherently non-deterministic; the
 architecture doesn't pretend otherwise. The flow is two stages with a hard
 seam between them:
@@ -151,10 +154,16 @@ proposal, never as fact.
 Classify each goal into exactly one of:
 
 - **already possible** — every required capability is installed
-- **composable** — achievable by combining existing capabilities/tools
+- **composable** — every required capability is installed and more than
+  one is involved. This means the pieces exist, not that combining them
+  has been proven achievable — V0.3B has no composition planner (see
+  `docs/GAP_REASONING.md`); it is a candidate composition, never a
+  verified executable plan
 - **capability gap** — a real capability is missing but plausibly buildable
-- **impossible / externally blocked** — not achievable under current
-  permissions, or not a MootOS-appropriate action at all
+- **impossible / externally blocked** — the *model* judges this not
+  achievable under current permissions, or not a MootOS-appropriate
+  action at all; this is always a model interpretation, not something
+  MootOS's registry verifies
 
 **Gap reports are advisory, auditable artifacts.** They are logged (extend
 the existing Run pattern — see `docs/TOOL_SYSTEM.md` §8) so a hallucinated
