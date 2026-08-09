@@ -229,6 +229,12 @@ Runs are recorded as an internal execution/audit table by normal model-provider 
 ### `GET /activity/runs`
 Read-only listing of recent Run rows (newest first), for the Activity page. Optional `conversation_id` filter and bounded `limit` (1–200, default 50). Never returns prompt/response content.
 
+### `GET /activity/tasks`
+Read-only listing of the most recently *created* Tasks (newest first, any status), bounded `limit` (1–200, default 15). Deliberately a separate query from `GET /tasks`, which orders due Tasks before unscheduled ones for the Task viewer — that ordering is not creation recency, so Activity uses its own query rather than relying on it. Does not change `GET /tasks` for its existing callers.
+
+### `GET /activity/memories`
+Read-only listing of the most recently saved *active* memories (newest first), bounded `limit` (1–200, default 15), server-side limited. Does not change `GET /memories` for its existing callers, which remains unlimited.
+
 ## Settings
 
 ### `GET /settings/status`

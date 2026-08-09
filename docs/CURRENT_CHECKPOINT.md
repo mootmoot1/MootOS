@@ -148,6 +148,37 @@ is still ordinary chat and must not be reported as a scheduled reminder.
 
 **Task = intention/work item. Task does not authorize external execution.**
 
+## Development branch (not yet merged to `main`): `feature/v0.1-mvp-completion`
+
+This branch adds three authenticated, additive browser pages plus two small
+read-only routes. **Not merged to `main`, not yet production-verified —
+implementation status only, tracked here so it isn't mistaken for a
+production claim.**
+
+- `GET /task` — Task viewer/creation UI, consuming the existing, unmodified
+  `/tasks` JSON API. Named singular to avoid colliding with it.
+- `GET /activity` — read-only recent-activity feed: recent model Runs
+  (`GET /activity/runs`, wraps existing `backend.runs.list_runs`), recently
+  *created* Tasks regardless of status (`GET /activity/tasks`, a dedicated
+  creation-recency query — the existing `/tasks` listing orders due tasks
+  first, which is not the same thing and would have mislabeled data as
+  "recent"), and recently saved active memories, server-side limited
+  (`GET /activity/memories`, a dedicated bounded query — `/memories` itself
+  stays unlimited for its existing consumer, the Memory review page).
+- `GET /settings` — read-only current configuration (provider, model, schema
+  version) via `GET /settings/status`. Never exposes secrets. Provider/model
+  remain environment-variable-only; this page does not add mutable settings
+  storage.
+- A direct "add a memory" form on the existing `/memory` page.
+- `/profile`, `/task`, `/activity`, and `/settings` were added to the
+  private-session middleware's `HTML_PATHS` set, so an unauthenticated
+  browser GET to any of them now redirects to `/login` unconditionally
+  (previously this depended on the request's `Accept` header for `/profile`,
+  and the other three pages did not exist yet).
+
+No schema migration, no changes to chat/memory/task/run core logic, no new
+dependencies.
+
 ## Proposed next feature
 
 The next proposed development area is **Scheduler / Reminder v0.1**.

@@ -35,7 +35,9 @@ Is the Railway composition entrypoint. It imports the core app, adds focused fea
 
 ### `backend/activity_routes.py` and `backend/settings_routes.py`
 
-Add two small, authenticated, read-only route groups: `GET /activity/runs` wraps the existing `backend.runs.list_runs` for the Activity page (recent model-run execution metadata, never prompt/response content), and `GET /settings/status` exposes the currently configured model provider, model, and supported schema version (never secrets) for the Settings page. Neither module adds storage, a settings table, or a mutable configuration path; provider/model configuration remains environment-variable-only.
+Add two small, authenticated, read-only route groups. `GET /activity/runs` wraps the existing `backend.runs.list_runs` for the Activity page (recent model-run execution metadata, never prompt/response content). `GET /activity/tasks` wraps a dedicated `backend.tasks.list_recent_tasks` helper that orders strictly by creation time — the existing `GET /tasks` orders due tasks before unscheduled ones (correct for the Task viewer, wrong for an "Activity/recent" label), so Activity uses its own query rather than relying on `/tasks`'s ordering or changing it for its existing consumer. `GET /activity/memories` wraps a dedicated `backend.memory.list_recent_active_memories` helper with a server-side `LIMIT`, so Activity never loads the full active-memory table just to show a handful of items; `GET /memories` itself is unchanged and stays unlimited for the Memory review page. `GET /settings/status` exposes the currently configured model provider, model, and supported schema version (never secrets) for the Settings page. None of this adds durable storage, a settings table, or a mutable configuration path; provider/model configuration remains environment-variable-only.
+
+`/profile`, `/task`, `/activity`, and `/settings` are included in `backend/main.py`'s `HTML_PATHS`, so an unauthenticated browser GET to any of them redirects to `/login` the same way `/chat` and `/memory` already do, rather than depending on the request's `Accept` header.
 
 ### `backend/chat_commands.py`
 
