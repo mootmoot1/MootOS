@@ -154,10 +154,16 @@ proposal, never as fact.
 Classify each goal into exactly one of:
 
 - **already possible** — every required capability is installed
-- **composable** — achievable by combining existing capabilities/tools
+- **composable** — every required capability is installed and more than
+  one is involved. This means the pieces exist, not that combining them
+  has been proven achievable — V0.3B has no composition planner (see
+  `docs/GAP_REASONING.md`); it is a candidate composition, never a
+  verified executable plan
 - **capability gap** — a real capability is missing but plausibly buildable
-- **impossible / externally blocked** — not achievable under current
-  permissions, or not a MootOS-appropriate action at all
+- **impossible / externally blocked** — the *model* judges this not
+  achievable under current permissions, or not a MootOS-appropriate
+  action at all; this is always a model interpretation, not something
+  MootOS's registry verifies
 
 **Gap reports are advisory, auditable artifacts.** They are logged (extend
 the existing Run pattern — see `docs/TOOL_SYSTEM.md` §8) so a hallucinated

@@ -117,6 +117,23 @@ class GapReport:
     model's interpretation (reason/externally_blocked) merged with
     deterministic verification (installed/tools) per item; every other
     field is computed here, deterministically, from ``requirements``.
+
+    Two fields carry framing that is easy to overstate, so it's spelled
+    out here explicitly (see ``docs/GAP_REASONING.md``):
+
+    - ``composable_capabilities``: populated only when ``classification ==
+      "composable"`` -- meaning every proposed capability that goal needs
+      is installed and more than one distinct capability is involved.
+      **This is a candidate composition, not a verified executable plan.**
+      V0.3B never checks whether these capabilities can actually be
+      combined to accomplish the goal; that's not implemented at any
+      version yet.
+    - ``externally_blocked_capabilities``: capabilities the *model*
+      flagged ``externally_blocked`` in its proposal. This is always a
+      model interpretation, never a registry-verified fact -- unlike
+      ``installed``, nothing here is checked against the Tool Registry. A
+      capability being merely missing never lands here; only the model's
+      explicit flag does.
     """
 
     goal: str
@@ -303,6 +320,29 @@ def resolve_requirements(
 
 
 def _classify(resolutions: Sequence[RequirementResolution]) -> str:
+    """Compute the overall classification, deterministically, from the
+    resolved per-requirement flags only -- the model never states or
+    influences this directly.
+
+    - ``externally_blocked``: at least one requirement carries the model's
+      ``externally_blocked`` flag. This is a model *judgment*, not a
+      registry-verified fact -- see ``_build_notes`` and
+      ``docs/GAP_REASONING.md``. A requirement being merely missing never
+      produces this on its own; only the explicit flag does.
+    - ``capability_gap``: no requirement is flagged blocked, but at least
+      one is not installed.
+    - ``composable``: every requirement is installed and at least two
+      distinct capabilities are involved. **This means only that all the
+      individually-proposed capabilities happen to be installed** -- V0.3B
+      never checks whether they can actually be combined to satisfy the
+      goal (no composition planner exists yet; see
+      ``docs/CAPABILITY_ARCHITECTURE.md`` Sec9's "persistent workflow
+      engine" deferral). It is a candidate composition, not a verified
+      executable plan.
+    - ``already_possible``: every requirement is installed and at most one
+      distinct capability is involved (including zero requirements, i.e.
+      the goal needs nothing beyond ordinary conversation).
+    """
     if any(resolution.externally_blocked for resolution in resolutions):
         return CLASSIFICATION_EXTERNALLY_BLOCKED
     if any(not resolution.installed for resolution in resolutions):
@@ -319,16 +359,35 @@ def _build_notes(
     missing: Sequence[str],
     blocked: Sequence[str],
 ) -> str:
+    """Build the deterministic, templated ``notes`` string.
+
+    Two framing rules this function exists to enforce (see
+    ``docs/GAP_REASONING.md``):
+
+    1. ``composable`` notes must never claim composition is achievable or
+       proven -- only that the individual capabilities are installed.
+    2. ``externally_blocked`` notes must attribute the judgment to the
+       model, never state it as a verified fact.
+    """
     if classification == CLASSIFICATION_ALREADY_POSSIBLE:
         if not resolutions:
             return "No new capability is required for this goal."
         return f"Already installed: {', '.join(available)}."
     if classification == CLASSIFICATION_COMPOSABLE:
-        return f"Achievable by combining currently installed capabilities: {', '.join(available)}."
+        return (
+            f"Multiple required capabilities are installed ({', '.join(available)}); "
+            "composition feasibility has not been proven in V0.3B. This is a "
+            "candidate composition, not a verified executable plan."
+        )
 
     parts = []
     if classification == CLASSIFICATION_EXTERNALLY_BLOCKED:
-        parts.append(f"Blocked: {', '.join(blocked)}.")
+        parts.append(
+            "The model judged the following requirement(s) externally "
+            f"blocked: {', '.join(blocked)}. This is a model interpretation, "
+            "not a registry-verified fact; installed-state verification is "
+            "separate."
+        )
     if missing:
         parts.append(f"Missing: {', '.join(missing)}.")
     if available:

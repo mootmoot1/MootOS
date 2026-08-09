@@ -123,7 +123,62 @@ def test_multiple_installed_capabilities_are_composable(clean_db):
     assert report.classification == CLASSIFICATION_COMPOSABLE
     assert report.composable_capabilities == ("memory.recall", "tasks.manage")
     assert report.available_capabilities == ("memory.recall", "tasks.manage")
-    assert "Achievable by combining" in report.notes
+
+
+# --- Honesty/framing: composable must never claim proven achievability -------
+#
+# Added in the V0.3B audit-framing cleanup: "composable" only ever meant
+# "these capabilities are installed," never "this goal is achievable by
+# combining them" -- V0.3B has no composition planner. These tests guard
+# the wording so it cannot regress into an overclaim.
+
+
+_COMPOSABLE_OVERCLAIM_PHRASES = (
+    "achievable by combining",
+    "can be achieved",
+    "is achievable",
+    "has been proven",
+    "this will work",
+    "guaranteed",
+)
+
+
+def test_composable_notes_never_claim_achievability_or_proof(clean_db):
+    registry = _registry(
+        _tool("tasks.list", capabilities=("tasks.manage",)),
+        _tool("memory.search", capabilities=("memory.recall",)),
+    )
+    router = FakeRouter(_proposal(_req("tasks.manage"), _req("memory.recall")))
+
+    report = analyze_goal("Do two things", router=router, registry=registry)
+
+    assert report.classification == CLASSIFICATION_COMPOSABLE
+    lowered_notes = report.notes.lower()
+    for phrase in _COMPOSABLE_OVERCLAIM_PHRASES:
+        assert phrase not in lowered_notes, f"overclaiming phrase {phrase!r} found in: {report.notes!r}"
+    assert "composition feasibility has not been proven in v0.3b" in lowered_notes
+    assert "candidate composition" in lowered_notes
+    assert "not a verified executable plan" in lowered_notes
+
+
+def test_composable_classification_and_capability_membership_are_unchanged(clean_db):
+    """The wording cleanup must not change which goals classify as
+    composable, nor which capabilities are named as composable_capabilities
+    -- only the notes text changed."""
+    registry = _registry(
+        _tool("tasks.list", capabilities=("tasks.manage",)),
+        _tool("memory.search", capabilities=("memory.recall",)),
+        _tool("projects.list", capabilities=("projects.view",)),
+    )
+    router = FakeRouter(_proposal(_req("tasks.manage"), _req("memory.recall"), _req("projects.view")))
+
+    report = analyze_goal("Do three things", router=router, registry=registry)
+
+    assert report.classification == CLASSIFICATION_COMPOSABLE
+    assert report.composable_capabilities == ("memory.recall", "projects.view", "tasks.manage")
+    assert report.available_capabilities == report.composable_capabilities
+    assert report.missing_capabilities == ()
+    assert report.externally_blocked_capabilities == ()
 
 
 # --- 3. mixed installed + missing -> capability_gap --------------------------
@@ -176,7 +231,9 @@ def test_externally_blocked_requirement_drives_overall_classification(clean_db):
 
 def test_missing_capability_alone_is_not_externally_blocked(clean_db):
     """A capability being merely missing must never itself produce
-    externally_blocked -- only an explicit model flag does."""
+    externally_blocked -- only an explicit model flag does. Unchanged by
+    the V0.3B audit-framing cleanup -- only wording changed, not this
+    logic."""
     registry = ToolRegistry()
     router = FakeRouter(_proposal(_req("cloud.archive_dropbox")))
 
@@ -184,6 +241,56 @@ def test_missing_capability_alone_is_not_externally_blocked(clean_db):
 
     assert report.classification == CLASSIFICATION_CAPABILITY_GAP
     assert report.externally_blocked_capabilities == ()
+    assert "the model judged" not in report.notes.lower()
+
+
+# --- Honesty/framing: externally_blocked must read as model judgment --------
+#
+# Added in the V0.3B audit-framing cleanup: externally_blocked comes
+# entirely from the model's own flag -- nothing in the registry verifies
+# it. The notes text must say so explicitly, never presenting it as a
+# MootOS-verified fact.
+
+
+def test_externally_blocked_notes_attribute_the_judgment_to_the_model(clean_db):
+    registry = _registry(_tool("tasks.list", capabilities=("tasks.manage",)))
+    router = FakeRouter(
+        _proposal(
+            _req("tasks.manage"),
+            _req("other.private_account_access", "read someone else's private messages", externally_blocked=True),
+        )
+    )
+
+    report = analyze_goal("Read my coworker's private messages", router=router, registry=registry)
+
+    lowered_notes = report.notes.lower()
+    assert "the model judged" in lowered_notes
+    assert "other.private_account_access" in report.notes
+    assert "installed-state verification is separate" in lowered_notes
+    # Must not read as MootOS's own verified conclusion.
+    assert "mootos determined" not in lowered_notes
+    assert "verified that" not in lowered_notes
+
+
+def test_externally_blocked_classification_and_membership_are_unchanged(clean_db):
+    """The wording cleanup must not change which goals classify as
+    externally_blocked, nor which capabilities are named -- only the notes
+    text changed."""
+    registry = _registry(_tool("tasks.list", capabilities=("tasks.manage",)))
+    router = FakeRouter(
+        _proposal(
+            _req("tasks.manage"),
+            _req("other.private_account_access", externally_blocked=True),
+            _req("cloud.archive_dropbox"),
+        )
+    )
+
+    report = analyze_goal("Do a mix of things", router=router, registry=registry)
+
+    assert report.classification == CLASSIFICATION_EXTERNALLY_BLOCKED
+    assert report.externally_blocked_capabilities == ("other.private_account_access",)
+    assert report.available_capabilities == ("tasks.manage",)
+    assert report.missing_capabilities == ("cloud.archive_dropbox",)
 
 
 # --- 6/7. hallucinated/stale capability names never become installed ---------
@@ -324,6 +431,52 @@ def test_analyzing_a_goal_never_mutates_the_registry_or_catalog(clean_db):
     after = build_capability_index(registry)
     assert before == after
     assert len(registry) == 1  # still only the one real registered tool
+
+
+def test_composable_and_externally_blocked_reports_never_execute_or_register(clean_db):
+    """Focused check for the V0.3B audit-framing cleanup specifically: the
+    two classifications whose wording changed still cannot execute a tool
+    or mutate the registry/catalog, exactly like every other
+    classification."""
+    from backend.capability_catalog import build_capability_index
+
+    registry = _registry(
+        _tool("tasks.list", capabilities=("tasks.manage",)),
+        _tool("memory.search", capabilities=("memory.recall",)),
+    )
+    before = build_capability_index(registry)
+
+    composable_report = analyze_goal(
+        "Do two installed things",
+        router=FakeRouter(_proposal(_req("tasks.manage"), _req("memory.recall"))),
+        registry=registry,
+    )
+    assert composable_report.classification == CLASSIFICATION_COMPOSABLE
+    with pytest.raises(ToolNotFoundError):
+        execute_tool(
+            tool_name=composable_report.composable_capabilities[0],
+            arguments={},
+            context=ToolExecutionContext(),
+            registry=registry,
+        )
+
+    blocked_report = analyze_goal(
+        "Do a blocked thing",
+        router=FakeRouter(_proposal(_req("other.private_thing", externally_blocked=True))),
+        registry=registry,
+    )
+    assert blocked_report.classification == CLASSIFICATION_EXTERNALLY_BLOCKED
+    with pytest.raises(ToolNotFoundError):
+        execute_tool(
+            tool_name=blocked_report.externally_blocked_capabilities[0],
+            arguments={},
+            context=ToolExecutionContext(),
+            registry=registry,
+        )
+
+    after = build_capability_index(registry)
+    assert before == after
+    assert len(registry) == 2  # still only the two real registered tools
 
 
 # --- 12. malformed model output fails closed ----------------------------------

@@ -150,6 +150,33 @@ stated, and `notes` (a deterministic, templated string — never free model
 prose) lists what's blocked, what's missing, and what's already installed
 separately.
 
+### Two framing limits that must stay explicit
+
+**`composable` does not mean composition is proven.** It means every
+proposed capability the goal needs is installed and more than one
+distinct capability is involved — nothing more. V0.3B has no composition
+planner: it never checks whether those capabilities can actually be
+combined to accomplish the goal (that stays deferred — see
+`docs/CAPABILITY_ARCHITECTURE.md` §9's "persistent workflow engine"
+non-goal). `notes` for a `composable` report always reads along the lines
+of *"Multiple required capabilities are installed (...); composition
+feasibility has not been proven in V0.3B. This is a candidate composition,
+not a verified executable plan."* — never wording like "achievable by
+combining," which would overclaim. `tests/test_gap_reasoning.py::
+test_composable_notes_never_claim_achievability_or_proof` guards this
+wording so it cannot regress.
+
+**`externally_blocked` is a model interpretation, not a registry-verified
+fact.** Unlike `installed` (always checked against the Tool Registry),
+nothing verifies whether a requirement is genuinely, permanently blocked
+— that determination comes entirely from the model's own
+`externally_blocked` flag. `notes` for a blocked report always attributes
+the judgment explicitly — *"The model judged the following requirement(s)
+externally blocked: ...; installed-state verification is separate."* — so
+it reads as the model's claim, not MootOS's own verified conclusion.
+`tests/test_gap_reasoning.py::test_externally_blocked_notes_attribute_the_judgment_to_the_model`
+guards this wording.
+
 No alias table, ontology, dependency graph, or fuzzy matcher exists or is
 planned for V0.3B — matching `docs/CAPABILITY_ARCHITECTURE.md`'s explicit
 "what NOT to build yet" list. If a real need for a minimal, explicit alias
@@ -163,9 +190,11 @@ goal                              the (length-capped) user-supplied goal text
 requirements                      tuple[RequirementResolution, ...] -- full per-item detail
 available_capabilities            tuple[str, ...] -- installed, not externally_blocked, deduped+sorted
 composable_capabilities           same as available_capabilities, but only populated when
-                                   classification == "composable"; () otherwise
+                                   classification == "composable"; () otherwise. A candidate
+                                   composition only -- composition feasibility is never checked.
 missing_capabilities              tuple[str, ...] -- not installed, not externally_blocked, deduped+sorted
-externally_blocked_capabilities   tuple[str, ...] -- model-flagged, deduped+sorted
+externally_blocked_capabilities   tuple[str, ...] -- model-flagged, deduped+sorted. A model
+                                   interpretation, not a registry-verified fact.
 classification                    already_possible | composable | capability_gap | externally_blocked
 notes                             deterministic, templated summary string (never free model prose)
 ```
