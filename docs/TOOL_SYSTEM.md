@@ -1,8 +1,8 @@
-# MootOS Tool System (V0.2A)
+# MootOS Tool System (V0.2A, extended in V0.3A)
 
-**Status:** Implemented and merged to `main`. Live-verified on Railway/OpenAI, including a successful frozen approval → execution → persisted Task.
-**Schema:** `5 — tool_system`
-**Applies to:** the Tool System added in V0.2A on top of the V0.1 foundation (PR #34).
+**Status:** V0.2A implemented and merged to `main`. Live-verified on Railway/OpenAI, including a successful frozen approval → execution → persisted Task. V0.3A's capability-aware metadata and generated catalog/manifest (Sec16) are implemented and merged on top of it.
+**Schema:** `5 — tool_system` (V0.3A added no migration -- its metadata lives on `ToolDefinition` in code, not in the database.)
+**Applies to:** the Tool System added in V0.2A on top of the V0.1 foundation (PR #34), plus the V0.3A capability catalog described in Sec16.
 
 This document describes what the Tool System *is*, how the pieces fit
 together, and the safety rules that hold regardless of which tool is
@@ -67,6 +67,13 @@ input_schema     JSON-Schema-lite object (see backend/tool_validation.py)
 risk             read_only | internal_write | high_risk
 data_exposure    local | model_provider | tool_external (reused from backend/runs.py)
 executor         Callable[[arguments: dict, context: ToolExecutionContext], dict]
+
+-- V0.3A descriptive metadata (see §16); never read by execution/permission code --
+capabilities     tuple[str, ...] = ()     semantic capability/category reference(s)
+side_effects     str = ""                 what calling this tool actually does
+idempotent       Optional[bool] = None    None only for undocumented test fixtures
+limitations      str = ""                 short, truthful limitation statement
+depends_on       tuple[str, ...] = ()     other tool names this one depends on
 ```
 
 `executor` is a plain Python callable selected by direct reference at
@@ -77,6 +84,11 @@ structures; that translation happens once, only inside
 
 `ToolDefinition.to_catalog_entry()` returns the safe, JSON-serializable
 subset exposed to a model or an API client — `executor` is never included.
+As of V0.3A this also includes the five descriptive fields above; see §16
+for how `backend/capability_catalog.py` uses them. `backend/model_router.
+py`'s `_build_function_tools` still reads only `name`/`description`/
+`input_schema` from a catalog entry when building the OpenAI function-tool
+schema — the new fields never reach the provider.
 
 **`format: "utc-datetime"` (live-approval-testing fix).** `due_at` on
 `tasks.create` is declared `{"type": "string", ..., "format":
@@ -413,11 +425,14 @@ tool name/version (§8); no new Activity route was needed.
 
 ## 14. Capability manifest
 
-`backend/model_input.py`'s `CAPABILITY_MANIFEST` (sent to the model on
-every turn) now names exactly the four registered tools, states that
-`tasks.create` never runs without explicit approval, and instructs the
-model that it may not invent or assume any other tool exists. See
-`docs/CURRENT_IMPLEMENTATION.md` and `tests/test_model_input.py`.
+`backend/capability_catalog.py`'s `render_capability_manifest()` (called
+fresh from `backend/model_input.py` on every prepared request, sent to the
+model on every turn) names exactly the currently registered tools, states
+that an `internal_write` tool never runs without explicit approval, and
+instructs the model that it may not invent or assume any other tool
+exists. As of V0.3A this text is *generated* from `get_tool_registry()`,
+not a hand-maintained constant — see §16. See `docs/CURRENT_IMPLEMENTATION.md`
+and `tests/test_model_input.py`.
 
 **Live-testing fix: call the tool, don't ask first.** Live testing showed
 the model asking a chat confirmation question ("should I create this
@@ -430,14 +445,22 @@ action" rule — appended *after* the capability manifest, so closer to the
 model's attention — was not scoped to exclude a registered tool call. Both
 were rewritten to be explicit: calling a write-capable tool is how
 MootOS's own review step starts, not something to precede with a model-
-authored confirmation question; the model should call `tasks.create`
-immediately once the request is clear and the title is known, ask only
-for genuinely missing information, and never invent optional fields
-(`project`, `due_at`) the user did not state. The same guidance is
-repeated in `tasks.create`'s own tool description
-(`backend/tools_reference.py`), since that text is sent to OpenAI as the
-function's `description` and is one of the strongest signals the model
-uses when deciding whether/how to call it. See
+authored confirmation question; the model should call a write-capable tool
+immediately once the request is clear, ask only for genuinely missing
+information, and never invent optional fields the user did not state.
+
+**V0.3A: single-sourced, not duplicated.** At V0.2A this guidance was
+*repeated* as a second, independently hand-typed paragraph inside the
+manifest, alongside `tasks.create`'s own tool description
+(`backend/tools_reference.py`) — both said the same thing in different
+words, which is exactly the kind of drift risk V0.3A exists to close (see
+ADR-029). `render_capability_manifest()` now embeds each `internal_write`
+tool's own registered `description` **verbatim** in the manifest's
+"Calling a write-capable tool" section instead of re-authoring it — the
+argument-level rules (e.g. `tasks.create`'s `due_at` handling) exist in
+exactly one place, and only the mechanism-level guidance that's genuinely
+generic across *any* write-capable tool (don't self-confirm, ask only for
+missing information) remains fixed manifest prose. See
 `tests/test_model_input.py`, `tests/test_tools_reference.py`, and
 `tests/test_chat_tool_integration.py`.
 
@@ -450,3 +473,104 @@ installation, third-party external writes, voice, vision, or multi-user
 permissions were added. This branch establishes the port, not every device
 that will eventually plug into it. See ADR-027 and `ROADMAP.md` for the
 sequencing decision.
+
+## 16. V0.3A — Capability-aware metadata and the generated catalog
+
+**Status:** implemented and merged. Schema unchanged (`5 — tool_system`) —
+everything below lives on `ToolDefinition` in code, never in the database.
+See `docs/CAPABILITY_ARCHITECTURE.md` and ADR-028/ADR-029 for the decision
+record this section implements.
+
+**Goal.** Make MootOS able to truthfully answer "what can you currently
+do?" from the live Tool Registry, and stop the model-facing capability
+description from being a second, independently hand-maintained list that
+could name a tool the registry doesn't actually have (or omit one it
+does).
+
+**What changed:**
+
+- `ToolDefinition` (§3) gained five descriptive fields —
+  `capabilities`, `side_effects`, `idempotent`, `limitations`,
+  `depends_on` — validated at construction, never read by
+  `backend/tool_executor.py` or `backend/tool_conversation.py`. They
+  affect description only, never execution or permission.
+- All four V0.2A reference tools (`backend/tools_reference.py`) now
+  declare this metadata explicitly and truthfully — none rely on the
+  "undocumented" defaults, which exist only for unrelated test fixtures.
+- New module `backend/capability_catalog.py` — a read-only, derived view
+  over the registry. Nothing in it stores, executes, or authorizes
+  anything:
+  - `build_tool_catalog(registry)` — the full tool catalog (same shape as
+    `registry.catalog()`).
+  - `build_capability_index(registry)` — groups tool names by their
+    declared `capabilities` reference into a **derived, non-executable**
+    view, e.g. `{"id": "tasks.manage", "label": ..., "tools":
+    ["tasks.create", "tasks.list"]}`. A capability id with zero backing
+    tools simply does not appear; a capability id is never itself
+    passable to `execute_tool` (`ToolRegistry.get` fails closed on
+    anything that isn't a real registered tool name — capability ids
+    included).
+  - `describe_installed_abilities(registry)` — `{"tools": [...],
+    "capabilities": [...]}`, the structured, complete answer to "what can
+    you currently do?" Contains only tool/capability metadata; no tool
+    arguments, prompt/response content, secrets, or private user data
+    (`tests/test_capability_catalog.py` asserts this directly).
+  - `render_capability_manifest(registry)` — replaces the previous
+    `backend.model_input.CAPABILITY_MANIFEST` constant (§14). Builds the
+    model-facing prose fresh from `registry.list_definitions()` on every
+    call.
+- `backend/model_input.py`'s `_build_instructions` now calls
+  `render_capability_manifest()` instead of interpolating a frozen
+  constant. The rest of the deterministic budgeting pipeline (ADR-022) is
+  unchanged.
+
+**Why an internal catalog API, not a `self.capabilities` tool.** The
+generated manifest above is already unconditionally included in the
+system instructions on *every* chat turn — both the plain `generate()`
+path and the tool-calling path (`backend/model_input.py`'s
+`_build_instructions` runs for both). A "what can you currently do?"
+question is therefore already truthfully answerable from ambient context
+without any tool call. Registering a `self.capabilities` tool would add a
+function-schema entry to every OpenAI request (token cost, and one more
+opportunity for a redundant/off-policy tool call) for information the
+model already has in front of it, and it would be the first tool whose
+entire purpose is introspecting the Tool System itself — legitimate future
+work (`docs/CAPABILITY_ARCHITECTURE.md` §6, V0.3C self-awareness), but not
+something V0.3A's own goal requires. `describe_installed_abilities()` is
+instead a plain, directly testable, zero-execution-risk Python function —
+callable from tests, a future HTTP route, or a future V0.3B/V0.3C
+consumer without going through the model/tool-calling loop at all.
+
+**High-risk tools are never described as available.** `render_capability_
+manifest` only ever names `read_only` and `internal_write` tools in its
+"available" sections — a registered `high_risk` tool (none exist in
+V0.2A/V0.3A) is never described as something the model may call, matching
+`backend.tool_executor`'s unconditional block on that risk tier (§5).
+`tests/test_capability_catalog.py` proves this against a synthetic
+high-risk tool.
+
+**Bug found and fixed while building this: registry truthiness.**
+`backend/tool_executor.py`, `backend/tool_conversation.py`, and the new
+`backend/capability_catalog.py` all resolve an optional `registry`
+parameter with a pattern like `registry or get_tool_registry()`.
+`ToolRegistry.__len__` makes an *empty* registry falsy — so an explicitly
+passed, intentionally empty `ToolRegistry()` was silently replaced by the
+real process-wide default registry instead of being treated as empty.
+This was latent (masked in existing tests by an unrelated, also-true
+fallback condition — see the updated
+`test_falls_back_to_plain_generate_when_registry_empty` in
+`tests/test_tool_conversation.py`) until V0.3A's own tests caught it
+directly. Fixed in all three modules to `registry if registry is not None
+else get_tool_registry()`; regression tests added in
+`tests/test_tool_executor.py` and `tests/test_tool_conversation.py`. This
+does not change behavior for any real caller, which always passes either
+`None` or a genuinely populated registry.
+
+**Deliberately out of scope for V0.3A** (see
+`docs/CAPABILITY_ARCHITECTURE.md` for when these are planned): structured
+gap reasoning over a natural-language goal (V0.3B), self-inspection beyond
+the registry itself — no source paths, docs, or version/commit exposure
+(V0.3C), protected-core mechanical gates (V0.3D), and any form of capability
+building, installation, local node, or Codex bridge (V0.3E/V0.4A-D). No
+new registered tool, no new HTTP route, and no database migration were
+added by V0.3A.

@@ -3,8 +3,8 @@
 **Last updated:** August 9, 2026  
 **Repository:** `mootmoot1/MootOS`  
 **Default branch:** `main`  
-**Current release:** Version 0.1 foundation plus the V0.2A Tool Foundation  
-**Current schema:** `5 — tool_system`
+**Current release:** Version 0.1 foundation plus the V0.2A Tool Foundation and V0.3A Capability-Aware Tool System  
+**Current schema:** `5 — tool_system` (V0.3A added no migration)
 
 ## Current production topology
 
@@ -30,6 +30,21 @@ requires explicit human approval), a centralized executor, a per-turn
 5-call budget, and a frozen-operation approval state machine. Live-tested
 on Railway/OpenAI, including a successful frozen approval → execution →
 persisted Task.
+
+### V0.3A Capability-Aware Tool System — merged
+
+`docs/TOOL_SYSTEM.md` §16, ADR-028, ADR-029. `ToolDefinition` extended
+with `capabilities`/`side_effects`/`idempotent`/`limitations`/
+`depends_on`; all four V0.2A tools declare it truthfully. New
+`backend/capability_catalog.py` derives a non-executable capability index
+and a structured "what can you currently do?" description from the live
+registry. The model-facing capability manifest
+(previously `backend.model_input.CAPABILITY_MANIFEST`, a hand-maintained
+constant) is now generated from the registry on every request — a tool
+that isn't registered can never be named as available, and a registered
+tool can never be silently missing. No new tool, no new HTTP route, no
+schema migration. Next planned work is V0.3B (structured gap reasoning),
+not yet started.
 
 ## Production-verified capabilities
 

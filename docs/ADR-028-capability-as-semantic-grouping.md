@@ -2,9 +2,11 @@
 
 ## Status
 
-Accepted. Recorded August 9, 2026, as part of the V0.3/V0.4 architecture
-lock. See `docs/CAPABILITY_ARCHITECTURE.md` for the full model this ADR is
-one piece of.
+Accepted and implemented. Recorded August 9, 2026, as part of the V0.3/V0.4
+architecture lock; implemented and merged as part of V0.3A
+(`ToolDefinition.capabilities`, `backend/capability_catalog.py`). See
+`docs/CAPABILITY_ARCHITECTURE.md` for the full model this ADR is one piece
+of, and `docs/TOOL_SYSTEM.md` §16 for the concrete result.
 
 ## Context
 

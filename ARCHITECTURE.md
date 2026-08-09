@@ -367,14 +367,18 @@ The model router should record which model handled important requests and how mu
 > Everything else on this page remains the long-term vision for where the
 > Tool System is headed, not a description of what is registered today.
 >
-> **Next phase (V0.3/V0.4, locked, not yet implemented):** the permanent
-> plan for how MootOS describes what it has, reasons about capability
-> gaps, and — much later, human-approved at every step — builds new
-> capabilities itself, is recorded in `docs/CAPABILITY_ARCHITECTURE.md`
-> and ADR-028 through ADR-034. It keeps the Tool Registry below as the
-> only executable source of truth and adds a Capability layer (a semantic
-> grouping of tools, backed by them, never executing on its own) above it —
-> see that document before extending the Tool System further.
+> **Next phase (V0.3/V0.4, locked):** the permanent plan for how MootOS
+> describes what it has, reasons about capability gaps, and — much later,
+> human-approved at every step — builds new capabilities itself, is
+> recorded in `docs/CAPABILITY_ARCHITECTURE.md` and ADR-028 through
+> ADR-034. It keeps the Tool Registry below as the only executable source
+> of truth and adds a Capability layer (a semantic grouping of tools,
+> backed by them, never executing on its own) above it. **V0.3A is
+> implemented and merged** — `ToolDefinition` now carries capability/
+> side-effect/idempotency/limitation metadata, and the model-facing
+> capability manifest is generated from the live registry instead of
+> hand-maintained (`docs/TOOL_SYSTEM.md` §16, ADR-028/ADR-029). V0.3B
+> onward remain plan only — see that document before extending further.
 
 Tools give MootOS abilities beyond conversation.
 

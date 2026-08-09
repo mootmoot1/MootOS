@@ -45,9 +45,15 @@ Implemented and merged:
 - `AGENTS.md` — Codex's manual local-worker boundaries (read-only `main`,
   dedicated branch/worktree required, no secrets access, no destructive
   git operations, no unauthorized commit/push/merge/PR).
+- V0.3A Capability-Aware Tool System: `ToolDefinition` extended with
+  capability/side-effect/idempotency/limitation/dependency metadata; the
+  model-facing capability manifest is now generated from the live Tool
+  Registry instead of hand-maintained. See `docs/TOOL_SYSTEM.md` §16 and
+  ADR-028/ADR-029. No new tool, no new HTTP route, no schema migration.
 
 The repository currently has no scheduler, reminder delivery, recurrence,
-background worker, multi-user system, or capability-builder automation.
+background worker, multi-user system, structured gap reasoning, or
+capability-builder automation.
 
 ## V0.3/V0.4 architecture lock (August 2026)
 
@@ -61,7 +67,8 @@ shaped it, lives in **`docs/CAPABILITY_ARCHITECTURE.md`**, backed by
 definitions; this section is a pointer, not a duplicate.
 
 Phase sequence at a glance: **V0.3A** capability-aware Tool System (richer
-tool metadata, truthful "what can you do" answers) → **V0.3B** structured,
+tool metadata, truthful "what can you do" answers) — **implemented and
+merged**, see `docs/TOOL_SYSTEM.md` §16 — → **V0.3B** structured,
 advisory gap reasoning → **V0.3C** narrow self-awareness + read-only web
 awareness → **V0.3D** protected core enforced as mechanical release gates
 → **V0.3E** a manual, human-run capability-build pipeline proven on at
