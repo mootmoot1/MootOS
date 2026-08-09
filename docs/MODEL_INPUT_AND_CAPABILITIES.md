@@ -171,6 +171,6 @@ explicit approval, and instructed the model that it may not invent or
 assume any other tool name exists -- all as hand-maintained prose at the
 time. `tests/test_model_input.py` asserted this wording directly.
 
-**V0.3A (implemented on branch `claude/v0.3a-capability-aware-tool-system`,
-pending merge):** the same guarantees now hold by construction rather than
-by hand-maintained wording -- see the "Capability manifest" section above.
+**V0.3A (merged to `main`):** the same guarantees now hold by construction
+rather than by hand-maintained wording -- see the "Capability manifest"
+section above.

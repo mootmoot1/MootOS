@@ -27,13 +27,17 @@ As of August 9, 2026:
 - explicit chat-driven Task creation exists
 - the V0.2A Tool Foundation exists, merged to `main` and live-verified on
   Railway/OpenAI (`docs/TOOL_SYSTEM.md`, ADR-027)
+- the V0.3A Capability-Aware Tool System exists, merged to `main`
+  (`docs/TOOL_SYSTEM.md` §16, ADR-028/ADR-029)
+- V0.3B Structured Gap Reasoning is implemented on branch
+  `claude/v0.3b-structured-gap-reasoning`, **not yet merged**
+  (`docs/GAP_REASONING.md`, ADR-030)
 - scheduler/reminder delivery does **not** exist
 
-The locked next-phase plan is capability-aware self-description and
-structured gap reasoning (V0.3A/V0.3B) — see
-`docs/CAPABILITY_ARCHITECTURE.md` and ADR-028 through ADR-034.
-Scheduler/Reminder v0.1 remains a deferred, planned capability (Decision
-011, `ROADMAP.md`), not the active next feature.
+The locked next-phase plan is `docs/CAPABILITY_ARCHITECTURE.md` and
+ADR-028 through ADR-034's full V0.3/V0.4 sequence. Scheduler/Reminder v0.1
+remains a deferred, planned capability (Decision 011, `ROADMAP.md`), not
+the active next feature.
 
 ## Architecture and feature guides
 
@@ -43,6 +47,8 @@ Useful focused documents include:
   model, source-of-truth hierarchy, phase sequence, protected core,
   review roles, and deferred items
 - `TOOL_SYSTEM.md` — the current, implemented, executable Tool System
+- `GAP_REASONING.md` — V0.3B structured gap reasoning (not yet merged to
+  `main` — see its own Status line)
 - `FOUNDATION_HARDENING.md`
 - `CHAT_PROVIDER_PIPELINE.md`
 - `MODEL_INPUT_AND_CAPABILITIES.md`
