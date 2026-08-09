@@ -243,3 +243,44 @@ def test_tasks_create_rejects_malformed_due_at(clean_db):
 def test_tasks_create_rejects_timezone_naive_due_at(clean_db):
     with pytest.raises(ToolValidationError, match="timezone"):
         _run("tasks.create", {"title": "Call Mike", "due_at": "2026-08-10T15:00:00"}, approved=True)
+
+
+# --- V0.3A descriptive metadata --------------------------------------------
+#
+# Every real V0.2A tool must carry explicit, truthful V0.3A capability
+# metadata -- none of it silently falls back to the "undocumented" defaults
+# that only exist for unrelated test fixtures. See backend/tool_types.py
+# and docs/CAPABILITY_ARCHITECTURE.md Sec3/Sec6.
+
+
+@pytest.mark.parametrize("tool_name", ["projects.list", "memory.search", "tasks.list", "tasks.create"])
+def test_every_reference_tool_declares_v03a_metadata_explicitly(tool_name):
+    definition = get_tool_registry().get(tool_name)
+    assert definition.capabilities, f"{tool_name} must declare at least one capability reference"
+    assert definition.side_effects.strip(), f"{tool_name} must document its side effects"
+    assert definition.idempotent is not None, f"{tool_name} must document idempotency explicitly"
+    assert definition.limitations.strip(), f"{tool_name} must document a limitation"
+
+
+def test_read_only_reference_tools_are_idempotent_with_no_side_effects():
+    for name in ("projects.list", "memory.search", "tasks.list"):
+        definition = get_tool_registry().get(name)
+        assert definition.idempotent is True
+        assert "read-only" in definition.side_effects.lower()
+
+
+def test_tasks_create_is_documented_as_not_idempotent():
+    """Calling tasks.create twice (once approved each time) creates two
+    Tasks -- it must never be described as idempotent."""
+    definition = get_tool_registry().get("tasks.create")
+    assert definition.idempotent is False
+
+
+def test_tasks_list_and_tasks_create_share_the_tasks_manage_capability():
+    """Matches the worked example in docs/CAPABILITY_ARCHITECTURE.md Sec3:
+    tasks.manage is a non-executable semantic view over tasks.list and
+    tasks.create."""
+    list_definition = get_tool_registry().get("tasks.list")
+    create_definition = get_tool_registry().get("tasks.create")
+    assert "tasks.manage" in list_definition.capabilities
+    assert "tasks.manage" in create_definition.capabilities

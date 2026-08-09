@@ -52,7 +52,18 @@ def test_catalog_is_deterministically_ordered_and_excludes_executor():
     assert [entry["name"] for entry in catalog] == ["a.tool", "z.tool"]
     for entry in catalog:
         assert "executor" not in entry
-        assert set(entry) == {"name", "version", "description", "input_schema", "risk"}
+        assert set(entry) == {
+            "name",
+            "version",
+            "description",
+            "input_schema",
+            "risk",
+            "capabilities",
+            "side_effects",
+            "idempotent",
+            "limitations",
+            "depends_on",
+        }
 
 
 def test_list_definitions_is_deterministically_ordered():

@@ -54,6 +54,10 @@ PROJECTS_LIST = ToolDefinition(
     risk=RISK_READ_ONLY,
     data_exposure=DATA_EXPOSURE_LOCAL,
     executor=_projects_list,
+    capabilities=("projects.view",),
+    side_effects="None -- read-only.",
+    idempotent=True,
+    limitations="Returns every stored project; does not filter, search, or paginate.",
 )
 
 
@@ -99,6 +103,14 @@ MEMORY_SEARCH = ToolDefinition(
     risk=RISK_READ_ONLY,
     data_exposure=DATA_EXPOSURE_LOCAL,
     executor=_memory_search,
+    capabilities=("memory.recall",),
+    side_effects="None -- read-only.",
+    idempotent=True,
+    limitations=(
+        "Deterministic keyword/concept-alias matching over active memories only "
+        "-- no semantic/embedding search, and archived or superseded memories "
+        "are never returned."
+    ),
 )
 
 
@@ -139,6 +151,10 @@ TASKS_LIST = ToolDefinition(
     risk=RISK_READ_ONLY,
     data_exposure=DATA_EXPOSURE_LOCAL,
     executor=_tasks_list,
+    capabilities=("tasks.manage",),
+    side_effects="None -- read-only.",
+    idempotent=True,
+    limitations=f"Bounded to at most {TASKS_LIST_MAX_LIMIT} results per call; no free-text search.",
 )
 
 
@@ -190,6 +206,17 @@ TASKS_CREATE = ToolDefinition(
     risk=RISK_INTERNAL_WRITE,
     data_exposure=DATA_EXPOSURE_LOCAL,
     executor=_tasks_create,
+    capabilities=("tasks.manage",),
+    side_effects=(
+        "Creates exactly one new open MootOS Task once a human approves the "
+        "frozen request; nothing is created before approval."
+    ),
+    idempotent=False,
+    limitations=(
+        "Supports only title, project, and due_at -- no description, priority, "
+        "or tags. Always requires explicit human approval; never executes on "
+        "the model's request alone."
+    ),
 )
 
 
