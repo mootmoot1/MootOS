@@ -11,7 +11,8 @@ Supported subset:
 - top-level ``type: "object"`` with ``properties``, ``required``, and
   ``additionalProperties`` (defaults to ``False`` -- unknown keys rejected)
 - property ``type``: ``string``, ``integer``, ``boolean``
-- string: ``minLength``, ``maxLength``, ``enum``
+- string: ``minLength``, ``maxLength``, ``enum``, ``format`` (only
+  ``"utc-datetime"`` is recognized -- see ``_validate_utc_datetime``)
 - integer: ``minimum``, ``maximum``
 
 This intentionally does not support nested objects/arrays, ``oneOf``, or
@@ -21,6 +22,7 @@ subset; extend it deliberately, not by broadening the fallback.
 
 from typing import Any, Mapping, Sequence
 
+from backend.time_utils import normalize_optional_utc_datetime
 from backend.tool_types import ToolValidationError
 
 
@@ -81,6 +83,8 @@ def _validate_value(name: str, value: Any, spec: Mapping[str, Any]) -> Any:
             raise ToolValidationError(
                 f"'{name}' must be one of: {', '.join(str(item) for item in enum)}"
             )
+        if spec.get("format") == "utc-datetime":
+            return _validate_utc_datetime(name, text)
         return text
 
     if expected_type == "integer":
@@ -102,3 +106,30 @@ def _validate_value(name: str, value: Any, spec: Mapping[str, Any]) -> Any:
     # An unrecognized/unsupported schema type is a MootOS registration bug,
     # not something to pass through unchecked -- fail closed.
     raise ToolValidationError(f"Unsupported schema type for '{name}'")
+
+
+def _validate_utc_datetime(name: str, text: str) -> str:
+    """Validate/normalize a ``format: "utc-datetime"`` string property.
+
+    Reuses ``backend.time_utils.normalize_optional_utc_datetime`` -- the
+    exact same domain rule the existing Task system already enforces at
+    storage time (timezone-aware ISO 8601, normalized to UTC) -- so this is
+    additive validation at the Tool System boundary, not a second,
+    divergent set of rules. A model-supplied placeholder like ``"none"``,
+    ``"null"``, or ``"unknown"`` is not a valid ISO 8601 datetime and is
+    rejected here exactly like any other malformed value; there is no
+    special-cased placeholder allowlist. The normalized UTC value (not the
+    original model-supplied text) is what gets frozen into a pending
+    approval operation, so a later domain check can never diverge from what
+    was actually reviewed.
+    """
+    try:
+        normalized = normalize_optional_utc_datetime(text, field_name=name)
+    except ValueError as error:
+        raise ToolValidationError(str(error)) from error
+    if normalized is None:
+        # Unreachable while this property also has minLength >= 1 (empty
+        # text is rejected earlier), but fail closed rather than pass an
+        # empty value through if that ever changes.
+        raise ToolValidationError(f"'{name}' must be a valid UTC datetime")
+    return normalized

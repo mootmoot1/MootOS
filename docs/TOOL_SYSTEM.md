@@ -78,6 +78,22 @@ structures; that translation happens once, only inside
 `ToolDefinition.to_catalog_entry()` returns the safe, JSON-serializable
 subset exposed to a model or an API client — `executor` is never included.
 
+**`format: "utc-datetime"` (live-approval-testing fix).** `due_at` on
+`tasks.create` is declared `{"type": "string", ..., "format":
+"utc-datetime"}`. `backend.tool_validation` recognizes this one format and
+validates/normalizes it via `backend.time_utils.normalize_optional_utc_datetime`
+— the exact same rule the existing Task system already enforces at storage
+time — so an invalid value (a textual placeholder like `"none"`/`"null"`/
+`"unknown"`, a malformed string, or a timezone-naive datetime) is a
+`ToolValidationError` at the same generic argument-validation step every
+tool already goes through, before the risk/approval branch is ever reached.
+Live approval testing had found the model sending `due_at: "none"` as a
+stand-in for "no due time"; the old schema only checked `minLength`, so it
+passed validation, froze into a pending approval operation, and only failed
+once approved (Task storage's own, unweakened, unchanged validation). A
+valid value is normalized to UTC *before* being frozen, so the operation a
+human reviews already shows the exact value that will be stored. See §12.
+
 ## 4. Tool Registry
 
 `backend.tool_registry.ToolRegistry`:

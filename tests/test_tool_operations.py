@@ -76,6 +76,22 @@ def test_approve_executes_the_frozen_operation_exactly_once(clean_db):
     assert tasks[0]["id"] == approved["result_reference"]
 
 
+def test_approved_operation_with_omitted_due_at_creates_exactly_one_task(clean_db):
+    """Live-approval-testing regression: due_at is optional, and omitting it
+    (as opposed to a placeholder string like "none") must approve and
+    execute cleanly, creating exactly one Task with no due date."""
+    operation = _create_task_operation(arguments={"title": "Call Mike"})
+    assert "due_at" not in operation["arguments"]
+
+    approved = approve_operation(operation["id"])
+
+    assert approved["status"] == OPERATION_STATUS_SUCCEEDED
+    tasks = list_tasks()
+    assert len(tasks) == 1
+    assert tasks[0]["title"] == "Call Mike"
+    assert tasks[0]["due_at"] is None
+
+
 def test_duplicate_approval_does_not_duplicate_the_task(clean_db):
     operation = _create_task_operation()
 

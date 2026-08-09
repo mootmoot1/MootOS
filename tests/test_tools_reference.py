@@ -184,3 +184,62 @@ def test_tasks_create_description_forbids_inventing_optional_fields():
     definition = get_tool_registry().get("tasks.create")
     assert "never invent, guess, or default a due date" in definition.description
     assert "No other fields exist (no description, priority, or tags)" in definition.description
+
+
+def test_tasks_create_description_tells_model_to_omit_rather_than_use_a_placeholder():
+    definition = get_tool_registry().get("tasks.create")
+    assert "omit due_at entirely from the call" in definition.description
+    assert '"none", "null", "unknown", "N/A"' in definition.description
+
+
+def test_tasks_create_schema_marks_due_at_as_a_utc_datetime():
+    definition = get_tool_registry().get("tasks.create")
+    assert definition.input_schema["properties"]["due_at"]["format"] == "utc-datetime"
+
+
+# --- due_at validation boundary (live-approval-testing regression) -------------
+#
+# Live approval testing found the model sending due_at: "none" as a stand-in
+# for "no due time." Tool-argument validation accepted it (a non-empty
+# string), so it reached and froze into a pending approval operation; only
+# Task storage rejected it, after the user had already been shown an
+# approval card for something that could never execute. These prove the fix
+# at the executor level: an invalid due_at is now rejected by
+# ToolValidationError, the same generic argument-validation step every tool
+# already goes through, before tasks.create's own domain logic ever runs.
+
+
+def test_tasks_create_omitted_due_at_succeeds(clean_db):
+    result = _run("tasks.create", {"title": "Call Mike"}, approved=True)
+    assert result.success is True
+    assert result.data["task"]["due_at"] is None
+
+
+def test_tasks_create_valid_due_at_succeeds_and_normalizes_to_utc(clean_db):
+    result = _run(
+        "tasks.create",
+        {"title": "Call Mike", "due_at": "2026-08-10T15:00:00-04:00"},
+        approved=True,
+    )
+    assert result.success is True
+    assert result.data["task"]["due_at"] == "2026-08-10T19:00:00+00:00"
+
+
+@pytest.mark.parametrize("placeholder", ["none", "null", "unknown", "N/A"])
+def test_tasks_create_rejects_textual_placeholder_due_at(clean_db, placeholder):
+    with pytest.raises(ToolValidationError, match="ISO 8601 datetime"):
+        _run("tasks.create", {"title": "Call Mike", "due_at": placeholder}, approved=True)
+
+    from backend.tasks import list_tasks
+
+    assert list_tasks() == []
+
+
+def test_tasks_create_rejects_malformed_due_at(clean_db):
+    with pytest.raises(ToolValidationError, match="ISO 8601 datetime"):
+        _run("tasks.create", {"title": "Call Mike", "due_at": "not a real date"}, approved=True)
+
+
+def test_tasks_create_rejects_timezone_naive_due_at(clean_db):
+    with pytest.raises(ToolValidationError, match="timezone"):
+        _run("tasks.create", {"title": "Call Mike", "due_at": "2026-08-10T15:00:00"}, approved=True)

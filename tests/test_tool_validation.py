@@ -103,3 +103,61 @@ def test_unsupported_schema_type_fails_closed():
             },
             {"nested": {"a": 1}},
         )
+
+
+# --- format: "utc-datetime" (live-approval-testing regression) ----------------
+#
+# Live approval testing found the model sending due_at: "none" as a
+# placeholder for "no due time." Tool validation accepted it (a non-empty
+# string), and only Task storage rejected it -- after a pending approval
+# operation had already been frozen and shown to the user. This asserts the
+# fix at the Tool System validation boundary: an invalid due_at can never
+# reach validate_arguments's caller successfully, so it can never be frozen
+# into a pending operation in the first place.
+
+DATETIME_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string", "minLength": 1, "maxLength": 500},
+        "due_at": {"type": "string", "minLength": 1, "maxLength": 64, "format": "utc-datetime"},
+    },
+    "required": ["title"],
+    "additionalProperties": False,
+}
+
+
+def test_omitted_datetime_field_is_simply_absent():
+    result = validate_arguments(DATETIME_SCHEMA, {"title": "Call Mike"})
+    assert "due_at" not in result
+
+
+def test_valid_offset_datetime_is_normalized_to_utc():
+    result = validate_arguments(
+        DATETIME_SCHEMA, {"title": "Call Mike", "due_at": "2026-08-10T15:00:00-04:00"}
+    )
+    assert result["due_at"] == "2026-08-10T19:00:00+00:00"
+
+
+def test_valid_z_suffixed_datetime_is_normalized_to_utc():
+    result = validate_arguments(
+        DATETIME_SCHEMA, {"title": "Call Mike", "due_at": "2026-08-10T19:00:00Z"}
+    )
+    assert result["due_at"] == "2026-08-10T19:00:00+00:00"
+
+
+@pytest.mark.parametrize("placeholder", ["none", "None", "null", "NULL", "unknown", "N/A", "tbd"])
+def test_textual_placeholder_values_are_rejected(placeholder):
+    with pytest.raises(ToolValidationError, match="ISO 8601 datetime"):
+        validate_arguments(DATETIME_SCHEMA, {"title": "Call Mike", "due_at": placeholder})
+
+
+def test_malformed_datetime_is_rejected():
+    with pytest.raises(ToolValidationError, match="ISO 8601 datetime"):
+        validate_arguments(DATETIME_SCHEMA, {"title": "Call Mike", "due_at": "not a real date"})
+
+
+def test_timezone_naive_datetime_is_rejected():
+    with pytest.raises(ToolValidationError, match="timezone"):
+        validate_arguments(
+            DATETIME_SCHEMA, {"title": "Call Mike", "due_at": "2026-08-10T15:00:00"}
+        )

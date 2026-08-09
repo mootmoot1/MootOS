@@ -106,6 +106,15 @@ def test_capability_manifest_forbids_inventing_optional_task_fields():
     assert "no description, priority, tag, or other field" in CAPABILITY_MANIFEST
 
 
+def test_capability_manifest_tells_model_to_omit_due_at_not_use_a_placeholder():
+    """Live-approval-testing regression: the model sent due_at: "none" as a
+    stand-in for "no due time," which passed old tool validation and froze
+    into a pending approval that could never execute."""
+    assert "omit due_at entirely from the call" in CAPABILITY_MANIFEST
+    assert '"none", "null", "unknown", "N/A"' in CAPABILITY_MANIFEST
+    assert "actual timezone-aware ISO 8601 datetime" in CAPABILITY_MANIFEST
+
+
 def test_conversation_guidance_does_not_conflict_with_immediate_tool_calling():
     """The general "ask before an outside action" rule must not read as
     telling the model to ask a confirmation question before calling a

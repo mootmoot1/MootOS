@@ -227,6 +227,142 @@ def test_write_tool_request_stops_the_loop_and_creates_pending_operation(clean_d
     assert len(list_pending_operations(conversation_id="conversation-1")) == 1
 
 
+def test_write_tool_request_with_valid_due_at_reaches_approval_normalized_to_utc(clean_db):
+    """Live-approval-testing regression: a valid, real due_at reaches
+    approval, and the frozen operation stores the UTC-normalized form the
+    existing Task system uses -- not the model's original offset string."""
+    router = ScriptedToolRouter(
+        [
+            _FakeTurn(
+                "tool_calls",
+                tool_requests=[
+                    ToolRequest(
+                        name="tasks.create",
+                        arguments={"title": "Call Mike", "due_at": "2026-08-10T15:00:00-04:00"},
+                        call_id="c1",
+                    )
+                ],
+                state=_FakeState(1),
+            ),
+        ]
+    )
+
+    outcome = run_tool_conversation(
+        router=router,
+        conversation_id="conversation-1",
+        project=None,
+        messages=[{"role": "user", "content": "make me a task due Monday at 3pm eastern"}],
+        instructions="x",
+    )
+
+    assert outcome.kind == "approval_required"
+    assert outcome.operation["arguments"]["due_at"] == "2026-08-10T19:00:00+00:00"
+
+
+@pytest.mark.parametrize("placeholder", ["none", "null", "unknown"])
+def test_write_tool_request_with_placeholder_due_at_is_rejected_before_approval(clean_db, placeholder):
+    """Live-approval-testing regression: due_at: "none" (or similar
+    placeholders) must never reach a pending approval operation -- the
+    model sees a normal failed tool result instead of an approval card for
+    something that could never execute."""
+    router = ScriptedToolRouter(
+        [
+            _FakeTurn(
+                "tool_calls",
+                tool_requests=[
+                    ToolRequest(
+                        name="tasks.create",
+                        arguments={"title": "Call Mike", "due_at": placeholder},
+                        call_id="c1",
+                    )
+                ],
+                state=_FakeState(1),
+            ),
+            _FakeTurn("final", text="I could not schedule that; let me know a real date."),
+        ]
+    )
+
+    outcome = run_tool_conversation(
+        router=router,
+        conversation_id="conversation-1",
+        project=None,
+        messages=[{"role": "user", "content": "make me a task"}],
+        instructions="x",
+    )
+
+    assert outcome.kind == "final"
+    assert list_tasks() == []
+    assert list_pending_operations(conversation_id="conversation-1") == []
+    # A normal failed tool Run was still recorded (early-rejection audit
+    # trail), never a tool_operations row.
+    tool_runs = [run for run in list_runs() if run["run_type"] == RUN_TYPE_TOOL]
+    assert len(tool_runs) == 1
+    assert tool_runs[0]["status"] == "failed"
+    assert tool_runs[0]["error_class"] == "ToolValidationError"
+
+
+def test_write_tool_request_with_malformed_due_at_is_rejected_before_approval(clean_db):
+    router = ScriptedToolRouter(
+        [
+            _FakeTurn(
+                "tool_calls",
+                tool_requests=[
+                    ToolRequest(
+                        name="tasks.create",
+                        arguments={"title": "Call Mike", "due_at": "not a real date"},
+                        call_id="c1",
+                    )
+                ],
+                state=_FakeState(1),
+            ),
+            _FakeTurn("final", text="I need a real date to schedule that."),
+        ]
+    )
+
+    outcome = run_tool_conversation(
+        router=router,
+        conversation_id=None,
+        project=None,
+        messages=[{"role": "user", "content": "make me a task"}],
+        instructions="x",
+    )
+
+    assert outcome.kind == "final"
+    assert list_tasks() == []
+    assert list_pending_operations() == []
+
+
+def test_write_tool_request_with_timezone_naive_due_at_is_rejected_before_approval(clean_db):
+    router = ScriptedToolRouter(
+        [
+            _FakeTurn(
+                "tool_calls",
+                tool_requests=[
+                    ToolRequest(
+                        name="tasks.create",
+                        arguments={"title": "Call Mike", "due_at": "2026-08-10T15:00:00"},
+                        call_id="c1",
+                    )
+                ],
+                state=_FakeState(1),
+            ),
+            _FakeTurn("final", text="I need a timezone to schedule that."),
+        ]
+    )
+
+    outcome = run_tool_conversation(
+        router=router,
+        conversation_id=None,
+        project=None,
+        messages=[{"role": "user", "content": "make me a task"}],
+        instructions="x",
+    )
+
+    assert outcome.kind == "final"
+    assert list_tasks() == []
+    assert list_pending_operations() == []
+
+
 def test_unknown_tool_request_is_fed_back_as_a_failed_result_and_loop_continues(clean_db):
     router = ScriptedToolRouter(
         [

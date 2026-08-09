@@ -169,14 +169,20 @@ TASKS_CREATE = ToolDefinition(
         "Approve/Reject control; the Task is only created if they approve it there. "
         "Only set project or due_at if the user explicitly stated one in this "
         "conversation -- never invent, guess, or default a due date or a project. "
-        "No other fields exist (no description, priority, or tags)."
+        "If no due time was requested, omit due_at entirely from the call -- do not send "
+        "\"none\", \"null\", \"unknown\", \"N/A\", an empty string, or any other "
+        "placeholder in its place; omitting the field is the only correct way to leave it "
+        "unset. When due_at is provided, it must be a real timezone-aware ISO 8601 "
+        "datetime such as \"2026-08-10T15:00:00-04:00\" or \"2026-08-10T19:00:00Z\" -- a "
+        "date or time without a timezone, or anything that is not an actual datetime, is "
+        "rejected. No other fields exist (no description, priority, or tags)."
     ),
     input_schema={
         "type": "object",
         "properties": {
             "title": {"type": "string", "minLength": 1, "maxLength": 500},
             "project": {"type": "string", "minLength": 1, "maxLength": 100},
-            "due_at": {"type": "string", "minLength": 1, "maxLength": 64},
+            "due_at": {"type": "string", "minLength": 1, "maxLength": 64, "format": "utc-datetime"},
         },
         "required": ["title"],
         "additionalProperties": False,
