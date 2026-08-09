@@ -78,3 +78,28 @@ def test_settings_routes_require_auth_when_password_is_enabled(monkeypatch):
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Authentication required"}
+
+
+def test_settings_page_requires_auth_and_redirects_to_login(monkeypatch):
+    """/settings is in HTML_PATHS, so an unauthenticated GET always redirects.
+
+    Must hold regardless of Accept header, matching /chat and /memory, and
+    unlike the JSON /settings/status sub-route above, which correctly stays
+    a plain 401 for non-browser callers.
+    """
+    monkeypatch.setenv("MOOTOS_PASSWORD", "correct-horse")
+    monkeypatch.setenv("MOOTOS_SESSION_SECRET", "a" * 40)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN", raising=False)
+
+    client = TestClient(app)
+
+    default_accept = client.get("/settings", follow_redirects=False)
+    assert default_accept.status_code == 303
+    assert default_accept.headers["location"] == "/login?next=/settings"
+
+    explicit_html_accept = client.get(
+        "/settings", follow_redirects=False, headers={"accept": "text/html"}
+    )
+    assert explicit_html_accept.status_code == 303
+    assert explicit_html_accept.headers["location"] == "/login?next=/settings"

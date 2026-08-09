@@ -46,6 +46,22 @@ def test_task_page_is_served_at_singular_path(clean_db, client):
     assert "/static/task.js" in response.text
 
 
+def test_task_page_shows_a_visible_timezone_note_near_the_due_input(clean_db, client):
+    response = client.get("/task")
+
+    assert 'id="taskDueInput"' in response.text
+    assert 'id="taskDueTimezoneNote"' in response.text
+    assert "local timezone" in response.text
+    assert "stored as UTC" in response.text
+
+
+def test_task_script_labels_the_terminal_action_cancel_task(clean_db, client):
+    response = client.get("/static/task.js")
+
+    assert response.status_code == 200
+    assert '"Cancel task"' in response.text
+
+
 def test_task_page_does_not_collide_with_task_json_api(clean_db, client):
     page_response = client.get("/task")
     api_response = client.get("/tasks")
@@ -73,24 +89,46 @@ def test_task_route_methods_are_unchanged_by_this_page(clean_db):
     assert task_api_methods == {"GET", "POST"}
 
 
-def test_task_page_requires_auth_when_password_is_enabled(monkeypatch):
-    # Matches the existing /profile precedent: TestClient sends no text/html
-    # Accept header, so the private-session middleware returns 401 JSON here.
-    # A real browser (Accept: text/html, ...) receives a 303 redirect to
-    # /login instead, exactly like /profile already does.
+def test_task_page_requires_auth_and_redirects_to_login(monkeypatch):
+    """/task is in HTML_PATHS, so an unauthenticated GET always redirects.
+
+    This must hold regardless of the request's Accept header, exactly like
+    /chat and /memory already behave, not only when the caller happens to
+    send "text/html".
+    """
     monkeypatch.setenv("MOOTOS_PASSWORD", "correct-horse")
     monkeypatch.setenv("MOOTOS_SESSION_SECRET", "a" * 40)
     monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
     monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN", raising=False)
 
     client = TestClient(app)
-    response = client.get("/task", follow_redirects=False)
+
+    default_accept = client.get("/task", follow_redirects=False)
+    assert default_accept.status_code == 303
+    assert default_accept.headers["location"] == "/login?next=/task"
+
+    explicit_html_accept = client.get(
+        "/task", follow_redirects=False, headers={"accept": "text/html"}
+    )
+    assert explicit_html_accept.status_code == 303
+    assert explicit_html_accept.headers["location"] == "/login?next=/task"
+
+
+def test_task_json_api_still_returns_401_json_not_a_redirect(monkeypatch):
+    """The JSON /tasks API is unaffected by /task joining HTML_PATHS.
+
+    /tasks (plural, the API) was never added to HTML_PATHS, and a GET
+    request without a text/html Accept header must still receive a plain
+    401 so API/script callers keep getting a JSON error, not an HTML
+    redirect response.
+    """
+    monkeypatch.setenv("MOOTOS_PASSWORD", "correct-horse")
+    monkeypatch.setenv("MOOTOS_SESSION_SECRET", "a" * 40)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN", raising=False)
+
+    client = TestClient(app)
+    response = client.get("/tasks", follow_redirects=False)
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Authentication required"}
-
-    browser_response = client.get(
-        "/task", follow_redirects=False, headers={"accept": "text/html"}
-    )
-    assert browser_response.status_code == 303
-    assert browser_response.headers["location"] == "/login?next=/task"
