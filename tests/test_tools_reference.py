@@ -155,3 +155,32 @@ def test_tasks_create_rejects_unknown_project_even_when_approved(clean_db):
 def test_tasks_create_requires_nonempty_title(clean_db):
     with pytest.raises(ToolValidationError):
         _run("tasks.create", {"title": ""}, approved=True)
+
+
+# --- Provider-facing description (live-testing regression) ---------------------
+#
+# This is the exact text the OpenAI function-tool schema sends the model
+# as "description" -- see backend/model_router.py's _build_function_tools.
+# Live testing found the model asking for a separate chat confirmation
+# instead of calling tasks.create; the description was one of the two
+# places (with the capability manifest) that needed to make the intended
+# behavior explicit.
+
+
+def test_tasks_create_description_tells_model_to_call_it_immediately():
+    definition = get_tool_registry().get("tasks.create")
+    assert "Call this tool as soon as the user clearly asks to create/add a Task" in definition.description
+    assert "do not ask a separate chat question to confirm first" in definition.description
+
+
+def test_tasks_create_description_explains_calling_it_does_not_execute_it():
+    definition = get_tool_registry().get("tasks.create")
+    assert "Calling this tool never creates the Task by itself" in definition.description
+    assert "Approve/Reject control" in definition.description
+    assert "only created if they approve it there" in definition.description
+
+
+def test_tasks_create_description_forbids_inventing_optional_fields():
+    definition = get_tool_registry().get("tasks.create")
+    assert "never invent, guess, or default a due date" in definition.description
+    assert "No other fields exist (no description, priority, or tags)" in definition.description

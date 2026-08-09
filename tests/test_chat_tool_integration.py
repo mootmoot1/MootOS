@@ -166,6 +166,58 @@ def test_write_tool_request_returns_approval_payload_instead_of_executing(clean_
     assert client.get("/tasks").json()["data"] == []
 
 
+def test_explicit_task_creation_request_produces_approval_in_one_round_trip(
+    clean_db, client, monkeypatch
+):
+    """Live-testing regression: an explicit natural-language task-creation
+    request, with the title clearly known and nothing else stated, must
+    reach an approval-required outcome from a single tasks.create tool
+    request -- never a normal-text confirmation question, and never with
+    an invented due_at or project the user never mentioned.
+
+    This asserts the orchestration side of the fix: when the model calls
+    the tool the way the (now corrected) instructions ask it to, MootOS
+    itself never inserts an extra confirmation round before showing the
+    real Approve/Reject UI. The router below has exactly one scripted
+    turn; a second round-trip attempt would raise IndexError, proving no
+    hidden confirmation step exists in the orchestration.
+    """
+    router = ScriptedToolRouter(
+        [
+            _FakeTurn(
+                "tool_calls",
+                tool_requests=[
+                    ToolRequest(name="tasks.create", arguments={"title": "Call the dentist"}, call_id="c1")
+                ],
+                state=_FakeState(1),
+            ),
+        ]
+    )
+    monkeypatch.setattr("backend.main.get_model_router", lambda: router)
+
+    # Deliberately natural phrasing, not the deterministic "create a task
+    # to .../add task: ..." command forms (backend/task_commands.py) --
+    # this must reach the model-driven Tool System, not the separate
+    # explicit-command path.
+    response = client.post("/chat", json={"message": "Can you set up a task for me to call the dentist?"})
+
+    assert response.status_code == 200
+    assert router.calls == 1  # exactly one model round trip, no confirmation turn
+    data = response.json()["data"]
+    assert data["approval_required"] is True
+    assert data["operation"]["tool_name"] == "tasks.create"
+    assert data["operation"]["status"] == "pending"
+    # Only what the user actually said -- nothing invented.
+    assert data["operation"]["arguments"] == {"title": "Call the dentist"}
+    assert data["operation"]["arguments"].get("due_at") is None
+    assert data["operation"]["arguments"].get("project") is None
+    # The assistant turn is a deterministic approval summary, not a
+    # yes/no confirmation question requiring another user reply.
+    assert "?" not in data["assistant_message"]["content"]
+
+    assert client.get("/tasks").json()["data"] == []
+
+
 def test_approving_the_pending_operation_creates_exactly_one_task(clean_db, client, monkeypatch):
     router = ScriptedToolRouter(
         [

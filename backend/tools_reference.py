@@ -161,7 +161,16 @@ def _tasks_create(arguments: dict[str, Any], context: ToolExecutionContext) -> d
 TASKS_CREATE = ToolDefinition(
     name="tasks.create",
     version=TOOL_VERSION,
-    description="Create one open MootOS Task. Requires explicit user approval.",
+    description=(
+        "Prepare one open MootOS Task for creation. Call this tool as soon as the user "
+        "clearly asks to create/add a Task and you already know the title -- do not ask "
+        "a separate chat question to confirm first. Calling this tool never creates the "
+        "Task by itself: MootOS freezes the exact call and shows the user a real "
+        "Approve/Reject control; the Task is only created if they approve it there. "
+        "Only set project or due_at if the user explicitly stated one in this "
+        "conversation -- never invent, guess, or default a due date or a project. "
+        "No other fields exist (no description, priority, or tags)."
+    ),
     input_schema={
         "type": "object",
         "properties": {

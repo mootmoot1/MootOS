@@ -403,6 +403,28 @@ every turn) now names exactly the four registered tools, states that
 model that it may not invent or assume any other tool exists. See
 `docs/CURRENT_IMPLEMENTATION.md` and `tests/test_model_input.py`.
 
+**Live-testing fix: call the tool, don't ask first.** Live testing showed
+the model asking a chat confirmation question ("should I create this
+task?") instead of calling `tasks.create`, even when the request was
+unambiguous. Two instruction sources were ambiguous enough to cause this:
+the manifest's old wording ("Moot must explicitly approve it... first")
+read as "get the user's confirmation before calling the tool," and
+`backend/conversation_guidance.py`'s general "ask before an outside
+action" rule — appended *after* the capability manifest, so closer to the
+model's attention — was not scoped to exclude a registered tool call. Both
+were rewritten to be explicit: calling a write-capable tool is how
+MootOS's own review step starts, not something to precede with a model-
+authored confirmation question; the model should call `tasks.create`
+immediately once the request is clear and the title is known, ask only
+for genuinely missing information, and never invent optional fields
+(`project`, `due_at`) the user did not state. The same guidance is
+repeated in `tasks.create`'s own tool description
+(`backend/tools_reference.py`), since that text is sent to OpenAI as the
+function's `description` and is one of the strongest signals the model
+uses when deciding whether/how to call it. See
+`tests/test_model_input.py`, `tests/test_tools_reference.py`, and
+`tests/test_chat_tool_integration.py`.
+
 ## 15. Out of scope for V0.2A
 
 No Calendar, Gmail, GitHub, web browsing, filesystem execution, shell
