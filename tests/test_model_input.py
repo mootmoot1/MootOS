@@ -4,8 +4,8 @@ from copy import deepcopy
 
 import pytest
 
+from backend.capability_catalog import render_capability_manifest
 from backend.model_input import (
-    CAPABILITY_MANIFEST,
     MEMORY_CONTEXT_FOOTER,
     MEMORY_CONTEXT_HEADER,
     MODEL_INPUT_TOTAL_CHARACTER_BUDGET,
@@ -13,6 +13,14 @@ from backend.model_input import (
     prepare_model_input,
 )
 from backend.model_router import ModelProviderError, ModelResponse, ModelRouter
+
+
+# The manifest is generated fresh from the live default registry on every
+# call (backend/capability_catalog.py, ADR-029) -- these tests exercise
+# that real, production default-registry output. Dynamic add/remove and
+# hallucination-prevention behavior is covered against isolated test
+# registries in tests/test_capability_catalog.py, not here.
+CAPABILITY_MANIFEST = render_capability_manifest()
 
 
 class CapturingProvider:
@@ -68,51 +76,47 @@ def test_capability_manifest_is_explicit_about_available_and_unavailable_actions
     assert "chat model does not directly click or invoke" in CAPABILITY_MANIFEST
 
 
-def test_capability_manifest_names_exactly_the_registered_v02a_tools():
-    """V0.2A: MootOS may truthfully claim only the tools actually registered."""
-    assert "projects.list, memory.search, and tasks.list run automatically" in CAPABILITY_MANIFEST
+def test_capability_manifest_names_exactly_the_registered_v03a_tools():
+    """V0.3A: MootOS may truthfully claim only the tools actually
+    registered, and the claim is generated from the live registry, not a
+    hand-maintained list -- see tests/test_capability_catalog.py for the
+    dynamic add/remove/hallucination-prevention proof of that."""
+    assert "memory.search, projects.list, and tasks.list run automatically" in CAPABILITY_MANIFEST
     assert "tasks.create is registered as a write-capable tool" in CAPABILITY_MANIFEST
     assert "You may not invent, assume, or ask MootOS to run any other tool name" in CAPABILITY_MANIFEST
     assert "Never claim a write action" in CAPABILITY_MANIFEST
 
 
-def test_capability_manifest_tells_the_model_to_call_tasks_create_immediately():
-    """Live-testing regression: the model must call tasks.create as soon as
-    the request is clear and the title is known, not ask a chat
-    confirmation question first -- the Tool System's own approval UI is
-    what reviews the request, not a model-authored confirmation question."""
-    assert "call the tasks.create tool right away in that same turn" in CAPABILITY_MANIFEST
-    assert 'Do not ask a separate question such as "should I create this task?"' in CAPABILITY_MANIFEST
-
-
-def test_capability_manifest_explains_calling_the_tool_is_not_executing_it():
-    assert "Calling tasks.create does not mean the Task exists" in CAPABILITY_MANIFEST
+def test_capability_manifest_generic_write_tool_guidance_is_present():
+    """Live-testing regression, generalized to any internal_write tool: the
+    model must call a write-capable tool as soon as the request is clear,
+    not ask its own chat confirmation question first -- the Tool System's
+    own approval UI is what reviews the request."""
     assert (
-        "MootOS freezes the exact call and shows Moot a real Approve/Reject control"
+        "Calling a write-capable tool is how MootOS's own review step starts"
         in CAPABILITY_MANIFEST
     )
-    assert "the Task is created only if Moot approves it there" in CAPABILITY_MANIFEST
-
-
-def test_capability_manifest_only_asks_for_genuinely_missing_information():
+    assert 'Do not ask your own confirmation question (such as "should I do this?"' in CAPABILITY_MANIFEST
     assert "ask only for that missing piece" in CAPABILITY_MANIFEST
-    assert "do not ask a blanket confirmation once you already have enough to call the tool" in CAPABILITY_MANIFEST
+    assert "do not ask a blanket confirmation once enough information is already available" in CAPABILITY_MANIFEST
 
 
-def test_capability_manifest_forbids_inventing_optional_task_fields():
-    assert "Never invent, assume, guess, or default a due date" in CAPABILITY_MANIFEST
-    assert "never invent a due_at value" in CAPABILITY_MANIFEST
-    assert "never invent a project Moot did not name" in CAPABILITY_MANIFEST
-    assert "no description, priority, tag, or other field" in CAPABILITY_MANIFEST
+def test_capability_manifest_embeds_each_write_tools_own_description_verbatim():
+    """The manifest never re-authors a write tool's argument-level rules --
+    it quotes the tool's own registered ``description`` (the same text
+    already sent to the provider as the function-tool schema), so there is
+    exactly one place that text is written, not two independently
+    maintained copies."""
+    from backend.tool_registry import get_tool_registry
 
-
-def test_capability_manifest_tells_model_to_omit_due_at_not_use_a_placeholder():
-    """Live-approval-testing regression: the model sent due_at: "none" as a
-    stand-in for "no due time," which passed old tool validation and froze
-    into a pending approval that could never execute."""
-    assert "omit due_at entirely from the call" in CAPABILITY_MANIFEST
-    assert '"none", "null", "unknown", "N/A"' in CAPABILITY_MANIFEST
-    assert "actual timezone-aware ISO 8601 datetime" in CAPABILITY_MANIFEST
+    description = get_tool_registry().get("tasks.create").description
+    assert description in CAPABILITY_MANIFEST
+    # Spot-check a few of the argument-specific rules live inside that
+    # embedded description, not as a second, separately authored copy:
+    assert "never invent, guess, or default a due date" in description
+    assert "omit due_at entirely from the call" in description
+    assert '"none", "null", "unknown", "N/A"' in description
+    assert "No other fields exist (no description, priority, or tags)" in description
 
 
 def test_conversation_guidance_does_not_conflict_with_immediate_tool_calling():
