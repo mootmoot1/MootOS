@@ -23,8 +23,14 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from backend.model_router import ModelProviderError, ModelResponse, ModelRouter
-from backend.tool_budget import OUTCOME_ERROR, OUTCOME_SUCCESS, OUTCOME_UNKNOWN_TOOL, ToolCallBudget
-from backend.tool_executor import execute_tool
+from backend.tool_budget import (
+    OUTCOME_ERROR,
+    OUTCOME_SKIPPED,
+    OUTCOME_SUCCESS,
+    OUTCOME_UNKNOWN_TOOL,
+    ToolCallBudget,
+)
+from backend.tool_executor import execute_tool, record_rejected_tool_attempt
 from backend.tool_operations import create_pending_operation
 from backend.tool_registry import ToolRegistry, get_tool_registry
 from backend.tool_types import (
@@ -174,12 +180,28 @@ def run_tool_conversation(
 
         for request in turn.tool_requests:
             if not budget.allow_call(request.name, request.arguments):
+                # Recording the skip (not just appending a result) is what
+                # guarantees the loop terminates: without it, a request that
+                # keeps getting denied by the identical-call cap would never
+                # advance ``total_calls``, and the post-batch budget check
+                # below would never trip -- the loop would keep asking the
+                # model for another round indefinitely. Every processed
+                # request, skipped or not, now counts toward the same 5-call
+                # ceiling, so it is also always a hard bound on how many
+                # rounds this loop can run.
+                budget.record(request.name, request.arguments, OUTCOME_SKIPPED)
                 tool_results.append(_skipped_result(request))
                 continue
 
             try:
                 definition = active_registry.get(request.name)
-            except ToolNotFoundError:
+            except ToolNotFoundError as error:
+                record_rejected_tool_attempt(
+                    tool_name=request.name,
+                    conversation_id=conversation_id,
+                    error=error,
+                    registry=active_registry,
+                )
                 budget.record(request.name, request.arguments, OUTCOME_UNKNOWN_TOOL)
                 tool_results.append(
                     ToolResult(
@@ -195,6 +217,12 @@ def run_tool_conversation(
             try:
                 validated_arguments = validate_arguments(definition.input_schema, request.arguments)
             except ToolValidationError as error:
+                record_rejected_tool_attempt(
+                    tool_name=definition.name,
+                    conversation_id=conversation_id,
+                    error=error,
+                    registry=active_registry,
+                )
                 budget.record(definition.name, request.arguments, OUTCOME_ERROR)
                 tool_results.append(
                     ToolResult(
@@ -208,6 +236,13 @@ def run_tool_conversation(
                 continue
 
             if definition.risk == RISK_HIGH_RISK:
+                high_risk_error = ToolPermissionError(HIGH_RISK_SUMMARY)
+                record_rejected_tool_attempt(
+                    tool_name=definition.name,
+                    conversation_id=conversation_id,
+                    error=high_risk_error,
+                    registry=active_registry,
+                )
                 budget.record(definition.name, validated_arguments, OUTCOME_ERROR)
                 tool_results.append(
                     ToolResult(

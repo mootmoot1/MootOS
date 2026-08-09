@@ -175,9 +175,28 @@ class OpenAIProvider:
     ) -> ToolConversationTurn:
         output_items = list(getattr(response, "output", None) or [])
         tool_requests: list[ToolRequest] = []
+        seen_call_ids: set[str] = set()
         for item in output_items:
             if getattr(item, "type", None) != "function_call":
                 continue
+
+            # A call_id is how a tool result is matched back to the model's
+            # own request on the next turn (see continue_tool_turn). A
+            # missing/empty or duplicated call_id makes that matching
+            # ambiguous -- rather than guess which result belongs to which
+            # call, refuse the whole turn.
+            raw_call_id = getattr(item, "call_id", None)
+            call_id = str(raw_call_id).strip() if raw_call_id is not None else ""
+            if not call_id:
+                raise ModelProviderError(
+                    "Model provider returned a tool call with a missing call_id"
+                )
+            if call_id in seen_call_ids:
+                raise ModelProviderError(
+                    "Model provider returned duplicate tool call_id values"
+                )
+            seen_call_ids.add(call_id)
+
             raw_arguments = getattr(item, "arguments", None) or "{}"
             try:
                 parsed_arguments = json.loads(raw_arguments)
@@ -193,7 +212,7 @@ class OpenAIProvider:
                 ToolRequest(
                     name=str(getattr(item, "name", "")),
                     arguments=parsed_arguments,
-                    call_id=str(getattr(item, "call_id", "")),
+                    call_id=call_id,
                 )
             )
 

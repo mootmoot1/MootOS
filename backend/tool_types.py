@@ -71,6 +71,18 @@ class ToolBudgetExceededError(RuntimeError):
     """Raised internally when a conversation turn exceeds its tool-call budget."""
 
 
+class ToolVersionMismatchError(RuntimeError):
+    """Raised when a frozen approval operation's tool version no longer
+    matches the currently registered tool's version.
+
+    A human approved one specific reviewed version of a tool call. If the
+    registered tool has since changed version (or been removed and
+    re-registered under the same name with different behavior), approval
+    must execute nothing rather than silently run a different version than
+    the one that was reviewed. See ``backend/tool_operations.py``.
+    """
+
+
 # --- Core contract types ----------------------------------------------------
 
 

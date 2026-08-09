@@ -43,6 +43,52 @@ HIGH_RISK_BLOCKED_MESSAGE = (
 APPROVAL_REQUIRED_MESSAGE = "This tool requires explicit approval before it can run"
 
 
+def record_rejected_tool_attempt(
+    *,
+    tool_name: str,
+    conversation_id: Optional[str],
+    error: BaseException,
+    registry: Optional[ToolRegistry] = None,
+) -> dict[str, Any]:
+    """Create and immediately fail-finalize a tool Run for an attempt that
+    was rejected *before* a tool's executor callable ever ran -- an unknown
+    tool name, a schema-validation failure, a high-risk refusal, or (from
+    ``backend/tool_operations.py``) an approval whose frozen tool version no
+    longer matches what is currently registered.
+
+    This is the single centralized place that writes a tool Run for an
+    early rejection, so callers (the conversation loop, the approval flow)
+    never duplicate Run SQL and never risk writing two Run rows for the same
+    attempt: a request handled through this helper is never subsequently
+    passed to ``execute_tool``, and ``execute_tool``'s own unknown-tool
+    branch below delegates here instead of writing its own Run.
+
+    Never stores arguments, memory contents, prompt text, or model output --
+    only tool identity, data-exposure classification, and the sanitized
+    exception class name (via ``finish_tool_run_failure``).
+    """
+    active_registry = registry or get_tool_registry()
+    tool_version: Optional[str] = None
+    data_exposure = DATA_EXPOSURE_LOCAL
+    try:
+        definition = active_registry.get(tool_name)
+        tool_version = definition.version
+        data_exposure = definition.data_exposure
+    except ToolNotFoundError:
+        # Genuinely unknown tool: fail closed to the safest exposure default
+        # and record no version, rather than guessing.
+        pass
+
+    run = start_tool_run(
+        conversation_id=conversation_id,
+        tool_name=tool_name or "unknown",
+        tool_version=tool_version,
+        data_exposure=data_exposure,
+    )
+    finish_tool_run_failure(run["id"], error)
+    return run
+
+
 def execute_tool(
     *,
     tool_name: str,
@@ -65,13 +111,12 @@ def execute_tool(
         # A genuinely unregistered name still gets an audit trail entry --
         # this is what lets a repeatedly-nonexistent-tool request show up in
         # Activity instead of vanishing silently.
-        run = start_tool_run(
+        record_rejected_tool_attempt(
+            tool_name=tool_name,
             conversation_id=context.conversation_id,
-            tool_name=tool_name or "unknown",
-            tool_version=None,
-            data_exposure=DATA_EXPOSURE_LOCAL,
+            error=error,
+            registry=active_registry,
         )
-        finish_tool_run_failure(run["id"], error)
         raise
 
     run = start_tool_run(

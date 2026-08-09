@@ -139,6 +139,22 @@ malformed arguments is stopped by the consecutive-failure rule well before
 it could exhaust the full 5-call budget. A run of clean *successes* is still
 hard-capped at 5.
 
+**Precise guarantee — two different numbers.** `ToolCallBudget.total_calls`
+counts every tool *request* the loop finishes processing this turn,
+including one the budget itself denies (`OUTCOME_SKIPPED`: the duplicate-
+call cap or the hard cap already reached). `ToolCallBudget.executions`
+counts only requests that actually reached a tool's executor and ran. "At
+most 5 tool executions per user turn" refers to `executions`; `total_calls`
+is the number that is actually capped at 5 and is what guarantees the loop
+terminates at all. This distinction matters: a denied request that were
+left *unrecorded* would never advance `total_calls`, so the loop's
+per-batch `allow_next()` check would never trip, and a model that kept
+re-requesting an already-capped duplicate call could bounce the loop
+through an unbounded number of rounds. Recording every processed request —
+skipped or not — closes that gap; see `tests/test_tool_conversation.py`'s
+`test_repeated_duplicate_calls_terminate_instead_of_looping_forever` and
+`test_single_turn_with_more_tool_calls_than_remaining_budget`.
+
 When the budget is exhausted mid-turn, the loop asks the provider for one
 final, honest, tools-disabled answer (`continue_tool_turn(..., force_text=True)`)
 so the user gets a real closing response instead of a mid-sentence cutoff.
@@ -167,6 +183,21 @@ are fine; raw internal exception text is not). Any *unexpected* exception is
 wrapped into a fully generic `ToolExecutionError` before it is ever shown —
 the real exception's class name (never its message) is the only thing
 persisted, and only to the Run's `error_class`.
+
+**Early rejections also get a Run.** A request the conversation loop
+rejects *before* ever calling `execute_tool` — an unknown tool name, a
+schema-validation failure, or a `high_risk` refusal — still produces a
+terminal `failed` tool Run, via the same centralized helper,
+`backend.tool_executor.record_rejected_tool_attempt`. This is the one other
+place (besides `execute_tool` itself) allowed to write a tool Run row, so
+neither the conversation loop nor the approval flow duplicates Run SQL, and
+neither risks writing two Run rows for one attempt — a request handled by
+this helper is never subsequently passed to `execute_tool`. It resolves the
+live tool version/data-exposure when the name is registered, and fails
+closed to `tool_version = None` / `data_exposure = local` when it is not.
+It is also reused by `backend.tool_operations.approve_operation` for an
+approval that turns out to name an unregistered tool or a tool whose
+version has since changed (§9) — those rejections are audited the same way.
 
 ## 8. Tool Runs / Audit Trail
 
@@ -209,6 +240,21 @@ A frozen operation stores: `id`, `tool_name`, `tool_version`, validated
 accepts *only* an operation ID — there is no argument parameter anywhere in
 its signature — so nothing downstream of a human's approval click can alter
 what runs.
+
+**Approval is also pinned to the frozen tool version.** After the claim
+(below) and before calling `execute_tool`, `approve_operation` re-resolves
+the *currently* registered tool by name and requires
+`live_definition.version == claimed["tool_version"]`. If the tool has been
+unregistered since the operation was created, or its registered version has
+since changed, the operation is finalized `failed` (`ToolNotFoundError` or
+`ToolVersionMismatchError`) and **nothing executes** — the human reviewed
+one specific version of this call, and a registry change between creation
+and approval must never let a different version run silently. Both
+rejections are also recorded as a Run via
+`record_rejected_tool_attempt` (§7). See
+`tests/test_tool_operations.py`'s
+`test_approval_refuses_a_changed_tool_version_and_executes_nothing` and
+`test_approval_refuses_a_removed_or_unregistered_tool_and_executes_nothing`.
 
 **Duplicate-safety.** `executing` is a short-lived claimed state written by
 an atomic `UPDATE tool_operations SET status = 'executing' WHERE status =
@@ -267,6 +313,15 @@ test already used — is routed to the unchanged plain-text path instead of
 raising `AttributeError`. This is also what lets a future provider that
 never implements tool calling degrade to plain chat instead of breaking
 `/chat` outright.
+
+**Every parsed tool call must carry a usable `call_id`.** `call_id` is how
+a tool result is matched back to the model's own request on the next turn
+(`continue_tool_turn`'s `function_call_output` items). `OpenAIProvider`'s
+response parser (`_parse_tool_response`) raises `ModelProviderError` and
+refuses the whole turn — rather than continue with an ambiguous mapping —
+if any parsed `function_call` item has a missing/empty `call_id`, or if two
+items in the same turn share a `call_id`. See
+`tests/test_model_router_tool_parsing.py`.
 
 ## 12. Tool Conversation Loop
 

@@ -211,3 +211,61 @@ def test_approval_failure_is_recorded_without_leaking_details(clean_db):
     assert approved["status"] == "failed"
     assert approved["error_class"] == "ToolExecutionError"
     assert list_tasks() == []
+
+
+# --- Frozen tool-version enforcement (Grok audit remediation) ------------------
+
+
+def test_approval_executes_when_frozen_version_matches_the_registered_one(clean_db):
+    """tasks.create is registered at version "1" in this build; an operation
+    frozen at that same version must still execute normally."""
+    operation = _create_task_operation(tool_version="1", arguments={"title": "Call Mike"})
+
+    approved = approve_operation(operation["id"])
+
+    assert approved["status"] == OPERATION_STATUS_SUCCEEDED
+    assert len(list_tasks()) == 1
+
+
+def test_approval_refuses_a_changed_tool_version_and_executes_nothing(clean_db):
+    """The frozen operation names a version ("99") that no longer matches
+    the currently registered tool ("1"). Approval must execute nothing."""
+    operation = _create_task_operation(tool_version="99", arguments={"title": "Should never run"})
+
+    approved = approve_operation(operation["id"])
+
+    assert approved["status"] == "failed"
+    assert approved["error_class"] == "ToolVersionMismatchError"
+    assert list_tasks() == []
+
+
+def test_approval_refuses_a_removed_or_unregistered_tool_and_executes_nothing(clean_db):
+    operation = _create_task_operation(
+        tool_name="tasks.no_longer_exists",
+        tool_version="1",
+        arguments={"title": "Should never run"},
+    )
+
+    approved = approve_operation(operation["id"])
+
+    assert approved["status"] == "failed"
+    assert approved["error_class"] == "ToolNotFoundError"
+    assert list_tasks() == []
+
+
+def test_version_mismatch_and_unregistered_rejections_still_leave_an_audit_run(clean_db):
+    from backend.runs import RUN_TYPE_TOOL, list_runs
+
+    mismatched = _create_task_operation(tool_version="99", arguments={"title": "A"})
+    approve_operation(mismatched["id"])
+
+    unregistered = _create_task_operation(
+        tool_name="tasks.no_longer_exists", tool_version="1", arguments={"title": "B"}
+    )
+    approve_operation(unregistered["id"])
+
+    tool_runs = [run for run in list_runs() if run["run_type"] == RUN_TYPE_TOOL]
+    assert len(tool_runs) == 2
+    assert {run["status"] for run in tool_runs} == {"failed"}
+    error_classes = {run["error_class"] for run in tool_runs}
+    assert error_classes == {"ToolVersionMismatchError", "ToolNotFoundError"}

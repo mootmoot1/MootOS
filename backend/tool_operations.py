@@ -30,6 +30,12 @@ operationally, and never silently duplicated.
 
 ``rejected``, ``failed``, and ``expired`` are terminal and executed nothing.
 ``succeeded`` is terminal and executed exactly once.
+
+Approval also re-checks the frozen ``tool_version`` against the currently
+registered tool immediately after the claim and before any execution --- if
+the registered tool was removed or its version has since changed, approval
+finalizes as ``failed`` (a ``ToolVersionMismatchError``/``ToolNotFoundError``
+error class) and executes nothing. See ``approve_operation``.
 """
 
 import json
@@ -39,8 +45,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from backend.db import database_connection
-from backend.tool_executor import execute_tool
-from backend.tool_types import ToolExecutionContext
+from backend.tool_executor import execute_tool, record_rejected_tool_attempt
+from backend.tool_registry import get_tool_registry
+from backend.tool_types import ToolExecutionContext, ToolNotFoundError, ToolVersionMismatchError
 
 
 OPERATION_STATUS_PENDING = "pending"
@@ -296,9 +303,46 @@ def approve_operation(operation_id: str) -> dict[str, Any]:
 
     Never accepts arguments -- the only input is the operation ID, so a
     model or client cannot alter what runs after approval.
+
+    Also refuses to execute -- and executes nothing -- if the tool has been
+    unregistered since the operation was frozen, or if the currently
+    registered version no longer matches ``claimed["tool_version"]``. The
+    human reviewed one specific version of this tool call; approval must
+    never silently run a different one just because the registry changed
+    between when the operation was created and when it was approved.
     """
     claimed = _claim_pending_operation(operation_id)
     arguments = json.loads(claimed["arguments_json"])
+
+    try:
+        live_definition = get_tool_registry().get(claimed["tool_name"])
+    except ToolNotFoundError as error:
+        record_rejected_tool_attempt(
+            tool_name=claimed["tool_name"],
+            conversation_id=claimed["conversation_id"],
+            error=error,
+        )
+        return _finalize_operation(
+            operation_id,
+            OPERATION_STATUS_FAILED,
+            error_class=type(error).__name__[:200],
+        )
+
+    if live_definition.version != claimed["tool_version"]:
+        version_error = ToolVersionMismatchError(
+            "Registered tool version no longer matches the approved operation"
+        )
+        record_rejected_tool_attempt(
+            tool_name=claimed["tool_name"],
+            conversation_id=claimed["conversation_id"],
+            error=version_error,
+        )
+        return _finalize_operation(
+            operation_id,
+            OPERATION_STATUS_FAILED,
+            error_class=type(version_error).__name__[:200],
+        )
+
     context = ToolExecutionContext(
         conversation_id=claimed["conversation_id"],
         project=claimed["project"],
