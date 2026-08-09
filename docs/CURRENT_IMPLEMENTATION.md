@@ -1,8 +1,8 @@
 # MootOS Current Implementation
 
-**Applies to:** `main` after PR #30  
-**Last synchronized:** August 8, 2026  
-**Schema:** `4 — tasks`  
+**Applies to:** `main`, including the merged V0.2A Tool Foundation  
+**Last synchronized:** August 9, 2026  
+**Schema:** `5 — tool_system`  
 **Purpose:** Describe what the running code does now. Historical ADRs and verification records remain valid for their original checkpoints but are not substitutes for this file.
 
 ## 1. Runtime shape
@@ -252,9 +252,9 @@ Scheduler / Reminder v0.1 is the next proposed capability. The design should rem
 actual sequence: a Tool Foundation was built next instead, per ADR-027.
 Scheduler/Reminder v0.1 remains the proposed capability after it.
 
-## 16. Tool System (V0.2A — branch only, not yet merged to `main`)
+## 16. Tool System (V0.2A — merged to `main`)
 
-**Applies to:** `claude/motos-v0.2a-tool-foundation-u46ew4`, schema `5 — tool_system`. Not yet merged, not yet production-verified. See `docs/TOOL_SYSTEM.md` for the full architecture and ADR-027 for the decision record; this section is a short pointer, not a duplicate.
+**Applies to:** `main`, schema `5 — tool_system`. Merged and live-verified on Railway/OpenAI, including a successful frozen approval → execution → persisted Task. See `docs/TOOL_SYSTEM.md` for the full architecture and ADR-027 for the decision record; this section is a short pointer, not a duplicate.
 
 V0.2A adds a small, explicit, fail-closed Tool System so the model can
 invoke a controlled set of internal tools from normal chat, with a

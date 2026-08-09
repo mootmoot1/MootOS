@@ -14,7 +14,7 @@ As of August 8, 2026:
 - private login/session protection is enabled
 - persistent Railway volume is mounted at `/data`
 - normal production SQLite database is `/data/mootos.db`
-- current supported schema is `4 — tasks`
+- current supported schema is `5 — tool_system`
 - conversations, memories, profile imports, Runs, and Tasks share the same SQLite source of truth
 
 The deployment does **not** currently include a background worker, scheduler service, Redis, external queue, or second replica.

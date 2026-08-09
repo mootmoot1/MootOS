@@ -1,7 +1,7 @@
 # MootOS Data and Persistence
 
-**Applies to:** `main` after PR #30  
-**Current schema:** `4 — tasks`
+**Applies to:** `main`, including the merged V0.2A Tool System  
+**Current schema:** `5 — tool_system`
 
 ## 1. Database choice
 
@@ -45,9 +45,6 @@ Current ordered migrations on `main`:
 2. `memory_lifecycle`
 3. `model_runs`
 4. `tasks`
-
-**V0.2A (branch `claude/motos-v0.2a-tool-foundation-u46ew4`, not yet merged to `main`)** adds:
-
 5. `tool_system` — adds `tool_name`/`tool_version` columns to `runs`, and a new `tool_operations` table. See `docs/TOOL_SYSTEM.md`.
 
 Startup migrations run in order, reject gaps/newer unsupported schemas, verify required tables/columns and important constraints, and roll back on failure.
@@ -90,7 +87,7 @@ Run rows intentionally do not duplicate prompts or model responses, and (V0.2A) 
 
 **V0.2A (branch only):** migration 5 adds nullable `tool_name`/`tool_version` columns, populated only on `run_type = 'tool'` rows. `provider`/`model` remain model-provider-only fields; they are not repurposed for tool identity. See `docs/TOOL_SYSTEM.md` §8 and ADR-027.
 
-### `tool_operations` (V0.2A, branch only — not yet merged to `main`)
+### `tool_operations` (V0.2A)
 
 Added by migration 5. Freezes one model-selected write-tool request for human approval:
 

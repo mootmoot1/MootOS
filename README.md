@@ -8,14 +8,14 @@ MootOS is Moot's private, mobile-friendly personal AI foundation. It runs as a s
 **Primary branch:** `main`  
 **Production shape:** one Railway service, one replica  
 **Database:** SQLite on the Railway volume  
-**Current schema:** `4 — tasks`  
+**Current schema:** `5 — tool_system`  
 **Current model provider:** OpenAI through a replaceable provider interface
 
 The current codebase includes persistent chat, long-term memory, memory lifecycle controls, deterministic memory retrieval, a curated profile-import path, model Run logging, Task v0.1, and explicit chat-driven Task creation.
 
 See [`docs/CURRENT_CHECKPOINT.md`](docs/CURRENT_CHECKPOINT.md) for the latest project checkpoint and [`docs/CURRENT_IMPLEMENTATION.md`](docs/CURRENT_IMPLEMENTATION.md) for the code-level architecture map.
 
-**In development, not yet merged:** a V0.2A Tool Foundation on branch `claude/motos-v0.2a-tool-foundation-u46ew4` — a small, fail-closed Tool System that lets the model invoke four controlled internal tools (read Projects/Memory/Tasks automatically; propose a Task write only with explicit human approval). See [`docs/TOOL_SYSTEM.md`](docs/TOOL_SYSTEM.md).
+**Merged, live-verified:** a V0.2A Tool Foundation — a small, fail-closed Tool System that lets the model invoke four controlled internal tools (read Projects/Memory/Tasks automatically; propose a Task write only with explicit human approval). Live-tested on Railway/OpenAI, including a successful frozen approval → execution → persisted Task. See [`docs/TOOL_SYSTEM.md`](docs/TOOL_SYSTEM.md). The locked next-phase plan (V0.3/V0.4) lives in [`docs/CAPABILITY_ARCHITECTURE.md`](docs/CAPABILITY_ARCHITECTURE.md).
 
 ## What works today
 

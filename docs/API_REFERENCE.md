@@ -1,7 +1,7 @@
 # MootOS API Reference
 
-**Version:** 0.1 (plus V0.2A Tool System additions below, branch `claude/motos-v0.2a-tool-foundation-u46ew4`, not yet merged to `main`)  
-**Applies to:** `main` after PR #30, plus the unmerged V0.2A branch  
+**Version:** 0.1 plus the V0.2A Tool System additions below  
+**Applies to:** `main`, including the merged, live-verified V0.2A Tool System  
 **Production app:** `backend.application:app`
 
 All private application/API routes are protected by the signed-session boundary when production auth is configured. `/health`, `/ready`, login/logout, manifest, and static assets have intentional public behavior.
@@ -76,7 +76,7 @@ Task command interception is deliberately strict. `Remind me ...` is not a sched
 
 Normal successful model-backed chat stores the complete user/assistant pair atomically after provider success. Explicit memory and Task writes use their own atomic storage transactions.
 
-**V0.2A (branch only, not yet merged):** when no deterministic command
+**V0.2A (merged, live-verified):** when no deterministic command
 matches, MootOS also offers the model a small internal Tool System
 (`docs/TOOL_SYSTEM.md`). A read-only tool (`projects.list`, `memory.search`,
 `tasks.list`) may execute automatically as part of producing the response;
@@ -282,7 +282,7 @@ Read-only listing of the most recently *created* Tasks (newest first, any status
 ### `GET /activity/memories`
 Read-only listing of the most recently saved *active* memories (newest first), bounded `limit` (1–200, default 15), server-side limited. Does not change `GET /memories` for its existing callers, which remains unlimited.
 
-## Tool operations (V0.2A, branch only — not yet merged to `main`)
+## Tool operations (V0.2A)
 
 Reviews and decides model-selected write-tool requests that `/chat`
 returned with `approval_required: true`. See `docs/TOOL_SYSTEM.md` §9-10

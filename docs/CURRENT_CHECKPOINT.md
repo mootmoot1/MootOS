@@ -1,10 +1,10 @@
 # MootOS Current Checkpoint
 
-**Last updated:** August 8, 2026  
+**Last updated:** August 9, 2026  
 **Repository:** `mootmoot1/MootOS`  
 **Default branch:** `main`  
-**Current release:** Version 0.1 foundation  
-**Current schema:** `4 — tasks`
+**Current release:** Version 0.1 foundation plus the V0.2A Tool Foundation  
+**Current schema:** `5 — tool_system`
 
 ## Current production topology
 
@@ -21,6 +21,15 @@ OpenAI for model-backed chat
 Production launches `backend.application:app` and Railway uses `/ready` for deployment readiness. `/health` remains minimal liveness.
 
 No Redis, Celery, distributed queue, vector database, background worker, scheduler, reminder-delivery system, external write-capable tool executor, or multi-replica coordination exists today.
+
+### V0.2A Tool Foundation — merged, live-verified
+
+`docs/TOOL_SYSTEM.md` and ADR-027. Four registered tools (`projects.list`,
+`memory.search`, `tasks.list` read-only; `tasks.create` internal-write,
+requires explicit human approval), a centralized executor, a per-turn
+5-call budget, and a frozen-operation approval state machine. Live-tested
+on Railway/OpenAI, including a successful frozen approval → execution →
+persisted Task.
 
 ## Production-verified capabilities
 
@@ -101,6 +110,7 @@ Migrations are:
 2. `memory_lifecycle`
 3. `model_runs`
 4. `tasks`
+5. `tool_system`
 
 Current durable domains/tables include:
 
@@ -110,8 +120,7 @@ Current durable domains/tables include:
 - memories/history/lifecycle
 - runs
 - tasks
-
-There is no migration 5 on current `main`. Migration 5 (`tool_system`) exists only on the unmerged V0.2A branch described below.
+- tool_operations
 
 ## Current memory boundary
 
@@ -179,14 +188,13 @@ production claim.**
 No schema migration, no changes to chat/memory/task/run core logic, no new
 dependencies.
 
-## Development branch (not yet merged to `main`): `claude/motos-v0.2a-tool-foundation-u46ew4`
+## V0.2A Tool Foundation — merged to `main`, live-verified
 
-This branch adds a V0.2A Tool Foundation on top of the merged V0.1 MVP.
-**Not merged to `main`, not yet production-verified — implementation
-status only, tracked here so it isn't mistaken for a production claim.**
-See `docs/TOOL_SYSTEM.md` for the architecture and ADR-027 for the decision
-record (including why this was built before Scheduler/Reminder v0.1,
-below).
+V0.2A added a Tool Foundation on top of the merged V0.1 MVP. **Merged to
+`main` and live-verified on Railway/OpenAI, including a successful frozen
+approval → execution → persisted Task.** See `docs/TOOL_SYSTEM.md` for the
+architecture and ADR-027 for the decision record (including why this was
+built before Scheduler/Reminder v0.1, below).
 
 - Migration 5 (`tool_system`): `tool_name`/`tool_version` columns on
   `runs`; new `tool_operations` table for frozen write-tool approvals.
@@ -215,10 +223,13 @@ below).
 
 ## Proposed next feature
 
-**Superseded by the branch above; kept for history.** The next proposed
-development area *was* **Scheduler / Reminder v0.1**, before ADR-027 moved
-the Tool Foundation ahead of it. It remains the next proposed capability
-after the Tool Foundation branch merges.
+**Superseded by the V0.3/V0.4 architecture lock; kept for history.** The
+next proposed development area *was* **Scheduler / Reminder v0.1**, before
+ADR-027 moved the Tool Foundation ahead of it. With the Tool Foundation now
+merged, the active next-phase plan is V0.3A (capability-aware Tool System)
+per `docs/CAPABILITY_ARCHITECTURE.md` and ADR-028 — not the scheduler.
+Scheduler/Reminder v0.1 remains a deferred, planned capability (Decision
+011).
 
 Before implementation, the design should answer:
 

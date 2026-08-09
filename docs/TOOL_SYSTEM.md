@@ -1,6 +1,6 @@
 # MootOS Tool System (V0.2A)
 
-**Status:** Implemented on branch `claude/motos-v0.2a-tool-foundation-u46ew4`. Not merged to `main`. Not yet production-verified.
+**Status:** Implemented and merged to `main`. Live-verified on Railway/OpenAI, including a successful frozen approval → execution → persisted Task.
 **Schema:** `5 — tool_system`
 **Applies to:** the Tool System added in V0.2A on top of the V0.1 foundation (PR #34).
 
