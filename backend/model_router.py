@@ -443,6 +443,30 @@ class ModelRouter:
             instructions=prepared.instructions,
         )
 
+    def generate_standalone(
+        self,
+        messages: list[dict[str, str]],
+        instructions: str,
+    ) -> ModelResponse:
+        """Call the configured provider with exactly the given messages and
+        instructions -- no capability-manifest, conversation-rules, memory
+        context, or history budgeting is injected (contrast with
+        ``generate()``, which always adds all of that via
+        ``prepare_model_input``).
+
+        For narrow, self-contained model interactions that must not be
+        shaped by chat-oriented fixed instructions -- e.g.
+        ``backend/gap_reasoning.py``'s structured capability-requirement
+        extraction, which needs the model to emit strict JSON and would
+        only be confused by chat guidance like "ask a clarifying question"
+        or "do not repeat the conversation." Still goes through the same
+        provider selection, ``ensure_ready()``, and sanitized
+        ``ModelProviderError`` boundary as ``generate()``.
+        """
+        provider = self._get_provider()
+        provider.ensure_ready()
+        return provider.generate(messages=messages, instructions=instructions)
+
     def supports_tools(self) -> bool:
         """Whether the currently selected provider implements tool calling.
 
