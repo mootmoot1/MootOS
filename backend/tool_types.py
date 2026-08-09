@@ -107,6 +107,26 @@ class ToolDefinition:
     ``executor`` is a plain Python callable -- ``(arguments, context) ->
     dict`` -- selected explicitly at registration time. It is never resolved
     from a model-supplied string, and it never sees provider-native types.
+
+    V0.3A descriptive metadata (``capabilities``, ``side_effects``,
+    ``idempotent``, ``limitations``, ``depends_on``) never affects execution
+    or permission enforcement -- ``backend/tool_executor.py`` and
+    ``backend/tool_conversation.py`` never read these fields. They exist so
+    the generated capability catalog and model-facing manifest
+    (``backend/capability_catalog.py``) can describe this tool truthfully
+    without a second, independently hand-maintained description of it. See
+    ADR-028/ADR-029 and ``docs/CAPABILITY_ARCHITECTURE.md``.
+
+    ``capabilities`` is the tool's semantic grouping reference(s) -- e.g.
+    ``("tasks.manage",)`` -- used only to build a derived, non-executable
+    capability view over the registry (backend/capability_catalog.py). A
+    capability that no registered tool references simply does not appear in
+    that view; there is no separate place capability membership is stored.
+
+    ``idempotent`` is ``None`` when genuinely undocumented (the safe default
+    for test/fixture tools outside the real V0.2A/V0.3A tool set); every
+    real registered tool should set it explicitly to ``True`` or ``False``
+    rather than leave it undocumented.
     """
 
     name: str
@@ -116,6 +136,11 @@ class ToolDefinition:
     risk: str
     data_exposure: str
     executor: Callable[[dict[str, Any], ToolExecutionContext], dict[str, Any]]
+    capabilities: tuple[str, ...] = ()
+    side_effects: str = ""
+    idempotent: Optional[bool] = None
+    limitations: str = ""
+    depends_on: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.name or not self.name.strip():
@@ -126,12 +151,22 @@ class ToolDefinition:
             raise ValueError(
                 f"Unsupported tool data-exposure classification: {self.data_exposure!r}"
             )
+        for label, values in (("capabilities", self.capabilities), ("depends_on", self.depends_on)):
+            if not isinstance(values, tuple):
+                raise ValueError(f"Tool {label!r} must be a tuple of strings")
+            if any(not isinstance(value, str) or not value.strip() for value in values):
+                raise ValueError(f"Tool {label!r} entries must be non-empty strings")
 
     def to_catalog_entry(self) -> dict[str, Any]:
         """Return the safe, JSON-serializable subset exposed to a model/API.
 
         Never includes ``executor`` -- the catalog is read-only description,
-        not a way to reach the callable.
+        not a way to reach the callable. This is the single place tool
+        metadata is translated into the shape both the provider-facing tool
+        list (backend/model_router.py, which reads only name/description/
+        input_schema from it) and the generated capability catalog/manifest
+        (backend/capability_catalog.py) read from -- neither maintains an
+        independent copy of this data.
         """
         return {
             "name": self.name,
@@ -139,6 +174,11 @@ class ToolDefinition:
             "description": self.description,
             "input_schema": self.input_schema,
             "risk": self.risk,
+            "capabilities": list(self.capabilities),
+            "side_effects": self.side_effects,
+            "idempotent": self.idempotent,
+            "limitations": self.limitations,
+            "depends_on": list(self.depends_on),
         }
 
 

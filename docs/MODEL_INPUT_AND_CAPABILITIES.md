@@ -76,6 +76,18 @@ memory versions remain excluded by the existing retrieval layer.
 
 The manifest is deterministic application-owned input. It distinguishes the running application's features from actions that the chat model can directly invoke. It does not claim to be a deterministic validator of every provider output.
 
+**V0.3A: generated from the live Tool Registry, not hand-maintained.**
+`backend/capability_catalog.py`'s `render_capability_manifest()` builds
+this text fresh from `backend.tool_registry.get_tool_registry()` on every
+call — replacing a previously hand-authored prose constant (ADR-022). The
+tool-availability lines (which tools run automatically, which require
+approval, and each write-capable tool's own argument rules, embedded
+verbatim from that tool's registered `description`) can only ever name a
+tool that is actually registered; there is no second, independently
+maintained list of tool names that could drift from the registry. See
+`docs/TOOL_SYSTEM.md` for the full module description and ADR-028/ADR-029
+for the decision record.
+
 Available to the current running application:
 
 - text chat through the configured provider
@@ -141,7 +153,11 @@ Provider and storage failure behavior remains defined by
 Any future capability addition must update all of the following in the same PR:
 
 1. actual application code that performs the action
-2. the capability manifest
+2. the capability manifest (as of V0.3A: register the tool with truthful
+   metadata -- the tool-naming portions of the manifest text update
+   automatically; a genuinely new *category* of capability, such as a
+   fixed "Available"/"Not available" bullet unrelated to any registered
+   tool, still requires a manual edit to `render_capability_manifest`)
 3. tests proving access and completion claims are truthful
 4. this document and the relevant ADR
 
@@ -149,8 +165,12 @@ Do not update the manifest to advertise a planned feature before the running
 application can actually perform it.
 
 **V0.2A (merged to `main`, live-verified):**
-the manifest now names the exact four registered Tool System tools
-(`docs/TOOL_SYSTEM.md`), states that `tasks.create` never runs without
-explicit approval, and instructs the model that it may not invent or assume
-any other tool name exists. `tests/test_model_input.py` asserts this
-wording directly.
+the manifest named the exact four registered Tool System tools
+(`docs/TOOL_SYSTEM.md`), stated that `tasks.create` never runs without
+explicit approval, and instructed the model that it may not invent or
+assume any other tool name exists -- all as hand-maintained prose at the
+time. `tests/test_model_input.py` asserted this wording directly.
+
+**V0.3A (implemented on branch `claude/v0.3a-capability-aware-tool-system`,
+pending merge):** the same guarantees now hold by construction rather than
+by hand-maintained wording -- see the "Capability manifest" section above.

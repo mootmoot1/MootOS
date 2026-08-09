@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
+from backend.capability_catalog import render_capability_manifest
 from backend.conversation_guidance import build_conversation_instructions
 
 
@@ -17,46 +18,6 @@ MEMORY_CONTEXT_HEADER = "\nRelevant long-term memory context:\n"
 MEMORY_CONTEXT_FOOTER = (
     "\nUse this context only when it helps answer the current request."
 )
-
-CAPABILITY_MANIFEST = """Current MootOS capability manifest:
-Available to this running application:
-- Text chat using the configured model provider.
-- Recent conversation history supplied as context for the current chat.
-- Ranked active long-term memories supplied as context by MootOS.
-- Explicit long-term-memory saves handled by MootOS storage for commands beginning with "remember" or "save this".
-- User-facing memory review, correction, recoverable archive, and restore through the MootOS interface and API. The chat model does not directly click or invoke those controls.
-- A small set of registered, controlled internal tools you may call directly during this conversation: projects.list, memory.search, and tasks.list run automatically and only read existing MootOS data. tasks.create is registered as a write-capable tool: calling it never creates the Task immediately, but calling it promptly when appropriate is correct and expected -- see "Calling a write-capable tool" below.
-- Only the tools named above exist. You may not invent, assume, or ask MootOS to run any other tool name.
-
-Not available to the chat model in this running version:
-- Live web search, local-business lookup, or browsing.
-- Email, calendar access, scheduling, reminders, or changing appointments.
-- Sending messages, contacting people, or coordinating with friends.
-- Reservations, purchases, payments, or ordering.
-- GitHub or other repository changes, deployments, shell commands, or infrastructure operations.
-- Any external tool or service not explicitly registered above.
-- Background work that continues after the current response.
-- A write-capable tool (such as tasks.create) actually running before Moot approves the exact frozen request in the interface.
-
-Calling a write-capable tool (currently tasks.create):
-- Calling tasks.create is how MootOS's own review step starts, not something you need to precede with your own chat confirmation. If Moot clearly asks you to create/add a Task and you already know the title, call the tasks.create tool right away in that same turn.
-- Do not ask a separate question such as "should I create this task?" or "would you like me to add that?" before calling it -- that is not how MootOS's approval works, and it duplicates the real Approve/Reject control MootOS itself will show Moot next.
-- Calling tasks.create does not mean the Task exists. MootOS freezes the exact call and shows Moot a real Approve/Reject control in the interface; the Task is created only if Moot approves it there.
-- If information the Task genuinely needs is missing or ambiguous (most commonly, what the task actually is), ask only for that missing piece. Do not re-ask about a title, project, or due date Moot already gave you, and do not ask a blanket confirmation once you already have enough to call the tool.
-- Only include a project or a due date if Moot explicitly stated one in this conversation. Never invent, assume, guess, or default a due date, and never invent a project Moot did not name. In particular, never invent a due_at value.
-- If no due time was requested, omit due_at entirely from the call. Do not send "none", "null", "unknown", "N/A", an empty string, or any other placeholder in its place -- those are not valid substitutes for omitting the field and MootOS will reject them. When you do have a real due time, due_at must be an actual timezone-aware ISO 8601 datetime (for example "2026-08-10T15:00:00-04:00"), never a bare date, a time without a timezone, or free text.
-- tasks.create only supports title, project, and due_at. It has no description, priority, tag, or other field -- never offer, mention, or ask about one.
-
-Capability honesty rules:
-- You may help plan, draft, explain, compare, or prepare steps for an outside action.
-- Planning an action is not the same as having access to the relevant service.
-- An application feature is not proof that the chat model directly invoked it.
-- The existence of the Tool System is not proof that a specific tool exists; only the tools explicitly named above are registered.
-- Never claim an unavailable action was started, completed, booked, sent, changed, checked, or verified.
-- Never claim a write action (such as creating a Task through a tool) already happened before MootOS confirms it was approved and actually executed. Requesting a tool call is not the same as it running.
-- Never imply access to private accounts, live systems, current web information, or external tools unless application code explicitly supplied that result.
-- Only say long-term memory was saved when the explicit MootOS memory-write path confirmed it.
-"""
 
 
 class ModelInputBudgetError(RuntimeError):
@@ -182,10 +143,14 @@ def _build_instructions(
     memory_entries: Sequence[str],
     messages: Sequence[Mapping[str, str]],
 ) -> str:
+    # Generated fresh from the live Tool Registry on every call -- never a
+    # frozen/hand-maintained constant. See backend/capability_catalog.py and
+    # ADR-029: a tool that isn't registered can never be named here, and a
+    # registered tool can never be silently missing.
     instructions = (
         fixed_instructions.rstrip()
         + "\n\n"
-        + CAPABILITY_MANIFEST.rstrip()
+        + render_capability_manifest().rstrip()
     )
     if memory_entries:
         instructions += (
