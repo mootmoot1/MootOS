@@ -94,7 +94,17 @@ PUBLIC_PATHS = {
     "/manifest.webmanifest",
 }
 CACHEABLE_PUBLIC_PATHS = {"/health", "/ready", "/manifest.webmanifest"}
-HTML_PATHS = {"/", "/chat", "/memory", "/docs", "/redoc"}
+HTML_PATHS = {
+    "/",
+    "/chat",
+    "/memory",
+    "/profile",
+    "/task",
+    "/activity",
+    "/settings",
+    "/docs",
+    "/redoc",
+}
 MAX_MEMORY_CONTENT_LENGTH = 10_000
 MAX_MEMORY_SEARCH_LENGTH = 500
 LOGIN_THROTTLED_DETAIL = "Too many login attempts. Try again shortly."

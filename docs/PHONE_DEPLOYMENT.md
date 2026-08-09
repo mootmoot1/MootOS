@@ -95,8 +95,13 @@ After ordinary deployments, verify at least:
 - chat opens
 - an existing conversation can be reopened
 - existing memory remains available
+- `/task`, `/activity`, and `/settings` open after login and redirect to `/login` when signed out
+- creating a Task from `/task` and completing/cancelling it works end to end
+- `/settings` shows the currently configured provider/model without ever showing a secret value
 
 After specific feature changes, use their targeted tests. For example, PR #29 was production-verified by correcting a test memory and confirming a brand-new chat recalled only the replacement.
+
+Note on the Task viewer, Activity, and Settings pages: they were added, tested locally (pytest), and pushed to a development branch, but have not yet had a dated production-verification pass on Railway. Do not treat them as production-verified until that pass is recorded, per this repository's documentation policy.
 
 ## Scheduler note
 

@@ -13,6 +13,7 @@ from backend.auth import (
     validate_auth_configuration,
 )
 from backend.main import app
+from backend.memory import init_db
 
 
 TEST_SESSION_SECRET = "test-session-secret-with-at-least-32-characters"
@@ -23,6 +24,21 @@ def isolated_login_throttle():
     reset_login_throttle()
     yield
     reset_login_throttle()
+
+
+@pytest.fixture(autouse=True)
+def ensure_database_ready():
+    """Guarantee the schema exists regardless of test collection order.
+
+    This file previously relied on ``backend.main``'s module-import-time
+    ``init_db()`` call and on always being the first test file pytest
+    collects alphabetically. Any other test module that deletes the database
+    file in its own teardown (an established, repeated pattern across this
+    suite) and happens to sort before this file breaks that assumption.
+    ``init_db()``/``run_migrations()`` is idempotent, so calling it here is
+    always safe and makes this file self-sufficient.
+    """
+    init_db()
 
 
 @pytest.fixture

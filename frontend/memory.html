@@ -25,7 +25,11 @@
       </div>
 
       <div class="memory-page-actions">
-        <a class="secondary-button memory-link-button" href="/chat">Back to chat</a>
+        <a class="secondary-button memory-link-button" href="/chat">Chat</a>
+        <a class="secondary-button memory-link-button" href="/task">Tasks</a>
+        <a class="secondary-button memory-link-button" href="/activity">Activity</a>
+        <a class="secondary-button memory-link-button" href="/settings">Settings</a>
+        <a class="secondary-button memory-link-button" href="/profile">Profile</a>
         <form class="logout-form" action="/auth/logout" method="post">
           <button class="text-button" type="submit">Log out</button>
         </form>
@@ -74,6 +78,55 @@
       <button class="secondary-button" id="refreshMemoriesButton" type="button">
         Refresh
       </button>
+    </section>
+
+    <section class="memory-toolbar" aria-label="Add a memory">
+      <form class="memory-search-form" id="createMemoryForm">
+        <label class="memory-field-label" for="createMemoryContent">Add a memory</label>
+        <textarea
+          id="createMemoryContent"
+          class="memory-correction-textarea"
+          rows="2"
+          maxlength="10000"
+          placeholder="A durable fact worth remembering across conversations."
+          required
+        ></textarea>
+
+        <div class="memory-filter-row">
+          <div class="memory-filter-group">
+            <label class="memory-field-label" for="createMemoryProject">Project</label>
+            <select id="createMemoryProject" class="project-select">
+              <option value="">Global (no project)</option>
+            </select>
+          </div>
+
+          <div class="memory-filter-group">
+            <label class="memory-field-label" for="createMemoryType">Type</label>
+            <input
+              id="createMemoryType"
+              class="memory-search-input"
+              type="text"
+              maxlength="100"
+              list="createMemoryTypeSuggestions"
+              placeholder="e.g. personal, people, decision"
+              autocomplete="off"
+            >
+            <datalist id="createMemoryTypeSuggestions">
+              <option value="personal"></option>
+              <option value="project"></option>
+              <option value="people"></option>
+              <option value="decision"></option>
+              <option value="task_note"></option>
+              <option value="summary"></option>
+              <option value="correction"></option>
+            </datalist>
+          </div>
+        </div>
+
+        <div class="error-banner memory-error" id="createMemoryError" role="alert" hidden></div>
+
+        <button class="primary-button" id="createMemoryButton" type="submit">Save memory</button>
+      </form>
     </section>
 
     <p class="memory-summary" id="memorySummary">Loading memories…</p>

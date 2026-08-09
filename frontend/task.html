@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MootOS">
+  <title>Tasks · MootOS</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/deployment.css">
+  <link rel="stylesheet" href="/static/panels.css">
+</head>
+<body class="panel-page">
+  <div class="panel-shell">
+    <header class="panel-header">
+      <div>
+        <p class="eyebrow">MootOS v0.1</p>
+        <h1>Tasks</h1>
+        <p class="panel-intro">
+          Durable intentions and work items. A Task is not authority to act &mdash;
+          MootOS does not execute anything automatically when a due time arrives.
+        </p>
+      </div>
+
+      <div class="panel-header-actions">
+        <a class="secondary-button panel-nav-button" href="/chat">Chat</a>
+        <a class="secondary-button panel-nav-button" href="/memory">Memories</a>
+        <a class="secondary-button panel-nav-button" href="/activity">Activity</a>
+        <a class="secondary-button panel-nav-button" href="/settings">Settings</a>
+        <a class="secondary-button panel-nav-button" href="/profile">Profile</a>
+        <form class="logout-form" action="/auth/logout" method="post">
+          <button class="text-button" type="submit">Log out</button>
+        </form>
+      </div>
+    </header>
+
+    <section class="panel-toolbar" aria-label="Create a task">
+      <form class="panel-form" id="taskCreateForm">
+        <label class="panel-field-label" for="taskTitleInput">New task</label>
+        <div class="panel-form-row">
+          <input
+            id="taskTitleInput"
+            class="panel-input"
+            type="text"
+            maxlength="500"
+            placeholder="e.g. Export final mix"
+            autocomplete="off"
+            required
+            style="flex: 1 1 260px"
+          >
+          <select id="taskProjectSelect" class="panel-select" aria-label="Project">
+            <option value="">No project</option>
+          </select>
+          <input
+            id="taskDueInput"
+            class="panel-input"
+            type="datetime-local"
+            aria-label="Optional due date and time"
+          >
+          <button class="primary-button" type="submit">Add task</button>
+        </div>
+        <p class="panel-status-note" id="taskDueTimezoneNote">
+          Due date/time uses this browser's local timezone and is stored as UTC.
+          MootOS does not currently send a reminder when a task becomes due.
+        </p>
+      </form>
+    </section>
+
+    <section class="panel-toolbar" aria-label="Filter tasks">
+      <div class="panel-form-row">
+        <div class="panel-form">
+          <label class="panel-field-label" for="taskStatusFilter">Status</label>
+          <select id="taskStatusFilter" class="panel-select">
+            <option value="open">Open</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="">All</option>
+          </select>
+        </div>
+        <div class="panel-form">
+          <label class="panel-field-label" for="taskProjectFilter">Project</label>
+          <select id="taskProjectFilter" class="panel-select">
+            <option value="">All projects</option>
+          </select>
+        </div>
+      </div>
+      <button class="secondary-button" id="refreshTasksButton" type="button">Refresh</button>
+    </section>
+
+    <p class="panel-summary" id="taskSummary">Loading tasks&hellip;</p>
+    <div class="success-banner panel-success" id="taskSuccess" role="status" hidden></div>
+    <div class="error-banner panel-error" id="taskError" role="alert" hidden></div>
+
+    <main class="panel-list" id="taskList" aria-live="polite" aria-label="Tasks">
+      <div class="panel-empty-state">Loading tasks&hellip;</div>
+    </main>
+  </div>
+
+  <script src="/static/task.js" defer></script>
+</body>
+</html>

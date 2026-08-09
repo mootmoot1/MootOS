@@ -83,6 +83,25 @@ def test_profile_page_and_endpoints_require_private_session(clean_db, monkeypatc
     assert client.post("/profile/preview", json=reviewed_manifest()).status_code == 200
 
 
+def test_profile_page_redirects_to_login_regardless_of_accept_header(clean_db, monkeypatch):
+    """/profile is in HTML_PATHS, so an unauthenticated GET always redirects.
+
+    This must hold even without an explicit text/html Accept header,
+    matching /chat and /memory's existing behavior. /profile/preview and
+    /profile/import (JSON APIs) are unaffected and still return 401.
+    """
+    monkeypatch.setenv("MOOTOS_PASSWORD", "private-password")
+    monkeypatch.setenv("MOOTOS_SESSION_SECRET", "s" * 32)
+    client = TestClient(app)
+
+    default_accept = client.get("/profile", follow_redirects=False)
+    assert default_accept.status_code == 303
+    assert default_accept.headers["location"] == "/login?next=/profile"
+
+    preview = client.post("/profile/preview", json=reviewed_manifest())
+    assert preview.status_code == 401
+
+
 def test_profile_preview_and_import_have_private_response_headers(clean_db):
     client = TestClient(app)
 

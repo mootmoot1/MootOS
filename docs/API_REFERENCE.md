@@ -37,6 +37,15 @@ Memory review/search/correct/archive/restore UI.
 ### `GET /profile`
 Curated bootstrap-profile preview/import UI.
 
+### `GET /task`
+Task viewer/creation UI. Named singular to avoid colliding with the `/tasks` JSON API, matching the existing `/memory` vs `/memories` convention.
+
+### `GET /activity`
+Read-only recent-activity UI: recent model Runs, recent Tasks, and recent active memories. Not a scheduler and does not trigger anything.
+
+### `GET /settings`
+Read-only current-configuration UI: active model provider, model, and supported schema version. Does not expose secrets and does not allow changing configuration; provider/model are changed through Railway environment variables and a redeploy.
+
 ## Chat
 
 ### `POST /chat`
@@ -215,7 +224,21 @@ Completed/cancelled Tasks are terminal in Task v0.1.
 
 ## Runs
 
-Runs currently exist as an internal execution/audit table rather than a public CRUD surface. Normal model-provider attempts create/finalize Run records containing execution metadata and optional links to saved conversation messages. Prompt/response bodies are not duplicated into Run rows.
+Runs are recorded as an internal execution/audit table by normal model-provider attempts. Prompt/response bodies are not duplicated into Run rows.
+
+### `GET /activity/runs`
+Read-only listing of recent Run rows (newest first), for the Activity page. Optional `conversation_id` filter and bounded `limit` (1–200, default 50). Never returns prompt/response content.
+
+### `GET /activity/tasks`
+Read-only listing of the most recently *created* Tasks (newest first, any status), bounded `limit` (1–200, default 15). Deliberately a separate query from `GET /tasks`, which orders due Tasks before unscheduled ones for the Task viewer — that ordering is not creation recency, so Activity uses its own query rather than relying on it. Does not change `GET /tasks` for its existing callers.
+
+### `GET /activity/memories`
+Read-only listing of the most recently saved *active* memories (newest first), bounded `limit` (1–200, default 15), server-side limited. Does not change `GET /memories` for its existing callers, which remains unlimited.
+
+## Settings
+
+### `GET /settings/status`
+Read-only current configuration: `provider`, `model`, `schema_version`, `app_version`. Never returns API keys or other secrets.
 
 ## Current schema-related status codes
 
