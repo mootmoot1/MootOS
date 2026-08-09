@@ -85,6 +85,12 @@
   font-weight: 700;
 }
 
+.panel-page section > h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
 .panel-error {
   margin: 0 0 14px;
 }

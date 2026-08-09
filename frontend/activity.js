@@ -8,7 +8,7 @@ const elements = {
   memoriesList: document.querySelector("#memoriesList"),
 };
 
-const RECENT_MEMORY_LIMIT = 15;
+const RECENT_ITEMS_LIMIT = 15;
 
 function normalizeError(detail, fallback) {
   if (typeof detail === "string" && detail.trim()) {
@@ -144,7 +144,7 @@ function renderMemories(memories) {
     return;
   }
 
-  memories.slice(0, RECENT_MEMORY_LIMIT).forEach((memory) => {
+  memories.forEach((memory) => {
     const card = document.createElement("article");
     card.className = "panel-card";
 
@@ -183,9 +183,10 @@ async function loadRuns() {
 
 async function loadTasks() {
   try {
-    const tasks = await apiRequest("/tasks?limit=15");
+    const tasks = await apiRequest(`/activity/tasks?limit=${RECENT_ITEMS_LIMIT}`);
     renderTasks(tasks);
-    elements.tasksSummary.textContent = `${tasks.length} recent task${tasks.length === 1 ? "" : "s"}`;
+    elements.tasksSummary.textContent =
+      `${tasks.length} most recently created task${tasks.length === 1 ? "" : "s"}, any status`;
   } catch (error) {
     showError(error.message);
     elements.tasksSummary.textContent = "Could not load recent tasks.";
@@ -194,11 +195,10 @@ async function loadTasks() {
 
 async function loadMemories() {
   try {
-    const memories = await apiRequest("/memories?status=active");
-    const recent = memories.slice(0, RECENT_MEMORY_LIMIT);
+    const memories = await apiRequest(`/activity/memories?limit=${RECENT_ITEMS_LIMIT}`);
     renderMemories(memories);
     elements.memoriesSummary.textContent =
-      `${recent.length} of ${memories.length} active memories shown`;
+      `${memories.length} most recently saved active memor${memories.length === 1 ? "y" : "ies"}`;
   } catch (error) {
     showError(error.message);
     elements.memoriesSummary.textContent = "Could not load recent memories.";

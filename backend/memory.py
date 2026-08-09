@@ -220,6 +220,29 @@ def list_memories(
     return [dict(row) for row in rows]
 
 
+def list_recent_active_memories(limit: int = 15) -> list[dict[str, Any]]:
+    """Return the most recently created active memories, newest first, bounded.
+
+    Dedicated helper for the Activity feed so it never has to load every
+    active memory just to display a handful. Ordering matches
+    ``list_memories``'s existing active-status ordering (``created_at DESC``);
+    this only adds a server-side LIMIT, it does not change ranking semantics.
+    """
+    safe_limit = max(1, min(int(limit), 200))
+    with database_connection() as connection:
+        rows = connection.execute(
+            f"""
+            SELECT {MEMORY_COLUMNS}
+            FROM memories
+            WHERE status = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (MEMORY_STATUS_ACTIVE, safe_limit),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def list_context_memories(project: Optional[str] = None) -> list[dict[str, Any]]:
     """Return active memories relevant to model context.
 

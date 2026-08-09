@@ -20,15 +20,18 @@
         <p class="eyebrow">MootOS v0.1</p>
         <h1>Activity</h1>
         <p class="panel-intro">
-          Recent model runs, tasks, and memory writes. Run rows never contain
-          prompt or response text &mdash; only execution metadata.
+          The most recent model runs, Tasks, and active memories, each sorted
+          by when it was created (not by due date or status). Run rows never
+          contain prompt or response text &mdash; only execution metadata.
         </p>
       </div>
 
       <div class="panel-header-actions">
         <a class="secondary-button panel-nav-button" href="/chat">Chat</a>
+        <a class="secondary-button panel-nav-button" href="/memory">Memories</a>
         <a class="secondary-button panel-nav-button" href="/task">Tasks</a>
         <a class="secondary-button panel-nav-button" href="/settings">Settings</a>
+        <a class="secondary-button panel-nav-button" href="/profile">Profile</a>
         <form class="logout-form" action="/auth/logout" method="post">
           <button class="text-button" type="submit">Log out</button>
         </form>
@@ -37,21 +40,24 @@
 
     <div class="error-banner panel-error" id="activityError" role="alert" hidden></div>
 
-    <section aria-label="Recent AI model runs">
+    <section aria-label="Most recent AI model runs">
+      <h2>Most recent model runs</h2>
       <p class="panel-summary" id="runsSummary">Loading recent AI runs&hellip;</p>
       <main class="panel-list" id="runsList" aria-live="polite">
         <div class="panel-empty-state">Loading&hellip;</div>
       </main>
     </section>
 
-    <section aria-label="Recent tasks" style="margin-top: 30px">
+    <section aria-label="Most recently created tasks" style="margin-top: 30px">
+      <h2>Most recently created tasks</h2>
       <p class="panel-summary" id="tasksSummary">Loading recent tasks&hellip;</p>
       <main class="panel-list" id="tasksList" aria-live="polite">
         <div class="panel-empty-state">Loading&hellip;</div>
       </main>
     </section>
 
-    <section aria-label="Recent memory writes" style="margin-top: 30px">
+    <section aria-label="Most recently saved active memories" style="margin-top: 30px">
+      <h2>Most recently saved memories</h2>
       <p class="panel-summary" id="memoriesSummary">Loading recent memories&hellip;</p>
       <main class="panel-list" id="memoriesList" aria-live="polite">
         <div class="panel-empty-state">Loading&hellip;</div>

@@ -164,6 +164,28 @@ def list_tasks(
     return [dict(row) for row in rows]
 
 
+def list_recent_tasks(limit: int = 15) -> list[dict[str, Any]]:
+    """List the most recently created tasks, newest first, regardless of status.
+
+    This is a dedicated helper for the Activity feed. ``list_tasks`` orders
+    due tasks before unscheduled tasks (by design, for the Task viewer), which
+    is not the same as creation recency. Reusing it for "recent activity"
+    would silently mislabel an old task with a near due date as recent.
+    """
+    safe_limit = max(1, min(int(limit), 200))
+    with database_connection() as connection:
+        rows = connection.execute(
+            f"""
+            SELECT {TASK_COLUMNS}
+            FROM tasks
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def _finish_task(task_id: str, target_status: str) -> dict[str, Any]:
     if target_status not in {TASK_STATUS_COMPLETED, TASK_STATUS_CANCELLED}:
         raise ValueError("Unsupported terminal task status")
