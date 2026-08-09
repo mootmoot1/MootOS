@@ -2,8 +2,9 @@
 
 ## Status
 
-Draft implementation decision for V0.2A. Implemented on branch
-`claude/motos-v0.2a-tool-foundation-u46ew4`. Not merged to `main`.
+Accepted. Implemented and merged to `main`. Live-verified on
+Railway/OpenAI, including a successful frozen approval → execution →
+persisted Task.
 
 ## Context
 

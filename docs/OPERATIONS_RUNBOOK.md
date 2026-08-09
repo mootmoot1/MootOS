@@ -1,14 +1,14 @@
 # MootOS Operations Runbook
 
-**Last reviewed:** August 8, 2026  
+**Last reviewed:** August 9, 2026  
 **Environment:** Railway production deployment  
 **Application model:** One FastAPI service, one process, one replica, one attached SQLite volume  
 **Production entrypoint:** `backend.application:app`  
-**Current schema:** `4 — tasks`
+**Current schema:** `5 — tool_system`
 
-This is a **current operational document**. Historical deployment records and old ADRs may describe earlier schemas or entrypoints; use this runbook for the live post-PR-30 operating shape.
+This is a **current operational document**. Historical deployment records and old ADRs may describe earlier schemas or entrypoints; use this runbook for the live operating shape.
 
-A V0.2A Tool Foundation (schema `5 — tool_system`, `docs/TOOL_SYSTEM.md`, ADR-027) exists on branch `claude/motos-v0.2a-tool-foundation-u46ew4` and is **not deployed to production**. When it merges, `4 — tasks` above becomes `5 — tool_system`; the deployment/rollback/readiness procedures below are unchanged by that migration (it is additive: new nullable `runs` columns and one new `tool_operations` table, no destructive changes to existing rows).
+The V0.2A Tool Foundation (schema `5 — tool_system`, `docs/TOOL_SYSTEM.md`, ADR-027) is merged to `main` and deployed to production, live-verified on Railway/OpenAI. It was additive: new nullable `runs` columns and one new `tool_operations` table, no destructive changes to existing rows; the deployment/rollback/readiness procedures below are unchanged by that migration.
 
 ## 1. Production components
 
@@ -18,7 +18,7 @@ A V0.2A Tool Foundation (schema `5 — tool_system`, `docs/TOOL_SYSTEM.md`, ADR-
 - Railway volume: `mootos-volume`
 - Volume mount: `/data`
 - Production database: `/data/mootos.db`
-- Current schema version: `4 — tasks`
+- Current schema version: `5 — tool_system`
 - Public liveness endpoint: `/health`
 - Public deployment-readiness endpoint: `/ready`
 - Private chat interface: `/chat`

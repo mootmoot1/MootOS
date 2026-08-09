@@ -18,21 +18,31 @@ When these current documents conflict with an older PR verification record, bran
 
 ## Important current checkpoint
 
-As of August 8, 2026:
+As of August 9, 2026:
 
-- current database schema is `4 — tasks`
+- current database schema is `5 — tool_system`
 - model Run logging exists
 - Task v0.1 exists
 - intelligent explicit chat memory correction exists
 - explicit chat-driven Task creation exists
+- the V0.2A Tool Foundation exists, merged to `main` and live-verified on
+  Railway/OpenAI (`docs/TOOL_SYSTEM.md`, ADR-027)
 - scheduler/reminder delivery does **not** exist
 
-The next proposed feature is Scheduler / Reminder v0.1, pending independent repository review.
+The locked next-phase plan is capability-aware self-description and
+structured gap reasoning (V0.3A/V0.3B) — see
+`docs/CAPABILITY_ARCHITECTURE.md` and ADR-028 through ADR-034.
+Scheduler/Reminder v0.1 remains a deferred, planned capability (Decision
+011, `ROADMAP.md`), not the active next feature.
 
 ## Architecture and feature guides
 
 Useful focused documents include:
 
+- `CAPABILITY_ARCHITECTURE.md` — the locked V0.3/V0.4 plan: conceptual
+  model, source-of-truth hierarchy, phase sequence, protected core,
+  review roles, and deferred items
+- `TOOL_SYSTEM.md` — the current, implemented, executable Tool System
 - `FOUNDATION_HARDENING.md`
 - `CHAT_PROVIDER_PIPELINE.md`
 - `MODEL_INPUT_AND_CAPABILITIES.md`
@@ -56,6 +66,16 @@ Key later ADRs include:
 - ADR-023 — private HTTP boundary
 - ADR-025 — model Run logging / execution-audit direction
 - ADR-026 — Task v0.1 and Task-vs-Run-vs-future-Approval boundary
+- ADR-027 — Tool Foundation v0.2A (the executable Tool Registry/executor/
+  approval system)
+- ADR-028 — capability as semantic grouping over the Tool Registry, not a
+  parallel executable registry
+- ADR-029 — generated capability manifest instead of hand-maintained prose
+- ADR-030 — structured, logged, advisory gap reports
+- ADR-031 — protected core enforced mechanically before builder automation
+- ADR-032 — multi-AI review is advisory with distinct, non-overlapping roles
+- ADR-033 — Local Companion / automatic Codex dispatch are usage-gated
+- ADR-034 — capability-build pipeline proven manually before automation
 
 ## Production verification records
 
