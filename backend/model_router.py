@@ -132,11 +132,66 @@ class OpenAIProvider:
     # inside this class. Callers outside this module only ever see
     # ToolConversationTurn, ToolRequest, and ToolResult.
 
+    def _encode_tool_name(self, name: str) -> str:
+        """Turn a MootOS dotted tool name (``tasks.create``) into an
+        OpenAI-safe function name (``tasks_dcreate``).
+
+        OpenAI function names may not contain ``.`` -- sending a dotted name
+        unchanged makes the live Responses API reject the request outright
+        (confirmed against live Railway/OpenAI traffic). This escapes every
+        ``_`` as the two-character token ``_u`` and every ``.`` as ``_d``,
+        leaving every other character untouched. Every literal ``_`` in the
+        result is therefore always the first character of one of those two
+        tokens, which is what makes ``_decode_tool_name`` an exact,
+        unambiguous inverse -- unlike a plain ``"."`` -> ``"_"`` substitution,
+        this does not collide for inputs like ``"a_b"`` vs ``"a..b"`` (both
+        of which would otherwise encode to ``"a__b"``).
+        """
+        encoded = []
+        for character in name:
+            if character == "_":
+                encoded.append("_u")
+            elif character == ".":
+                encoded.append("_d")
+            else:
+                encoded.append(character)
+        return "".join(encoded)
+
+    def _decode_tool_name(self, safe_name: str) -> str:
+        """Inverse of ``_encode_tool_name``.
+
+        Raises ``ModelProviderError`` for a string that could not have come
+        from ``_encode_tool_name`` -- an ``_`` not immediately followed by
+        ``u`` or ``d`` is not a valid escape token, so the name is treated
+        as unmappable rather than guessed at.
+        """
+        decoded: list[str] = []
+        index = 0
+        length = len(safe_name)
+        while index < length:
+            character = safe_name[index]
+            if character == "_":
+                marker = safe_name[index + 1 : index + 2]
+                if marker == "u":
+                    decoded.append("_")
+                    index += 2
+                elif marker == "d":
+                    decoded.append(".")
+                    index += 2
+                else:
+                    raise ModelProviderError(
+                        "Model provider returned a tool name with an invalid escape sequence"
+                    )
+            else:
+                decoded.append(character)
+                index += 1
+        return "".join(decoded)
+
     def _build_function_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [
             {
                 "type": "function",
-                "name": tool["name"],
+                "name": self._encode_tool_name(tool["name"]),
                 "description": tool["description"],
                 "parameters": tool["input_schema"],
             }
@@ -172,7 +227,14 @@ class OpenAIProvider:
         *,
         input_items: list[Any],
         instructions: str,
+        offered_tools: Optional[list[dict[str, Any]]] = None,
     ) -> ToolConversationTurn:
+        # The set of internal MootOS tool names actually offered on the
+        # request that produced this response. A function_call whose
+        # provider-safe name doesn't decode back to one of these is refused
+        # rather than guessed at -- see the name-mapping check below.
+        offered_names = {tool["name"] for tool in offered_tools} if offered_tools else set()
+
         output_items = list(getattr(response, "output", None) or [])
         tool_requests: list[ToolRequest] = []
         seen_call_ids: set[str] = set()
@@ -208,9 +270,23 @@ class OpenAIProvider:
                 raise ModelProviderError(
                     "Model provider returned a non-object tool argument payload"
                 )
+
+            # Map the provider-safe function name back to the original
+            # registered MootOS tool name (see _encode_tool_name) before
+            # this ever becomes a ToolRequest. A name that doesn't decode
+            # back to one of the tools actually offered this round is
+            # unknown/unmappable and rejected outright -- never guessed at
+            # and never passed through as the raw provider-safe string.
+            provider_name = str(getattr(item, "name", ""))
+            internal_name = self._decode_tool_name(provider_name)
+            if internal_name not in offered_names:
+                raise ModelProviderError(
+                    "Model provider returned an unknown or unmappable tool name"
+                )
+
             tool_requests.append(
                 ToolRequest(
-                    name=str(getattr(item, "name", "")),
+                    name=internal_name,
                     arguments=parsed_arguments,
                     call_id=call_id,
                 )
@@ -261,6 +337,7 @@ class OpenAIProvider:
             response,
             input_items=input_items,
             instructions=instructions,
+            offered_tools=tools,
         )
 
     def continue_tool_turn(
@@ -294,15 +371,17 @@ class OpenAIProvider:
             for result in tool_results
         ]
         continued_input = state.input_items + function_outputs
+        offered_tools = None if force_text else tools
         response = self._call_responses_api(
             instructions=state.instructions,
             input_items=continued_input,
-            tools=None if force_text else (self._build_function_tools(tools) if tools else None),
+            tools=self._build_function_tools(offered_tools) if offered_tools else None,
         )
         return self._parse_tool_response(
             response,
             input_items=continued_input,
             instructions=state.instructions,
+            offered_tools=offered_tools,
         )
 
 

@@ -304,6 +304,21 @@ exactly the shape a future non-OpenAI provider would never need to know
 about. `_build_function_tools` is the only place a MootOS `ToolDefinition`
 catalog entry becomes an OpenAI `{"type": "function", ...}` object.
 
+**Dotted MootOS tool names never reach the OpenAI API directly.** MootOS
+tool names are stable and dotted (`tasks.create`); OpenAI function-tool
+names must not contain `.` — a live Railway/OpenAI request with a dotted
+function name is rejected outright. `_encode_tool_name`/`_decode_tool_name`
+are a small, deterministic, reversible escape used only inside
+`OpenAIProvider` (`_build_function_tools` encodes outgoing names;
+`_parse_tool_response` decodes incoming ones before ever constructing a
+`ToolRequest`), so every other module still only ever sees the real dotted
+name. It escapes `_` as `_u` and `.` as `_d` — not a plain `.` → `_`
+substitution, which would let two different names (e.g. `"a_b"` and
+`"a..b"`) collide on the same encoded string. A decoded name that fails to
+parse, or that doesn't match one of the tools actually offered on that
+specific request, is rejected as unknown/unmappable — fail closed, never
+guessed at. See `tests/test_model_router_tool_parsing.py`.
+
 `ModelRouter.supports_tools()` is a duck-typed capability probe. The
 conversation loop (`backend.tool_conversation._router_supports_tools`)
 checks it defensively (`getattr(..., "supports_tools", None)`, falling back
