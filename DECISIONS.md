@@ -294,7 +294,8 @@ Tool Foundation Before Scheduler/Reminders
 
 ## Status
 
-Draft (branch `claude/motos-v0.2a-tool-foundation-u46ew4`, not merged to `main`)
+Accepted. Merged to `main` and live-verified on Railway/OpenAI, including
+a successful frozen approval → execution → persisted Task.
 
 ## Date
 
@@ -328,6 +329,45 @@ each inventing their own permission and approval logic.
 See ADR-027 for the full architecture and `ROADMAP.md`'s "Immediate
 sequence" section, which keeps the original scheduler-first reasoning
 intact rather than deleting it.
+
+---
+
+# Decision 012
+
+## Title
+
+V0.3/V0.4 Capability Architecture Locked
+
+## Status
+
+Accepted
+
+## Date
+
+August 2026
+
+## Decision
+
+The next major phase after V0.2A — capability-aware self-description,
+structured gap reasoning, protected-core enforcement, a manually-proven
+capability-build pipeline, and only later, automation of that pipeline —
+is locked as the permanent plan in `docs/CAPABILITY_ARCHITECTURE.md`,
+backed by ADR-028 through ADR-034. The Tool Registry (Decision 011, ADR-027)
+remains the only executable source of truth; a Capability is a semantic
+grouping of registered Tools, never a second executable system.
+
+## Reason
+
+An independent architecture review reconciled the original product vision
+(MootOS eventually determining what abilities it has, what's missing, and
+building missing capabilities itself with human approval) against a
+separate adversarial review's sequencing concerns (don't build a
+self-modifying capability builder before capability description and gap
+reasoning are trustworthy). The reconciled plan keeps that sequencing
+instinct while avoiding new machinery that would duplicate the existing
+Tool Registry or introduce lifecycle infrastructure with nothing yet to
+run through it — see `docs/CAPABILITY_ARCHITECTURE.md` §9 for the specific
+list of what was deliberately deferred.
 
 ---
 
