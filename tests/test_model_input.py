@@ -61,11 +61,20 @@ def test_capability_manifest_is_explicit_about_available_and_unavailable_actions
     assert "Live web search" in CAPABILITY_MANIFEST
     assert "Sending messages" in CAPABILITY_MANIFEST
     assert "Reservations, purchases" in CAPABILITY_MANIFEST
-    assert "Calendar access" in CAPABILITY_MANIFEST
-    assert "Deployments, repository changes" in CAPABILITY_MANIFEST
+    assert "Email, calendar access" in CAPABILITY_MANIFEST
+    assert "GitHub or other repository changes" in CAPABILITY_MANIFEST
     assert "Background work" in CAPABILITY_MANIFEST
     assert "Planning an action is not the same as having access" in CAPABILITY_MANIFEST
     assert "chat model does not directly click or invoke" in CAPABILITY_MANIFEST
+
+
+def test_capability_manifest_names_exactly_the_registered_v02a_tools():
+    """V0.2A: MootOS may truthfully claim only the tools actually registered."""
+    assert "projects.list, memory.search, and tasks.list run automatically" in CAPABILITY_MANIFEST
+    assert "tasks.create is registered but never runs automatically" in CAPABILITY_MANIFEST
+    assert "Moot must explicitly approve it" in CAPABILITY_MANIFEST
+    assert "You may not invent, assume, or ask MootOS to run any other tool name" in CAPABILITY_MANIFEST
+    assert "Never claim a write action" in CAPABILITY_MANIFEST
 
 
 def test_history_budget_drops_oldest_and_preserves_current_message_fully():

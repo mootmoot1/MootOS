@@ -247,3 +247,51 @@ Current code does not provide:
 ## 15. Next proposed design problem
 
 Scheduler / Reminder v0.1 is the next proposed capability. The design should remain small but must explicitly solve durable due state, timezone semantics, restart recovery, duplicate-fire prevention/idempotency, delivery status, offline catch-up, cancellation/update behavior, and testable time. It must not blur Task (intention), Run (execution record), and future approval/external-action boundaries.
+
+**This section describes the plan as of PR #31.** V0.2A (§16) changed the
+actual sequence: a Tool Foundation was built next instead, per ADR-027.
+Scheduler/Reminder v0.1 remains the proposed capability after it.
+
+## 16. Tool System (V0.2A — branch only, not yet merged to `main`)
+
+**Applies to:** `claude/motos-v0.2a-tool-foundation-u46ew4`, schema `5 — tool_system`. Not yet merged, not yet production-verified. See `docs/TOOL_SYSTEM.md` for the full architecture and ADR-027 for the decision record; this section is a short pointer, not a duplicate.
+
+V0.2A adds a small, explicit, fail-closed Tool System so the model can
+invoke a controlled set of internal tools from normal chat, with a
+human-approval gate for any write. In module terms:
+
+- `backend/tool_types.py`, `tool_validation.py`, `tool_registry.py`,
+  `tools_reference.py`, `tool_executor.py`, `tool_budget.py`,
+  `tool_operations.py`, `tool_routes.py`, `tool_conversation.py` — new.
+- `backend/model_router.py` — extended with `generate_with_tools` /
+  `continue_tool_turn`, normalized `ToolRequest`/`ToolConversationTurn`
+  types, and an OpenAI-only opaque continuation state. The existing plain
+  `generate()` path is unchanged.
+- `backend/runs.py` — extended with `start_tool_run` /
+  `finish_tool_run_success` / `finish_tool_run_failure` and new
+  `tool_name`/`tool_version` columns (migration 5).
+- `backend/main.py`'s `/chat` route — the deterministic memory/Task command
+  dispatch (§ above) is unchanged and still runs first. Ordinary
+  provider-backed chat now goes through
+  `backend.tool_conversation.run_tool_conversation` instead of calling
+  `router.generate()` directly; that function falls back to the exact
+  previous behavior whenever the tool registry is empty or the configured
+  provider does not implement tool calling.
+
+Four tools are registered: `projects.list`, `memory.search`, `tasks.list`
+(`read_only`, auto-execute) and `tasks.create` (`internal_write`, requires
+explicit approval through `POST /tool-operations/{id}/approve`). A
+`high_risk` risk level exists in the taxonomy but has no registered tool in
+V0.2A and cannot execute under any circumstance, including approval.
+
+Frozen approval operations (`tool_operations` table) let a human review and
+approve/reject the model's exact request; approval can only ever run that
+exact frozen call, never fresh arguments. Post-approval model continuation
+is not implemented — approving returns a deterministic success/failure
+receipt rather than a new model-generated reply. See `docs/TOOL_SYSTEM.md`
+§12 for why, and `docs/API_REFERENCE.md` for the exact response shapes.
+
+`frontend/app.js` renders an inline chat approval card
+(`frontend/tools.css`) when a chat response carries
+`approval_required: true`; `frontend/activity.js` labels tool Runs by tool
+name/version in the existing `/activity` feed.

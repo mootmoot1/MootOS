@@ -34,9 +34,33 @@ Implemented and merged:
 - intelligent explicit memory correction through chat
 - explicit chat-driven Task creation
 
-The repository currently has no scheduler, reminder delivery, recurrence, background worker, external-tool executor, approval UI, or multi-user system.
+The repository currently has no scheduler, reminder delivery, recurrence, background worker, or multi-user system.
 
-## Immediate sequence
+Branch `claude/motos-v0.2a-tool-foundation-u46ew4` (not yet merged to `main`) adds a V0.2A Tool Foundation: a small, fail-closed, provider-replaceable Tool System with four registered tools, a centralized executor, a per-turn call budget, and a human-approval gate for writes. See `docs/TOOL_SYSTEM.md`, ADR-027, and Decision 011. This is a controlled internal port, not general external-tool execution — no calendar, email, GitHub, filesystem, or shell access exists.
+
+## Sequencing change: Tool Foundation moved ahead of Scheduler/Reminder
+
+**Recorded August 2026, ADR-027.** The sequence below (documentation sync,
+audit, then Scheduler/Reminder v0.1) was the plan through PR #31. V0.2A
+changes the order: a Tool Foundation (`docs/TOOL_SYSTEM.md`, ADR-027,
+Decision 011) is built *before* the scheduler, on branch
+`claude/motos-v0.2a-tool-foundation-u46ew4` (not yet merged to `main`).
+
+Real V0.1 usage showed that controlled action-taking creates more immediate
+product value than a scheduler would on its own — a reminder that fires
+into a system with no safe action boundary just becomes another chat
+message. A working, fail-closed Tool System is also the shared prerequisite
+most other planned integrations (Calendar, Gmail, GitHub, files, studio
+work, and eventually reminders themselves) will need.
+
+**The original reasoning below is not deleted or wrong — it is deferred.**
+Scheduler/Reminder v0.1 remains a planned next capability, and everything
+this section says about it (durable state, timezone semantics, idempotent
+delivery, and so on) still applies whenever it is built. It can now be
+designed as a producer of tool-selectable, approval-gated work instead of
+inventing its own execution/permission boundary from nothing.
+
+## Immediate sequence (pre-V0.2A; see the sequencing change above)
 
 ### 1. Documentation synchronization — current
 
@@ -104,9 +128,9 @@ Execution/audit record. Current usage records model-provider attempts; future to
 
 A future trigger/delivery concern. It must not silently turn mutable Task fields into execution authority.
 
-### Future approvals/tools
+### Tool System (V0.2A; see `docs/TOOL_SYSTEM.md`)
 
-Write-capable external actions should eventually use frozen operation parameters, policy checks, approvals when needed, and Run records.
+Write-capable actions use frozen operation parameters, risk-classified policy checks, human approval when required, and Run records. Implemented for four internal tools in V0.2A on the branch above; write-capable *external* actions (Calendar, Gmail, GitHub, and similar) remain future work that can plug into this same boundary.
 
 ## Near-term product direction
 

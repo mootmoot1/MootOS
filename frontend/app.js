@@ -144,6 +144,131 @@ function addMessage(role, content, options = {}) {
   return row;
 }
 
+const TOOL_DISPLAY_NAMES = {
+  "tasks.create": "Create task",
+};
+
+const OPERATION_ARGUMENT_LABELS = {
+  title: "Title",
+  project: "Project",
+  due_at: "Due",
+};
+
+function toolDisplayName(toolName) {
+  return TOOL_DISPLAY_NAMES[toolName] || toolName;
+}
+
+function formatOperationArgumentLabel(key) {
+  if (OPERATION_ARGUMENT_LABELS[key]) {
+    return OPERATION_ARGUMENT_LABELS[key];
+  }
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatOperationArgumentValue(key, value) {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+  if (key === "due_at") {
+    return formatDate(value) || String(value);
+  }
+  return String(value);
+}
+
+function setApprovalCardStatus(statusElement, variant, text) {
+  statusElement.hidden = false;
+  statusElement.textContent = text;
+  statusElement.classList.remove("succeeded", "rejected", "failed");
+  statusElement.classList.add(variant);
+}
+
+function addApprovalCard(operation) {
+  setEmptyState(false);
+
+  const row = document.createElement("div");
+  row.className = "message-row assistant";
+
+  const card = document.createElement("div");
+  card.className = "approval-card";
+
+  const eyebrow = document.createElement("p");
+  eyebrow.className = "approval-card-eyebrow";
+  eyebrow.textContent = "Needs your approval";
+
+  const title = document.createElement("p");
+  title.className = "approval-card-title";
+  title.textContent = toolDisplayName(operation.tool_name);
+
+  const details = document.createElement("dl");
+  details.className = "approval-card-details";
+  Object.entries(operation.arguments || {}).forEach(([key, value]) => {
+    const term = document.createElement("dt");
+    term.textContent = formatOperationArgumentLabel(key);
+    const definition = document.createElement("dd");
+    definition.textContent = formatOperationArgumentValue(key, value);
+    details.append(term, definition);
+  });
+
+  const status = document.createElement("p");
+  status.className = "approval-card-status";
+  status.hidden = true;
+
+  const actions = document.createElement("div");
+  actions.className = "approval-card-actions";
+
+  const approveButton = document.createElement("button");
+  approveButton.type = "button";
+  approveButton.className = "primary-button approval-approve-button";
+  approveButton.textContent = "Approve";
+
+  const rejectButton = document.createElement("button");
+  rejectButton.type = "button";
+  rejectButton.className = "text-button approval-reject-button";
+  rejectButton.textContent = "Reject";
+
+  let deciding = false;
+  async function decide(action) {
+    if (deciding) {
+      return;
+    }
+    deciding = true;
+    approveButton.disabled = true;
+    rejectButton.disabled = true;
+
+    try {
+      const updated = await apiRequest(
+        `/tool-operations/${encodeURIComponent(operation.id)}/${action}`,
+        { method: "POST" }
+      );
+      actions.remove();
+      if (updated.status === "succeeded") {
+        setApprovalCardStatus(status, "succeeded", "Approved — this action ran successfully.");
+      } else if (updated.status === "rejected") {
+        setApprovalCardStatus(status, "rejected", "Rejected — nothing was run.");
+      } else {
+        setApprovalCardStatus(status, "failed", "This action did not complete. Nothing was run.");
+      }
+    } catch (error) {
+      deciding = false;
+      approveButton.disabled = false;
+      rejectButton.disabled = false;
+      setApprovalCardStatus(status, "failed", error.message);
+    }
+  }
+
+  approveButton.addEventListener("click", () => decide("approve"));
+  rejectButton.addEventListener("click", () => decide("reject"));
+
+  actions.append(approveButton, rejectButton);
+  card.append(eyebrow, title, details, status, actions);
+  row.appendChild(card);
+  elements.messages.appendChild(row);
+  elements.messages.scrollTop = elements.messages.scrollHeight;
+  return row;
+}
+
 function autoResizeInput() {
   elements.messageInput.style.height = "auto";
   elements.messageInput.style.height = `${Math.min(
@@ -321,6 +446,9 @@ async function sendMessage(message) {
         : elements.conversationTitle.textContent;
 
     addMessage("assistant", result.assistant_message.content);
+    if (result.approval_required && result.operation) {
+      addApprovalCard(result.operation);
+    }
     localStorage.setItem("mootosConversationId", state.conversationId);
 
     try {

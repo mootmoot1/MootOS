@@ -83,13 +83,20 @@ function renderRuns(runs) {
     const header = document.createElement("div");
     header.className = "panel-card-header";
 
+    const isToolRun = run.run_type === "tool";
     const title = document.createElement("h3");
     title.className = "panel-card-title";
-    title.textContent = run.provider && run.model ? `${run.provider} · ${run.model}` : "Model run";
+    if (isToolRun) {
+      title.textContent = run.tool_version
+        ? `${run.tool_name} (v${run.tool_version})`
+        : run.tool_name || "Tool run";
+    } else {
+      title.textContent = run.provider && run.model ? `${run.provider} · ${run.model}` : "Model run";
+    }
 
     const badge = document.createElement("span");
     badge.className = `panel-badge ${run.status}`;
-    badge.textContent = run.status;
+    badge.textContent = isToolRun ? `tool · ${run.status}` : run.status;
 
     header.append(title, badge);
 

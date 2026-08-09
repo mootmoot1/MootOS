@@ -15,6 +15,8 @@ The current codebase includes persistent chat, long-term memory, memory lifecycl
 
 See [`docs/CURRENT_CHECKPOINT.md`](docs/CURRENT_CHECKPOINT.md) for the latest project checkpoint and [`docs/CURRENT_IMPLEMENTATION.md`](docs/CURRENT_IMPLEMENTATION.md) for the code-level architecture map.
 
+**In development, not yet merged:** a V0.2A Tool Foundation on branch `claude/motos-v0.2a-tool-foundation-u46ew4` — a small, fail-closed Tool System that lets the model invoke four controlled internal tools (read Projects/Memory/Tasks automatically; propose a Task write only with explicit human approval). See [`docs/TOOL_SYSTEM.md`](docs/TOOL_SYSTEM.md).
+
 ## What works today
 
 - Private password login and signed HTTP-only sessions

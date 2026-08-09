@@ -1,0 +1,89 @@
+/* Chat-embedded approval card for model-selected write tools (V0.2A).
+   Reuses the color/spacing tokens already defined in styles.css so this
+   stays visually consistent with the rest of the chat interface. */
+
+.approval-card {
+  width: 100%;
+  max-width: min(82%, 680px);
+  padding: 16px 17px;
+  border-radius: 18px;
+  border: 1px solid rgba(124, 92, 255, 0.45);
+  background: var(--panel-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.approval-card-eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
+.approval-card-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.approval-card-details {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 0.88rem;
+}
+
+.approval-card-details dt {
+  color: var(--muted);
+}
+
+.approval-card-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.approval-card-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.approval-card-actions button {
+  flex: 1;
+}
+
+.approval-approve-button:disabled,
+.approval-reject-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.approval-card-status {
+  margin: 0;
+  padding: 8px 11px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.approval-card-status.succeeded {
+  color: #b5f6d8;
+  background: rgba(82, 212, 154, 0.12);
+  border: 1px solid rgba(82, 212, 154, 0.4);
+}
+
+.approval-card-status.rejected {
+  color: var(--muted);
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+}
+
+.approval-card-status.failed {
+  color: #ffd9dc;
+  background: rgba(255, 107, 114, 0.12);
+  border: 1px solid rgba(255, 107, 114, 0.4);
+}

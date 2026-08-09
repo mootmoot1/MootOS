@@ -8,6 +8,8 @@
 
 This is a **current operational document**. Historical deployment records and old ADRs may describe earlier schemas or entrypoints; use this runbook for the live post-PR-30 operating shape.
 
+A V0.2A Tool Foundation (schema `5 — tool_system`, `docs/TOOL_SYSTEM.md`, ADR-027) exists on branch `claude/motos-v0.2a-tool-foundation-u46ew4` and is **not deployed to production**. When it merges, `4 — tasks` above becomes `5 — tool_system`; the deployment/rollback/readiness procedures below are unchanged by that migration (it is additive: new nullable `runs` columns and one new `tool_operations` table, no destructive changes to existing rows).
+
 ## 1. Production components
 
 - GitHub repository: `mootmoot1/MootOS`

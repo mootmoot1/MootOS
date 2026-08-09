@@ -1,7 +1,7 @@
 # MootOS API Reference
 
-**Version:** 0.1  
-**Applies to:** `main` after PR #30  
+**Version:** 0.1 (plus V0.2A Tool System additions below, branch `claude/motos-v0.2a-tool-foundation-u46ew4`, not yet merged to `main`)  
+**Applies to:** `main` after PR #30, plus the unmerged V0.2A branch  
 **Production app:** `backend.application:app`
 
 All private application/API routes are protected by the signed-session boundary when production auth is configured. `/health`, `/ready`, login/logout, manifest, and static assets have intentional public behavior.
@@ -75,6 +75,53 @@ Add task: ...
 Task command interception is deliberately strict. `Remind me ...` is not a scheduler command because no reminder-delivery system exists yet.
 
 Normal successful model-backed chat stores the complete user/assistant pair atomically after provider success. Explicit memory and Task writes use their own atomic storage transactions.
+
+**V0.2A (branch only, not yet merged):** when no deterministic command
+matches, MootOS also offers the model a small internal Tool System
+(`docs/TOOL_SYSTEM.md`). A read-only tool (`projects.list`, `memory.search`,
+`tasks.list`) may execute automatically as part of producing the response;
+its Run is recorded but nothing about it is returned differently in the
+`/chat` response shape below.
+
+If the model instead requests the one write-capable tool
+(`tasks.create`), `/chat` returns normally (`200`) but with two additional
+fields:
+
+```json
+{
+  "success": true,
+  "data": {
+    "conversation_id": "...",
+    "project": null,
+    "user_message": { "...": "..." },
+    "assistant_message": {
+      "content": "MootOS prepared \"tasks.create\" and needs your approval before it runs (title: Call Mike). Approve or reject it to continue."
+    },
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "approval_required": true,
+    "operation": {
+      "id": "...",
+      "tool_name": "tasks.create",
+      "tool_version": "1",
+      "status": "pending",
+      "arguments": { "title": "Call Mike" },
+      "conversation_id": "...",
+      "project": null,
+      "created_at": "...",
+      "expires_at": "...",
+      "decided_at": null,
+      "result_run_id": null,
+      "result_reference": null,
+      "error_class": null
+    }
+  }
+}
+```
+
+Nothing has executed at this point. The assistant message is a
+deterministic summary, never a claim that the tool already ran. See
+`POST /tool-operations/{id}/approve` below to actually run it.
 
 ## Conversations
 
@@ -235,6 +282,26 @@ Read-only listing of the most recently *created* Tasks (newest first, any status
 ### `GET /activity/memories`
 Read-only listing of the most recently saved *active* memories (newest first), bounded `limit` (1–200, default 15), server-side limited. Does not change `GET /memories` for its existing callers, which remains unlimited.
 
+## Tool operations (V0.2A, branch only — not yet merged to `main`)
+
+Reviews and decides model-selected write-tool requests that `/chat`
+returned with `approval_required: true`. See `docs/TOOL_SYSTEM.md` §9-10
+for the state machine and duplicate/expiry safety.
+
+### `GET /tool-operations`
+List pending operations, newest first. Optional `conversation_id` filter and bounded `limit` (1–200, default 50).
+
+### `GET /tool-operations/{operation_id}`
+Returns one operation and its current state, including the frozen `arguments`.
+
+### `POST /tool-operations/{operation_id}/approve`
+Executes the exact frozen tool call. Returns the operation with `status` set to `succeeded` or `failed` (a failed *execution* is still a `200` — the approval request itself was processed correctly; `error_class` explains the sanitized failure reason). A repeated approve on an already-decided operation returns `409` and does not execute again.
+
+### `POST /tool-operations/{operation_id}/reject`
+Marks the operation `rejected`. Executes nothing. A repeated reject, or a reject after approval, returns `409`.
+
+An operation past its `expires_at` fails closed on either endpoint: it is transitioned to `expired` and the request returns `409`.
+
 ## Settings
 
 ### `GET /settings/status`
@@ -258,4 +325,10 @@ Exact response details are controlled by route code and may intentionally be san
 
 ## Not an API yet
 
-There is currently no scheduler/reminder API, recurring schedule API, notification-delivery API, external-tool execution API, approval API, or background-job control API. Do not infer these capabilities from the presence of Task `due_at`.
+There is currently no scheduler/reminder API, recurring schedule API, notification-delivery API, or background-job control API. Do not infer these capabilities from the presence of Task `due_at`.
+
+The V0.2A Tool operations API above is an *internal* approval API for the
+four registered tools in `docs/TOOL_SYSTEM.md` — it is not a general
+external-tool execution API. There is still no calendar, email, GitHub,
+filesystem, or shell-command API, and no path for a model or a client to
+register a new tool at runtime.
