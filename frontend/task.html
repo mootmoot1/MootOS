@@ -29,6 +29,8 @@
         <a class="secondary-button panel-nav-button" href="/chat">Chat</a>
         <a class="secondary-button panel-nav-button" href="/memory">Memories</a>
         <a class="secondary-button panel-nav-button" href="/activity">Activity</a>
+        <a class="secondary-button panel-nav-button" href="/settings">Settings</a>
+        <a class="secondary-button panel-nav-button" href="/profile">Profile</a>
         <form class="logout-form" action="/auth/logout" method="post">
           <button class="text-button" type="submit">Log out</button>
         </form>
@@ -60,6 +62,10 @@
           >
           <button class="primary-button" type="submit">Add task</button>
         </div>
+        <p class="panel-status-note" id="taskDueTimezoneNote">
+          Due date/time uses this browser's local timezone and is stored as UTC.
+          MootOS does not currently send a reminder when a task becomes due.
+        </p>
       </form>
     </section>
 

@@ -136,7 +136,7 @@ function taskCard(task) {
     const cancelButton = document.createElement("button");
     cancelButton.className = "secondary-button";
     cancelButton.type = "button";
-    cancelButton.textContent = "Cancel";
+    cancelButton.textContent = "Cancel task";
     cancelButton.addEventListener("click", () => finishTask(task.id, "cancel"));
 
     actions.append(completeButton, cancelButton);
