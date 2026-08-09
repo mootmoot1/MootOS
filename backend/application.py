@@ -11,12 +11,14 @@ from backend.main import FRONTEND_DIR, app
 from backend.profile_routes import router as profile_router
 from backend.settings_routes import router as settings_router
 from backend.task_routes import router as task_router
+from backend.tool_routes import router as tool_operations_router
 
 
 app.include_router(profile_router)
 app.include_router(task_router)
 app.include_router(activity_router)
 app.include_router(settings_router)
+app.include_router(tool_operations_router)
 
 
 @app.get("/profile", include_in_schema=False)

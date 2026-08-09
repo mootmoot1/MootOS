@@ -82,6 +82,7 @@ from backend.runs import (
     finish_model_run_success,
     start_model_run,
 )
+from backend.tool_conversation import run_tool_conversation
 
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -678,7 +679,10 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 ) from error
 
             try:
-                model_response = router.generate(
+                tool_outcome = run_tool_conversation(
+                    router=router,
+                    conversation_id=conversation["id"],
+                    project=conversation["project"],
                     messages=model_messages,
                     instructions=_build_model_instructions(
                         conversation["project"],
@@ -704,14 +708,29 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 _safe_finish_failed_run(run["id"], error)
                 raise
 
+            if tool_outcome.kind == "approval_required":
+                # No action has executed yet -- see backend/tool_conversation.py.
+                # The assistant turn records the deterministic approval summary,
+                # never a claim that the tool already ran.
+                assistant_content = (
+                    tool_outcome.assistant_text
+                    or "MootOS needs your approval before continuing."
+                )
+                response_provider = configured_provider or "mootos"
+                response_model = configured_model or "tool-approval-v1"
+            else:
+                assistant_content = tool_outcome.response.text
+                response_provider = tool_outcome.response.provider
+                response_model = tool_outcome.response.model
+
             try:
                 saved_turn = commit_chat_turn(
                     conversation=conversation,
                     is_new=prepared["is_new"],
                     user_content=request.message,
-                    assistant_content=model_response.text,
-                    provider=model_response.provider,
-                    model=model_response.model,
+                    assistant_content=assistant_content,
+                    provider=response_provider,
+                    model=response_model,
                 )
             except ChatStorageError as error:
                 _safe_finish_failed_run(run["id"], error)
@@ -723,8 +742,8 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                     conversation_id=saved_turn["conversation"]["id"],
                     user_message_id=saved_turn["user_message"]["id"],
                     assistant_message_id=saved_turn["assistant_message"]["id"],
-                    provider=model_response.provider,
-                    model=model_response.model,
+                    provider=response_provider,
+                    model=response_model,
                 )
             except Exception:
                 # The chat turn is already durably committed. Do not make the user
@@ -746,10 +765,21 @@ def chat(request: ChatRequest) -> dict[str, Any]:
             detail="MootOS could not save the conversation turn. Please retry.",
         ) from error
 
+    if tool_outcome.kind == "approval_required":
+        return _chat_response(
+            conversation=saved_turn["conversation"],
+            user_message=saved_turn["user_message"],
+            assistant_message=saved_turn["assistant_message"],
+            provider=response_provider,
+            model=response_model,
+            approval_required=True,
+            operation=tool_outcome.operation,
+        )
+
     return _chat_response(
         conversation=saved_turn["conversation"],
         user_message=saved_turn["user_message"],
         assistant_message=saved_turn["assistant_message"],
-        provider=model_response.provider,
-        model=model_response.model,
+        provider=response_provider,
+        model=response_model,
     )

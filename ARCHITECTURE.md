@@ -358,6 +358,16 @@ The model router should record which model handled important requests and how mu
 
 ## 8. Tool System
 
+> **Implementation status (V0.2A):** a first, small version of this system
+> is implemented on branch `claude/motos-v0.2a-tool-foundation-u46ew4`
+> (not yet merged to `main`) — see `docs/TOOL_SYSTEM.md` for the concrete
+> architecture and ADR-027 for the decision record. It registers exactly
+> four internal tools (`projects.list`, `memory.search`, `tasks.list`,
+> `tasks.create`) behind a fail-closed risk/permission model and a
+> human-approval gate for writes. Everything else on this page remains the
+> long-term vision for where the Tool System is headed, not a description
+> of what is registered today.
+
 Tools give MootOS abilities beyond conversation.
 
 A tool is a controlled function that the AI is allowed to use.

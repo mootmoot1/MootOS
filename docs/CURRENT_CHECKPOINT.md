@@ -111,7 +111,7 @@ Current durable domains/tables include:
 - runs
 - tasks
 
-There is no migration 5 on current `main`.
+There is no migration 5 on current `main`. Migration 5 (`tool_system`) exists only on the unmerged V0.2A branch described below.
 
 ## Current memory boundary
 
@@ -179,9 +179,46 @@ production claim.**
 No schema migration, no changes to chat/memory/task/run core logic, no new
 dependencies.
 
+## Development branch (not yet merged to `main`): `claude/motos-v0.2a-tool-foundation-u46ew4`
+
+This branch adds a V0.2A Tool Foundation on top of the merged V0.1 MVP.
+**Not merged to `main`, not yet production-verified — implementation
+status only, tracked here so it isn't mistaken for a production claim.**
+See `docs/TOOL_SYSTEM.md` for the architecture and ADR-027 for the decision
+record (including why this was built before Scheduler/Reminder v0.1,
+below).
+
+- Migration 5 (`tool_system`): `tool_name`/`tool_version` columns on
+  `runs`; new `tool_operations` table for frozen write-tool approvals.
+- Four registered tools: `projects.list`, `memory.search`, `tasks.list`
+  (read-only, auto-execute), `tasks.create` (internal-write, requires
+  explicit approval).
+- A centralized tool executor, a per-turn 5-call budget with duplicate- and
+  repeated-failure protection, and a frozen-operation approval state
+  machine with duplicate-approval and expiry safety.
+- `backend/main.py`'s `/chat` route now runs a bounded model-tool
+  conversation loop after the unchanged deterministic memory/Task command
+  dispatch; it falls back to the exact previous plain-text behavior when
+  there is nothing to gain from tool calling.
+- New authenticated API: `GET /tool-operations`,
+  `GET /tool-operations/{id}`, `POST /tool-operations/{id}/approve`,
+  `POST /tool-operations/{id}/reject`.
+- An inline chat approval card (`frontend/tools.css`, `frontend/app.js`)
+  and tool-aware labeling on the existing `/activity` Runs feed
+  (`frontend/activity.js`); no new page and no new Activity route.
+- Capability manifest (`backend/model_input.py`) now names exactly the
+  four registered tools and states that `tasks.create` never runs without
+  approval.
+- 100 new automated tests; all pre-existing V0.1 tests, including the
+  chat/Run integration tests that supply a minimal fake router, pass
+  unmodified.
+
 ## Proposed next feature
 
-The next proposed development area is **Scheduler / Reminder v0.1**.
+**Superseded by the branch above; kept for history.** The next proposed
+development area *was* **Scheduler / Reminder v0.1**, before ADR-027 moved
+the Tool Foundation ahead of it. It remains the next proposed capability
+after the Tool Foundation branch merges.
 
 Before implementation, the design should answer:
 

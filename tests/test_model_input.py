@@ -61,11 +61,67 @@ def test_capability_manifest_is_explicit_about_available_and_unavailable_actions
     assert "Live web search" in CAPABILITY_MANIFEST
     assert "Sending messages" in CAPABILITY_MANIFEST
     assert "Reservations, purchases" in CAPABILITY_MANIFEST
-    assert "Calendar access" in CAPABILITY_MANIFEST
-    assert "Deployments, repository changes" in CAPABILITY_MANIFEST
+    assert "Email, calendar access" in CAPABILITY_MANIFEST
+    assert "GitHub or other repository changes" in CAPABILITY_MANIFEST
     assert "Background work" in CAPABILITY_MANIFEST
     assert "Planning an action is not the same as having access" in CAPABILITY_MANIFEST
     assert "chat model does not directly click or invoke" in CAPABILITY_MANIFEST
+
+
+def test_capability_manifest_names_exactly_the_registered_v02a_tools():
+    """V0.2A: MootOS may truthfully claim only the tools actually registered."""
+    assert "projects.list, memory.search, and tasks.list run automatically" in CAPABILITY_MANIFEST
+    assert "tasks.create is registered as a write-capable tool" in CAPABILITY_MANIFEST
+    assert "You may not invent, assume, or ask MootOS to run any other tool name" in CAPABILITY_MANIFEST
+    assert "Never claim a write action" in CAPABILITY_MANIFEST
+
+
+def test_capability_manifest_tells_the_model_to_call_tasks_create_immediately():
+    """Live-testing regression: the model must call tasks.create as soon as
+    the request is clear and the title is known, not ask a chat
+    confirmation question first -- the Tool System's own approval UI is
+    what reviews the request, not a model-authored confirmation question."""
+    assert "call the tasks.create tool right away in that same turn" in CAPABILITY_MANIFEST
+    assert 'Do not ask a separate question such as "should I create this task?"' in CAPABILITY_MANIFEST
+
+
+def test_capability_manifest_explains_calling_the_tool_is_not_executing_it():
+    assert "Calling tasks.create does not mean the Task exists" in CAPABILITY_MANIFEST
+    assert (
+        "MootOS freezes the exact call and shows Moot a real Approve/Reject control"
+        in CAPABILITY_MANIFEST
+    )
+    assert "the Task is created only if Moot approves it there" in CAPABILITY_MANIFEST
+
+
+def test_capability_manifest_only_asks_for_genuinely_missing_information():
+    assert "ask only for that missing piece" in CAPABILITY_MANIFEST
+    assert "do not ask a blanket confirmation once you already have enough to call the tool" in CAPABILITY_MANIFEST
+
+
+def test_capability_manifest_forbids_inventing_optional_task_fields():
+    assert "Never invent, assume, guess, or default a due date" in CAPABILITY_MANIFEST
+    assert "never invent a due_at value" in CAPABILITY_MANIFEST
+    assert "never invent a project Moot did not name" in CAPABILITY_MANIFEST
+    assert "no description, priority, tag, or other field" in CAPABILITY_MANIFEST
+
+
+def test_capability_manifest_tells_model_to_omit_due_at_not_use_a_placeholder():
+    """Live-approval-testing regression: the model sent due_at: "none" as a
+    stand-in for "no due time," which passed old tool validation and froze
+    into a pending approval that could never execute."""
+    assert "omit due_at entirely from the call" in CAPABILITY_MANIFEST
+    assert '"none", "null", "unknown", "N/A"' in CAPABILITY_MANIFEST
+    assert "actual timezone-aware ISO 8601 datetime" in CAPABILITY_MANIFEST
+
+
+def test_conversation_guidance_does_not_conflict_with_immediate_tool_calling():
+    """The general "ask before an outside action" rule must not read as
+    telling the model to ask a confirmation question before calling a
+    registered tool -- that conflict was the root cause of the live bug."""
+    from backend.conversation_guidance import CONVERSATION_RULES
+
+    assert "Calling a registered internal tool is not an unreviewed outside action" in CONVERSATION_RULES
 
 
 def test_history_budget_drops_oldest_and_preserves_current_message_fully():

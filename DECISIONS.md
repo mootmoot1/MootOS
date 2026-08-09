@@ -286,6 +286,51 @@ Every version should leave the project in a working state.
 
 ---
 
+# Decision 011
+
+## Title
+
+Tool Foundation Before Scheduler/Reminders
+
+## Status
+
+Draft (branch `claude/motos-v0.2a-tool-foundation-u46ew4`, not merged to `main`)
+
+## Date
+
+August 2026
+
+## Decision
+
+MootOS V0.2A adds a small, explicit, fail-closed Tool System (registry,
+risk-classified permissions, centralized executor, call budget, Run
+audit trail, and a human-approval gate for any write) before building
+Scheduler/Reminder v0.1, even though the roadmap previously named the
+scheduler as the next feature after documentation synchronization.
+
+Exactly four tools are registered: `projects.list`, `memory.search`, and
+`tasks.list` (read-only, auto-execute), and `tasks.create`
+(internal-write, requires explicit human approval of the model's exact
+request). No external service, calendar, email, GitHub, filesystem, or
+shell access was added.
+
+## Reason
+
+Real V0.1 usage showed that a scheduler/reminder loop is only useful once
+MootOS can already take some controlled action safely — a reminder that
+fires into a system with no action boundary just becomes another chat
+message. A working Tool System is also the shared prerequisite most other
+planned integrations (Calendar, Gmail, GitHub, files, studio work, and
+eventually reminders themselves) will need, so building it first means
+those integrations plug into one already-proven safety boundary instead of
+each inventing their own permission and approval logic.
+
+See ADR-027 for the full architecture and `ROADMAP.md`'s "Immediate
+sequence" section, which keeps the original scheduler-first reasoning
+intact rather than deleting it.
+
+---
+
 # Future Decisions
 
 As MootOS grows, every major architectural decision should be added to this document.

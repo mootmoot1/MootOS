@@ -147,3 +147,10 @@ Any future capability addition must update all of the following in the same PR:
 
 Do not update the manifest to advertise a planned feature before the running
 application can actually perform it.
+
+**V0.2A (branch `claude/motos-v0.2a-tool-foundation-u46ew4`, not yet merged):**
+the manifest now names the exact four registered Tool System tools
+(`docs/TOOL_SYSTEM.md`), states that `tasks.create` never runs without
+explicit approval, and instructs the model that it may not invent or assume
+any other tool name exists. `tests/test_model_input.py` asserts this
+wording directly.

@@ -26,8 +26,9 @@ REQUIRED_COLUMNS = {
     "memories": {"id", "content", "project", "memory_type", "created_at", "status", "updated_at", "replaces_memory_id", "superseded_by_id"},
     "conversations": {"id", "title", "project", "created_at", "updated_at"},
     "messages": {"id", "conversation_id", "role", "content", "provider", "model", "created_at"},
-    "runs": {"id", "run_type", "status", "conversation_id", "user_message_id", "assistant_message_id", "provider", "model", "started_at", "finished_at", "duration_ms", "error_class", "input_tokens", "output_tokens", "cost_usd", "data_exposure"},
+    "runs": {"id", "run_type", "status", "conversation_id", "user_message_id", "assistant_message_id", "provider", "model", "tool_name", "tool_version", "started_at", "finished_at", "duration_ms", "error_class", "input_tokens", "output_tokens", "cost_usd", "data_exposure"},
     "tasks": {"id", "title", "project", "status", "due_at", "created_at", "updated_at", "completed_at", "cancelled_at"},
+    "tool_operations": {"id", "tool_name", "tool_version", "status", "arguments_json", "conversation_id", "project", "created_at", "updated_at", "expires_at", "decided_at", "result_run_id", "result_reference", "error_class"},
     "schema_migrations": {"version", "name", "applied_at"},
 }
 
@@ -109,11 +110,59 @@ def _migration_004_tasks(connection: sqlite3.Connection) -> None:
     connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_project_status_due_at ON tasks (project, status, due_at, created_at DESC)")
 
 
+def _migration_005_tool_system(connection: sqlite3.Connection) -> None:
+    """Add tool identity to Runs and a frozen tool-operation approval table.
+
+    Tool identity intentionally lives in new ``tool_name``/``tool_version``
+    columns rather than reusing ``provider``/``model``. Those columns mean
+    "AI model provider used to generate this Run"; a tool is not a model
+    provider, and overloading the columns would make Run rows misleading.
+    """
+    existing_run_columns = {
+        str(row["name"]) for row in connection.execute("PRAGMA table_info(runs)").fetchall()
+    }
+    if "tool_name" not in existing_run_columns:
+        connection.execute("ALTER TABLE runs ADD COLUMN tool_name TEXT")
+    if "tool_version" not in existing_run_columns:
+        connection.execute("ALTER TABLE runs ADD COLUMN tool_version TEXT")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_runs_tool_name_started_at ON runs (tool_name, started_at DESC)"
+    )
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS tool_operations (
+            id TEXT PRIMARY KEY,
+            tool_name TEXT NOT NULL,
+            tool_version TEXT,
+            status TEXT NOT NULL CHECK (
+                status IN ('pending', 'executing', 'succeeded', 'rejected', 'failed', 'expired')
+            ),
+            arguments_json TEXT NOT NULL,
+            conversation_id TEXT,
+            project TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            expires_at TEXT,
+            decided_at TEXT,
+            result_run_id TEXT,
+            result_reference TEXT,
+            error_class TEXT
+        )
+    """)
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tool_operations_status_created_at ON tool_operations (status, created_at DESC)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tool_operations_conversation_id ON tool_operations (conversation_id)"
+    )
+
+
 MIGRATIONS = (
     Migration(1, "initial_schema", _migration_001_initial_schema),
     Migration(2, "memory_lifecycle", _migration_002_memory_lifecycle),
     Migration(3, "model_runs", _migration_003_model_runs),
     Migration(4, "tasks", _migration_004_tasks),
+    Migration(5, "tool_system", _migration_005_tool_system),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -143,6 +192,20 @@ def _verify_schema(connection: sqlite3.Connection) -> None:
     invalid_run = connection.execute("""SELECT run_type, status, data_exposure FROM runs WHERE run_type NOT IN ('model', 'tool') OR status NOT IN ('started', 'succeeded', 'failed') OR (data_exposure IS NOT NULL AND data_exposure NOT IN ('local', 'model_provider', 'tool_external')) LIMIT 1""").fetchone()
     if invalid_run is not None:
         raise RuntimeError("Database schema is incompatible: runs contains unsupported run metadata")
+    invalid_tool_run = connection.execute(
+        "SELECT id FROM runs WHERE run_type = 'tool' AND (tool_name IS NULL OR trim(tool_name) = '') LIMIT 1"
+    ).fetchone()
+    if invalid_tool_run is not None:
+        raise RuntimeError("Database schema is incompatible: a tool run is missing tool_name")
+    invalid_operation = connection.execute("""
+        SELECT status
+        FROM tool_operations
+        WHERE status NOT IN ('pending', 'executing', 'succeeded', 'rejected', 'failed', 'expired')
+           OR length(trim(tool_name)) = 0
+        LIMIT 1
+    """).fetchone()
+    if invalid_operation is not None:
+        raise RuntimeError("Database schema is incompatible: tool_operations contains unsupported metadata")
     invalid_task = connection.execute("""
         SELECT status
         FROM tasks

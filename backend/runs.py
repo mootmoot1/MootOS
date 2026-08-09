@@ -29,6 +29,8 @@ RUN_COLUMNS = """
     assistant_message_id,
     provider,
     model,
+    tool_name,
+    tool_version,
     started_at,
     finished_at,
     duration_ms,
@@ -103,6 +105,8 @@ def start_model_run(
         "assistant_message_id": None,
         "provider": provider,
         "model": model,
+        "tool_name": None,
+        "tool_version": None,
         "started_at": started_at,
         "finished_at": None,
         "duration_ms": None,
@@ -118,19 +122,131 @@ def start_model_run(
             """
             INSERT INTO runs (
                 id, run_type, status, conversation_id, user_message_id,
-                assistant_message_id, provider, model, started_at, finished_at,
-                duration_ms, error_class, input_tokens, output_tokens, cost_usd,
-                data_exposure
+                assistant_message_id, provider, model, tool_name, tool_version,
+                started_at, finished_at, duration_ms, error_class, input_tokens,
+                output_tokens, cost_usd, data_exposure
             ) VALUES (
                 :id, :run_type, :status, :conversation_id, :user_message_id,
-                :assistant_message_id, :provider, :model, :started_at, :finished_at,
-                :duration_ms, :error_class, :input_tokens, :output_tokens, :cost_usd,
-                :data_exposure
+                :assistant_message_id, :provider, :model, :tool_name, :tool_version,
+                :started_at, :finished_at, :duration_ms, :error_class, :input_tokens,
+                :output_tokens, :cost_usd, :data_exposure
             )
             """,
             run,
         )
     return run
+
+
+def start_tool_run(
+    *,
+    conversation_id: Optional[str],
+    tool_name: str,
+    tool_version: Optional[str],
+    data_exposure: Optional[str] = DATA_EXPOSURE_LOCAL,
+) -> dict[str, Any]:
+    """Persist a started tool Run before a registered tool executor runs.
+
+    Every attempted tool execution gets a Run row, including ones that turn
+    out to reference an unregistered tool name -- this is what lets the
+    audit trail show a model repeatedly requesting a nonexistent tool,
+    instead of that misuse being invisible. Tool identity is intentionally
+    ``tool_name``/``tool_version`` rather than ``provider``/``model``, which
+    describe the AI model provider, not a tool.
+    """
+    if data_exposure is not None and data_exposure not in VALID_DATA_EXPOSURES:
+        raise RunValidationError("Unsupported data exposure classification")
+    if not tool_name or not tool_name.strip():
+        raise RunValidationError("A tool Run requires a tool name")
+
+    started_at = _utc_now().isoformat()
+    run = {
+        "id": str(uuid.uuid4()),
+        "run_type": RUN_TYPE_TOOL,
+        "status": RUN_STATUS_STARTED,
+        "conversation_id": conversation_id,
+        "user_message_id": None,
+        "assistant_message_id": None,
+        "provider": None,
+        "model": None,
+        "tool_name": tool_name,
+        "tool_version": tool_version,
+        "started_at": started_at,
+        "finished_at": None,
+        "duration_ms": None,
+        "error_class": None,
+        "input_tokens": None,
+        "output_tokens": None,
+        "cost_usd": None,
+        "data_exposure": data_exposure,
+    }
+    with database_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            """
+            INSERT INTO runs (
+                id, run_type, status, conversation_id, user_message_id,
+                assistant_message_id, provider, model, tool_name, tool_version,
+                started_at, finished_at, duration_ms, error_class, input_tokens,
+                output_tokens, cost_usd, data_exposure
+            ) VALUES (
+                :id, :run_type, :status, :conversation_id, :user_message_id,
+                :assistant_message_id, :provider, :model, :tool_name, :tool_version,
+                :started_at, :finished_at, :duration_ms, :error_class, :input_tokens,
+                :output_tokens, :cost_usd, :data_exposure
+            )
+            """,
+            run,
+        )
+    return run
+
+
+def finish_tool_run_success(run_id: str) -> dict[str, Any]:
+    """Finalize one started tool Run after its executor completes successfully.
+
+    Tool Runs never carry token/cost metrics or linked message IDs -- those
+    are model-Run concepts. Keeping this as its own small function (instead
+    of overloading ``finish_model_run_success``) keeps a tool Run's shape
+    honest about what actually happened.
+    """
+    finished_at = _utc_now()
+    with database_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        run = _get_run(connection, run_id)
+        if run is None:
+            raise RunNotFoundError("Run not found")
+        if run["status"] != RUN_STATUS_STARTED:
+            raise RunAlreadyFinishedError("Run is already finished")
+
+        updated = connection.execute(
+            """
+            UPDATE runs
+            SET status = ?, finished_at = ?, duration_ms = ?, error_class = NULL
+            WHERE id = ? AND status = ?
+            """,
+            (
+                RUN_STATUS_SUCCEEDED,
+                finished_at.isoformat(),
+                _duration_ms(run["started_at"], finished_at),
+                run_id,
+                RUN_STATUS_STARTED,
+            ),
+        )
+        if updated.rowcount != 1:
+            raise RunAlreadyFinishedError("Run is already finished")
+        saved = _get_run(connection, run_id)
+        if saved is None:
+            raise RuntimeError("Run completion did not persist")
+        return saved
+
+
+def finish_tool_run_failure(run_id: str, error: BaseException) -> dict[str, Any]:
+    """Finalize one started tool Run without storing private exception text.
+
+    Tool and model Run failures are recorded identically (sanitized error
+    class only), so this intentionally reuses ``finish_model_run_failure``
+    rather than duplicating the same logic under a different name.
+    """
+    return finish_model_run_failure(run_id, error)
 
 
 def finish_model_run_success(

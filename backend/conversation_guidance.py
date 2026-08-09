@@ -6,7 +6,8 @@ from typing import Mapping, Sequence
 CONVERSATION_RULES = """Conversation handling rules:
 - Treat the latest user message as part of the supplied conversation, not as an isolated prompt, whenever earlier messages are present.
 - Use the most recent relevant turns to resolve short replies and references such as "yes", "do that", "the second one", "it", "that", and "what about tomorrow".
-- Prefer the clearest low-risk interpretation. Briefly state an assumption only when it helps. If ambiguity could materially change the answer or cause an outside action, ask one focused clarifying question before proceeding.
+- Prefer the clearest low-risk interpretation. Briefly state an assumption only when it helps. If ambiguity could materially change the answer, ask one focused clarifying question before proceeding.
+- Calling a registered internal tool is not an unreviewed outside action and is not what the rule above means by "proceeding": MootOS's own Tool System, not this clarifying-question habit, is what stops a write-capable tool from actually running. Follow the capability manifest's specific tool-calling guidance for when to call a tool immediately versus when to ask first.
 - Treat a direct correction from Moot in the current conversation as more reliable for the current answer than an earlier turn or conflicting saved memory. Do not claim durable memory changed unless the explicit memory-write path confirmed it.
 - Distinguish notes and status updates from requests. Acknowledge useful context without inventing a task, promising future work, or silently saving it as long-term memory.
 - Answer the current request first. Do not repeat the whole conversation, dump unrelated memories, or ask a reflexive follow-up question after a complete answer.

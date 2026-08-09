@@ -39,12 +39,16 @@ Write operations that require serialized lifecycle changes commonly use `BEGIN I
 
 `backend/migrations.py` is authoritative.
 
-Current ordered migrations:
+Current ordered migrations on `main`:
 
 1. `initial_schema`
 2. `memory_lifecycle`
 3. `model_runs`
 4. `tasks`
+
+**V0.2A (branch `claude/motos-v0.2a-tool-foundation-u46ew4`, not yet merged to `main`)** adds:
+
+5. `tool_system` — adds `tool_name`/`tool_version` columns to `runs`, and a new `tool_operations` table. See `docs/TOOL_SYSTEM.md`.
 
 Startup migrations run in order, reject gaps/newer unsupported schemas, verify required tables/columns and important constraints, and roll back on failure.
 
@@ -82,7 +86,22 @@ Memory states are `active`, `superseded`, and `archived`.
 
 Added by migration 3. Stores execution/audit metadata for model/tool-type Runs, including status, timestamps, provider/model, optional linked message IDs, sanitized failure class, optional usage/cost metadata, and data-exposure classification.
 
-Run rows intentionally do not duplicate prompts or model responses.
+Run rows intentionally do not duplicate prompts or model responses, and (V0.2A) never duplicate tool arguments.
+
+**V0.2A (branch only):** migration 5 adds nullable `tool_name`/`tool_version` columns, populated only on `run_type = 'tool'` rows. `provider`/`model` remain model-provider-only fields; they are not repurposed for tool identity. See `docs/TOOL_SYSTEM.md` §8 and ADR-027.
+
+### `tool_operations` (V0.2A, branch only — not yet merged to `main`)
+
+Added by migration 5. Freezes one model-selected write-tool request for human approval:
+
+- id, `tool_name`, `tool_version`
+- `status` (`pending`, `executing`, `succeeded`, `rejected`, `failed`, `expired`)
+- `arguments_json` — the already-schema-validated tool arguments, frozen at creation; this is the one place the Tool System *does* durably store tool arguments, by design, so a human can review exactly what would run
+- `conversation_id`, `project`
+- `created_at`, `updated_at`, `expires_at`, `decided_at`
+- `result_run_id`, `result_reference`, `error_class`
+
+See `docs/TOOL_SYSTEM.md` §9 for the state machine and duplicate/expiry safety guarantees.
 
 ### `tasks`
 
@@ -149,7 +168,7 @@ The design must explicitly address:
 - indexes for efficiently finding due pending rows
 - test clocks rather than waiting on wall time
 
-Whether that belongs in a separate reminder/schedule table or a carefully bounded extension must be decided before migration 5.
+Whether that belongs in a separate reminder/schedule table or a carefully bounded extension must be decided before its own migration. (Migration 5 was used by the V0.2A Tool System, ADR-027 — the scheduler's migration will be the next one after whichever of these two branches merges first.)
 
 ## 10. Scaling direction
 

@@ -246,3 +246,66 @@ def test_settings_status_response_has_every_field_settings_js_reads(clean_db, cl
     row = response.json()["data"]
     for field in ("provider", "model", "schema_version", "app_version"):
         assert field in row
+
+
+# ---------------------------------------------------------------------------
+# app.js -> /chat approval-required response, and the approval card it builds
+# ---------------------------------------------------------------------------
+# sendMessage() reads: result.approval_required, result.operation.id,
+#   result.operation.tool_name, result.operation.arguments (object of
+#   key/value pairs rendered by addApprovalCard()), result.assistant_message.content
+# The approval card then calls:
+#   apiRequest(`/tool-operations/${id}/approve`, { method: "POST" })
+#   apiRequest(`/tool-operations/${id}/reject`, { method: "POST" })
+# and reads updated.status from the response.
+
+
+def test_chat_approval_required_response_has_every_field_app_js_reads(clean_db, client, monkeypatch):
+    from backend.model_router import ModelResponse
+    from backend.tool_types import ToolRequest
+
+    class _Turn:
+        def __init__(self, kind, text=None, tool_requests=None, state=None):
+            self.kind = kind
+            self.text = text
+            self.tool_requests = tool_requests or []
+            self.provider = "fake"
+            self.model = "fake-model"
+            self.state = state
+
+    class _Router:
+        provider_name = "fake"
+        providers = {"fake": type("Provider", (), {"model": "fake-model"})()}
+
+        def ensure_ready(self):
+            return None
+
+        def supports_tools(self):
+            return True
+
+        def generate(self, messages, instructions):
+            return ModelResponse(text="unused", provider="fake", model="fake-model")
+
+        def generate_with_tools(self, messages, instructions, tools):
+            return _Turn(
+                "tool_calls",
+                tool_requests=[
+                    ToolRequest(name="tasks.create", arguments={"title": "Call Mike"}, call_id="c1")
+                ],
+                state=object(),
+            )
+
+    monkeypatch.setattr("backend.main.get_model_router", lambda: _Router())
+
+    response = client.post("/chat", json={"message": "make me a task to call Mike"})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["approval_required"] is True
+    assert "id" in data["operation"]
+    assert "tool_name" in data["operation"]
+    assert isinstance(data["operation"]["arguments"], dict)
+    assert "content" in data["assistant_message"]
+
+    approve_response = client.post(f"/tool-operations/{data['operation']['id']}/approve")
+    assert approve_response.json()["data"]["status"] == "succeeded"
