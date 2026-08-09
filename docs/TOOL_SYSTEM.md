@@ -1,6 +1,6 @@
 # MootOS Tool System (V0.2A, extended in V0.3A)
 
-**Status:** V0.2A implemented and merged to `main`. Live-verified on Railway/OpenAI, including a successful frozen approval → execution → persisted Task. V0.3A's capability-aware metadata and generated catalog/manifest (Sec16) are implemented and merged on top of it.
+**Status:** V0.2A implemented and merged to `main`. Live-verified on Railway/OpenAI, including a successful frozen approval → execution → persisted Task. V0.3A's capability-aware metadata and generated catalog/manifest (Sec16) are implemented on branch `claude/v0.3a-capability-aware-tool-system`, pending merge.
 **Schema:** `5 — tool_system` (V0.3A added no migration -- its metadata lives on `ToolDefinition` in code, not in the database.)
 **Applies to:** the Tool System added in V0.2A on top of the V0.1 foundation (PR #34), plus the V0.3A capability catalog described in Sec16.
 
@@ -75,6 +75,13 @@ idempotent       Optional[bool] = None    None only for undocumented test fixtur
 limitations      str = ""                 short, truthful limitation statement
 depends_on       tuple[str, ...] = ()     other tool names this one depends on
 ```
+
+Production `ToolDefinition`s are expected to declare the V0.3A descriptive
+metadata explicitly and truthfully (see §16); the permissive empty/`None`
+defaults above exist primarily so legacy and test fixtures can stay
+lightweight, not as an acceptable state for a real registered tool. This is
+a documentation expectation only — nothing in `backend/tool_registry.py`
+or `backend/tool_executor.py` currently enforces it.
 
 `executor` is a plain Python callable selected by direct reference at
 registration time (see §7) — never resolved from a model-supplied string,
@@ -476,9 +483,10 @@ sequencing decision.
 
 ## 16. V0.3A — Capability-aware metadata and the generated catalog
 
-**Status:** implemented and merged. Schema unchanged (`5 — tool_system`) —
-everything below lives on `ToolDefinition` in code, never in the database.
-See `docs/CAPABILITY_ARCHITECTURE.md` and ADR-028/ADR-029 for the decision
+**Status:** implemented on branch `claude/v0.3a-capability-aware-tool-system`,
+pending merge. Schema unchanged (`5 — tool_system`) — everything below
+lives on `ToolDefinition` in code, never in the database. See
+`docs/CAPABILITY_ARCHITECTURE.md` and ADR-028/ADR-029 for the decision
 record this section implements.
 
 **Goal.** Make MootOS able to truthfully answer "what can you currently

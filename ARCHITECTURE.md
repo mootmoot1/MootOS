@@ -374,7 +374,8 @@ The model router should record which model handled important requests and how mu
 > ADR-034. It keeps the Tool Registry below as the only executable source
 > of truth and adds a Capability layer (a semantic grouping of tools,
 > backed by them, never executing on its own) above it. **V0.3A is
-> implemented and merged** — `ToolDefinition` now carries capability/
+> implemented on branch `claude/v0.3a-capability-aware-tool-system`,
+> pending merge** — `ToolDefinition` now carries capability/
 > side-effect/idempotency/limitation metadata, and the model-facing
 > capability manifest is generated from the live registry instead of
 > hand-maintained (`docs/TOOL_SYSTEM.md` §16, ADR-028/ADR-029). V0.3B

@@ -2,7 +2,8 @@
 
 **Status:** Locked architecture for the next major phase. Recorded August 9,
 2026. This document is a plan, not an implementation record. **V0.3A
-(Capability-Aware Tool System) is now implemented and merged** — see
+(Capability-Aware Tool System) is implemented on branch
+`claude/v0.3a-capability-aware-tool-system`, pending merge** — see
 `docs/TOOL_SYSTEM.md` §16 for what exists in code. V0.3B–V0.3E and
 V0.4A–V0.4D remain plan only, nothing implemented.
 **Applies to:** design and build order for everything after V0.2A.
@@ -101,11 +102,12 @@ manifest is never allowed to assert a capability the registry doesn't back.
 
 ### V0.3A — Capability-Aware Tool System
 
-**Implemented and merged.** See `docs/TOOL_SYSTEM.md` §16 for the concrete
-result (`backend/capability_catalog.py`, extended `ToolDefinition`) and
+**Implemented on branch `claude/v0.3a-capability-aware-tool-system`,
+pending merge.** See `docs/TOOL_SYSTEM.md` §16 for the concrete result
+(`backend/capability_catalog.py`, extended `ToolDefinition`) and
 ADR-028/ADR-029 for the decisions it carries out. Everything below is the
-plan this delivered against; it is not re-describing something still
-pending.
+plan this implementation follows — the design is settled; only the merge
+is still pending.
 
 **Purpose:** make MootOS accurately understand what it already has.
 

@@ -3,8 +3,9 @@
 **Last updated:** August 9, 2026  
 **Repository:** `mootmoot1/MootOS`  
 **Default branch:** `main`  
-**Current release:** Version 0.1 foundation plus the V0.2A Tool Foundation and V0.3A Capability-Aware Tool System  
-**Current schema:** `5 — tool_system` (V0.3A added no migration)
+**Current release on `main`:** Version 0.1 foundation plus the V0.2A Tool Foundation  
+**Current schema on `main`:** `5 — tool_system`  
+**Also implemented, pending merge:** V0.3A Capability-Aware Tool System, on branch `claude/v0.3a-capability-aware-tool-system` (adds no migration -- schema stays `5 — tool_system` once merged)
 
 ## Current production topology
 
@@ -31,9 +32,10 @@ requires explicit human approval), a centralized executor, a per-turn
 on Railway/OpenAI, including a successful frozen approval → execution →
 persisted Task.
 
-### V0.3A Capability-Aware Tool System — merged
+### V0.3A Capability-Aware Tool System — implemented on branch, pending merge
 
-`docs/TOOL_SYSTEM.md` §16, ADR-028, ADR-029. `ToolDefinition` extended
+Branch `claude/v0.3a-capability-aware-tool-system`. `docs/TOOL_SYSTEM.md`
+§16, ADR-028, ADR-029. `ToolDefinition` extended
 with `capabilities`/`side_effects`/`idempotent`/`limitations`/
 `depends_on`; all four V0.2A tools declare it truthfully. New
 `backend/capability_catalog.py` derives a non-executable capability index
