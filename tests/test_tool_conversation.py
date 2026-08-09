@@ -108,6 +108,37 @@ def test_falls_back_to_plain_generate_when_registry_empty(clean_db):
     assert router.calls == 1
 
 
+def test_an_explicitly_empty_registry_is_never_silently_replaced_by_the_default_one(clean_db):
+    """V0.3A regression: an empty ``ToolRegistry()`` is falsy (``__len__`` ==
+    0), so ``registry or get_tool_registry()`` previously substituted the
+    real process-wide default registry for it -- an intentionally empty
+    registry would silently gain the four real V0.2A tools. Fixed to
+    ``registry if registry is not None else get_tool_registry()``.
+
+    A router that *does* support tool calling isolates this: the only
+    reason this call could still fall back to plain generate() is the
+    registry genuinely being treated as empty, not the router lacking tool
+    support (unlike the test above, which uses PlainFakeRouter for that
+    other reason)."""
+    from backend.tool_registry import ToolRegistry
+
+    router = ScriptedToolRouter([_FakeTurn(kind="final", text="should not be reached")])
+
+    outcome = run_tool_conversation(
+        router=router,
+        conversation_id=None,
+        project=None,
+        messages=[{"role": "user", "content": "hi"}],
+        instructions="x",
+        registry=ToolRegistry(),
+    )
+
+    assert outcome.kind == "final"
+    assert outcome.response.text == "should not be used"  # ScriptedToolRouter.generate()'s fixed text
+    assert router.plain_generate_calls == 1
+    assert router.calls == 0  # generate_with_tools() was never reached
+
+
 def test_falls_back_to_plain_generate_when_router_lacks_tool_support(clean_db):
     router = PlainFakeRouter("hello")
     outcome = run_tool_conversation(

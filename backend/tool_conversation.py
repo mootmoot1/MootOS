@@ -157,7 +157,7 @@ def run_tool_conversation(
     there is nothing to gain from tool calling: an empty registry, or a
     provider that does not implement it.
     """
-    active_registry = registry or get_tool_registry()
+    active_registry = registry if registry is not None else get_tool_registry()
     catalog = active_registry.catalog()
 
     if not catalog or not _router_supports_tools(router):

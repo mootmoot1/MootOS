@@ -67,7 +67,7 @@ def record_rejected_tool_attempt(
     only tool identity, data-exposure classification, and the sanitized
     exception class name (via ``finish_tool_run_failure``).
     """
-    active_registry = registry or get_tool_registry()
+    active_registry = registry if registry is not None else get_tool_registry()
     tool_version: Optional[str] = None
     data_exposure = DATA_EXPOSURE_LOCAL
     try:
@@ -103,7 +103,7 @@ def execute_tool(
     three carry only safe, sanitized messages; the underlying exception's
     class name (never its text) is the only thing persisted to the Run.
     """
-    active_registry = registry or get_tool_registry()
+    active_registry = registry if registry is not None else get_tool_registry()
 
     try:
         definition = active_registry.get(tool_name)

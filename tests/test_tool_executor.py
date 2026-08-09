@@ -165,6 +165,24 @@ def test_unknown_tool_fails_closed_and_still_logs_a_run(clean_db):
     assert runs[0]["error_class"] == "ToolNotFoundError"
 
 
+def test_an_explicitly_empty_registry_is_never_silently_replaced_by_the_default_one(clean_db):
+    """V0.3A regression: an empty ``ToolRegistry()`` is falsy (``__len__``
+    == 0), so ``registry or get_tool_registry()`` previously substituted
+    the real process-wide default registry -- a real, registered tool such
+    as ``tasks.list`` would silently become reachable through a registry
+    explicitly built to be empty. Fixed to ``registry if registry is not
+    None else get_tool_registry()``."""
+    registry = ToolRegistry()
+
+    with pytest.raises(ToolNotFoundError):
+        execute_tool(
+            tool_name="tasks.list",
+            arguments={},
+            context=ToolExecutionContext(),
+            registry=registry,
+        )
+
+
 def test_invalid_arguments_are_rejected_before_executor_runs(clean_db):
     calls = []
 
