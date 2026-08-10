@@ -361,9 +361,10 @@ The model router should record which model handled important requests and how mu
 > **Implementation status (V0.2A):** a first, small version of this system
 > is implemented and merged to `main`, live-verified on Railway/OpenAI —
 > see `docs/TOOL_SYSTEM.md` for the concrete architecture and ADR-027 for
-> the decision record. It registers exactly four internal tools
+> the decision record. V0.2A itself registered exactly four internal tools
 > (`projects.list`, `memory.search`, `tasks.list`, `tasks.create`) behind a
-> fail-closed risk/permission model and a human-approval gate for writes.
+> fail-closed risk/permission model and a human-approval gate for writes;
+> later phases add more through the same boundary (see below).
 > Everything else on this page remains the long-term vision for where the
 > Tool System is headed, not a description of what is registered today.
 >
@@ -371,19 +372,23 @@ The model router should record which model handled important requests and how mu
 > describes what it has, reasons about capability gaps, and — much later,
 > human-approved at every step — builds new capabilities itself, is
 > recorded in `docs/CAPABILITY_ARCHITECTURE.md` and ADR-028 through
-> ADR-034. It keeps the Tool Registry below as the only executable source
+> ADR-035. It keeps the Tool Registry below as the only executable source
 > of truth and adds a Capability layer (a semantic grouping of tools,
 > backed by them, never executing on its own) above it. **V0.3A is
 > implemented and merged** — `ToolDefinition` now carries capability/
 > side-effect/idempotency/limitation metadata, and the model-facing
 > capability manifest is generated from the live registry instead of
 > hand-maintained (`docs/TOOL_SYSTEM.md` §16, ADR-028/ADR-029). **V0.3B
-> (structured gap reasoning) is implemented on branch
-> `claude/v0.3b-structured-gap-reasoning`, pending merge** —
+> (structured gap reasoning) is implemented and merged** —
 > `backend/gap_reasoning.py` turns a goal into a structured, audited Gap
 > Report without executing anything (`docs/GAP_REASONING.md`, ADR-030).
-> V0.3C onward remain plan only — see that document before extending
-> further.
+> **V0.3C (narrow self-inspection + read-only web awareness) is
+> implemented on branch `claude/v0.3c-self-inspection-web-awareness`,
+> pending merge** — three read-only tools let MootOS describe its own
+> architecture from curated sources and search the public web, treating
+> retrieved content as untrusted data (`docs/SELF_INSPECTION.md`,
+> `docs/WEB_AWARENESS.md`, ADR-035). V0.3D onward remain plan only — see
+> that document before extending further.
 
 Tools give MootOS abilities beyond conversation.
 

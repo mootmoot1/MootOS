@@ -1,7 +1,6 @@
 # MootOS Structured Gap Reasoning (V0.3B)
 
-**Status:** Implemented on branch `claude/v0.3b-structured-gap-reasoning`.
-Not merged to `main`. Not yet production-verified.
+**Status:** Implemented and merged to `main`. Not yet production-verified.
 **Schema:** unchanged (`5 — tool_system`) — V0.3B added no migration.
 **Applies to:** the gap-reasoning layer added in V0.3B on top of the
 merged V0.3A Capability-Aware Tool System.
@@ -243,6 +242,34 @@ was explicitly requested, and adding one is a separate product decision
 natural-language answer layer looks like) that belongs to a later,
 deliberate integration pass — not something to fold into the reasoning
 engine itself.
+
+**Still true after V0.3C, deliberately.** Live testing confirmed the
+practical consequence: `analyze_goal()` is never invoked by normal chat, so
+asking MootOS "could you organize my computer?" produces an ordinary model
+answer rather than a verified Gap Report. V0.3C did not change this —
+`backend/gap_reasoning.py` still has no caller outside its own tests, and
+no locked ADR requires chat invocation at this phase.
+
+The recommended eventual integration, when it is taken up as its own
+scoped change:
+
+- **Trigger narrowly, not on every turn.** Gap analysis costs a second
+  model round-trip and is only meaningful for capability-shaped requests
+  ("can you…", "I want you to be able to…"). Running it on every message
+  would double latency and cost for no benefit.
+- **Prefer an explicit surface first.** The lowest-risk version is a
+  registered read-only tool (e.g. `self.gap_analysis`) that the model
+  calls when a request is genuinely about MootOS's own abilities. That
+  reuses the existing budget, audit, and result-channel machinery and
+  requires no new chat-pipeline branch.
+- **Keep the report authoritative over the model's prose.** Whatever
+  triggers it, the answer the user sees must be derived from the
+  `GapReport`'s verified fields, not re-improvised — otherwise the
+  deterministic verification this whole layer exists for is discarded at
+  the last step.
+- **Do not let it gate execution.** A Gap Report stays advisory (ADR-030);
+  it must never become a precondition or an authorization for running a
+  tool.
 
 ## 9. Out of scope for V0.3B
 
