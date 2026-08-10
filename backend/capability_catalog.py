@@ -44,6 +44,8 @@ CAPABILITY_LABELS: dict[str, str] = {
     "projects.view": "View MootOS projects",
     "memory.recall": "Search saved long-term memory",
     "tasks.manage": "View and create MootOS Tasks",
+    "self.inspect": "Inspect MootOS's own architecture and current capability state",
+    "web.current_information": "Search the public web for current information",
 }
 
 

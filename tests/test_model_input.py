@@ -81,7 +81,10 @@ def test_capability_manifest_names_exactly_the_registered_v03a_tools():
     registered, and the claim is generated from the live registry, not a
     hand-maintained list -- see tests/test_capability_catalog.py for the
     dynamic add/remove/hallucination-prevention proof of that."""
-    assert "memory.search, projects.list, and tasks.list run automatically" in CAPABILITY_MANIFEST
+    # Read-only tools are named in sorted order by the generator; V0.3C
+    # added self.architecture/self.state (and web.search when configured).
+    assert "memory.search, projects.list, self.architecture, self.state" in CAPABILITY_MANIFEST
+    assert "run automatically and only read existing MootOS data" in CAPABILITY_MANIFEST
     assert "tasks.create is registered as a write-capable tool" in CAPABILITY_MANIFEST
     assert "You may not invent, assume, or ask MootOS to run any other tool name" in CAPABILITY_MANIFEST
     assert "Never claim a write action" in CAPABILITY_MANIFEST

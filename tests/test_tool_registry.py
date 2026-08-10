@@ -74,15 +74,35 @@ def test_list_definitions_is_deterministically_ordered():
     assert [d.name for d in registry.list_definitions()] == ["a.tool", "b.tool"]
 
 
-def test_default_registry_registers_exactly_the_four_reference_tools():
-    registry = build_default_registry()
+def test_default_registry_registers_exactly_the_expected_tools(monkeypatch):
+    """The default registry is an explicit, closed set -- never discovery.
 
-    assert {d.name for d in registry.list_definitions()} == {
+    V0.3C added self.state/self.architecture (always registered) and
+    web.search (registered only when a search service is configured, so an
+    unconfigured deployment never advertises it -- see backend/tools_web.py).
+    Both configurations are asserted exactly, so an accidentally-registered
+    extra tool fails here.
+    """
+    from backend.web_connector import SEARCH_API_KEY_VARIABLE
+
+    v02a_and_self_inspection = {
         "projects.list",
         "memory.search",
         "tasks.list",
         "tasks.create",
+        "self.state",
+        "self.architecture",
     }
+
+    monkeypatch.delenv(SEARCH_API_KEY_VARIABLE, raising=False)
+    unconfigured = build_default_registry()
+    assert {d.name for d in unconfigured.list_definitions()} == v02a_and_self_inspection
+
+    monkeypatch.setenv(SEARCH_API_KEY_VARIABLE, "test-key")
+    configured = build_default_registry()
+    assert {d.name for d in configured.list_definitions()} == (
+        v02a_and_self_inspection | {"web.search"}
+    )
 
 
 def test_get_tool_registry_returns_a_stable_singleton():

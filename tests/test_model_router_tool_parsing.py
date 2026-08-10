@@ -26,6 +26,11 @@ from backend.tool_registry import get_tool_registry
 # OpenAI function names: letters, digits, underscores, hyphens.
 OPENAI_FUNCTION_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
+# Dotted internal names that are always registered, across every
+# configuration. The provider-boundary tests below derive the rest from the
+# live registry rather than hard-coding a count, so adding a tool (V0.3C
+# added self.state/self.architecture, and web.search when configured) does
+# not require editing an unrelated encoding test.
 REFERENCE_TOOL_NAMES = ("projects.list", "memory.search", "tasks.list", "tasks.create")
 
 
@@ -57,7 +62,7 @@ def test_each_reference_tool_name_round_trips_through_encode_and_decode(internal
 def test_encode_decode_round_trips_all_currently_registered_tools():
     provider = _provider()
     definitions = get_tool_registry().list_definitions()
-    assert {d.name for d in definitions} == set(REFERENCE_TOOL_NAMES)
+    assert set(REFERENCE_TOOL_NAMES) <= {d.name for d in definitions}
     for definition in definitions:
         encoded = provider._encode_tool_name(definition.name)
         assert provider._decode_tool_name(encoded) == definition.name
@@ -82,11 +87,11 @@ def test_provider_facing_tool_definitions_contain_only_openai_valid_names():
     outside OpenAI's allowed function-name character set."""
     provider = _provider()
     catalog = get_tool_registry().catalog()
-    assert len(catalog) == 4
+    assert set(REFERENCE_TOOL_NAMES) <= {entry["name"] for entry in catalog}
 
     function_tools = provider._build_function_tools(catalog)
 
-    assert len(function_tools) == 4
+    assert len(function_tools) == len(catalog)
     for function_tool in function_tools:
         name = function_tool["name"]
         assert "." not in name
@@ -218,7 +223,12 @@ def test_end_to_end_round_trip_for_every_registered_reference_tool():
     )
 
     assert turn.kind == "tool_calls"
-    assert {request.name for request in turn.tool_requests} == set(REFERENCE_TOOL_NAMES)
+    # Every tool actually offered on this request round-trips back to its
+    # exact internal dotted name -- derived from the live registry, so a
+    # newly registered tool is automatically covered here.
+    assert {request.name for request in turn.tool_requests} == {
+        entry["name"] for entry in catalog
+    }
     # And every request name is the original dotted internal name, never
     # the provider-safe one.
     for request in turn.tool_requests:
