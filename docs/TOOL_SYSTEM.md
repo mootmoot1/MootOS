@@ -1,6 +1,6 @@
 # MootOS Tool System (V0.2A, extended in V0.3A)
 
-**Status:** V0.2A implemented and merged to `main`. Live-verified on Railway/OpenAI, including a successful frozen approval → execution → persisted Task. V0.3A's capability-aware metadata and generated catalog/manifest (Sec16) are implemented and merged on top of it. V0.3B's structured gap reasoning (`docs/GAP_REASONING.md`) is implemented on branch `claude/v0.3b-structured-gap-reasoning`, pending merge.
+**Status:** V0.2A implemented and merged to `main`. Live-verified on Railway/OpenAI, including a successful frozen approval → execution → persisted Task. V0.3A's capability-aware metadata and generated catalog/manifest (Sec16) and V0.3B's structured gap reasoning (`docs/GAP_REASONING.md`) are both implemented and merged on top of it. V0.3C's three read-only tools -- `self.state`, `self.architecture` (`docs/SELF_INSPECTION.md`), and `web.search` (`docs/WEB_AWARENESS.md`) -- are implemented on branch `claude/v0.3c-self-inspection-web-awareness`, pending merge.
 **Schema:** `5 — tool_system` (V0.3A added no migration -- its metadata lives on `ToolDefinition` in code, not in the database.)
 **Applies to:** the Tool System added in V0.2A on top of the V0.1 foundation (PR #34), plus the V0.3A capability catalog described in Sec16.
 

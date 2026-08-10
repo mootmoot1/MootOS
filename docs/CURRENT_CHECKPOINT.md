@@ -3,9 +3,9 @@
 **Last updated:** August 9, 2026  
 **Repository:** `mootmoot1/MootOS`  
 **Default branch:** `main`  
-**Current release on `main`:** Version 0.1 foundation plus the V0.2A Tool Foundation and V0.3A Capability-Aware Tool System  
+**Current release on `main`:** Version 0.1 foundation plus the V0.2A Tool Foundation, V0.3A Capability-Aware Tool System, and V0.3B Structured Gap Reasoning  
 **Current schema on `main`:** `5 — tool_system`  
-**Also implemented, pending merge:** V0.3B Structured Gap Reasoning, on branch `claude/v0.3b-structured-gap-reasoning` (adds no migration -- schema stays `5 — tool_system` once merged)
+**Also implemented, pending merge:** V0.3C Narrow Self-Inspection + Read-Only Web Awareness, on branch `claude/v0.3c-self-inspection-web-awareness` (adds no migration -- schema stays `5 — tool_system` once merged)
 
 ## Current production topology
 
@@ -46,9 +46,9 @@ that isn't registered can never be named as available, and a registered
 tool can never be silently missing. No new tool, no new HTTP route, no
 schema migration.
 
-### V0.3B Structured Gap Reasoning — implemented on branch, pending merge
+### V0.3B Structured Gap Reasoning — merged
 
-Branch `claude/v0.3b-structured-gap-reasoning`. `docs/GAP_REASONING.md`,
+`docs/GAP_REASONING.md`,
 ADR-030. New `backend/gap_reasoning.py`: `analyze_goal(goal, router=...)`
 turns a natural-language goal into a structured `GapReport`, strictly
 separating the model's interpretation (proposed capability requirements,
@@ -61,8 +61,41 @@ for the narrow, chat-pipeline-independent model call this requires. Every
 call is an audited `RUN_TYPE_MODEL` Run (existing Run schema, no
 migration); the Run table has no column able to hold goal/model text, so
 none is ever stored. No new tool, no new HTTP route, no schema migration.
-Next planned work is V0.3C (narrow self-awareness + read-only web
-awareness), not yet started.
+
+**Known integration gap:** `analyze_goal()` exists as an internal API and
+is not yet invoked by normal chat. Deliberately unchanged in V0.3C; see
+`docs/GAP_REASONING.md` §8 and the V0.3C section below.
+
+### V0.3C Narrow Self-Inspection + Read-Only Web Awareness — implemented on branch, pending merge
+
+Branch `claude/v0.3c-self-inspection-web-awareness`.
+`docs/SELF_INSPECTION.md`, `docs/WEB_AWARENESS.md`, ADR-035. Adds three
+read-only registered tools:
+
+- `self.state` — live runtime truth (registry-derived), no arguments.
+- `self.architecture` — one document from a seven-entry compile-time
+  allow-list of architecture/status markdown files, selected by
+  enum-constrained key. No path input exists; no `read_file(path)` was
+  added. Cannot reach `.env`, secrets, the database, user data, source
+  code, or Git history.
+- `web.search` — MootOS's first external connector
+  (`backend/web_connector.py`): bounded, GET-only public web search with a
+  10s timeout, a 512KB streamed response cap, and at most 5
+  title/URL/snippet results. Registered **only when a search service is
+  configured**, so an unconfigured deployment truthfully reports no web
+  capability (ADR-035).
+
+Documentation never overrides runtime truth: when a curated document names
+a tool the registry lacks, `self.state` surfaces the disagreement rather
+than choosing a side. Retrieved web content is treated as untrusted data —
+structurally unable to register a tool, change a risk classification, or
+approve an operation. No write-capable external operation, no filesystem
+or shell access, no new HTTP route, no schema migration. `httpx` is now
+declared explicitly in `requirements.txt` (already a transitive dependency
+of `openai`); `railway.toml` is untouched.
+
+Next planned work is V0.3D (protected core + mechanical release gates),
+not yet started.
 
 ## Production-verified capabilities
 

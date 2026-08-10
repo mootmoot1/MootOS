@@ -344,14 +344,25 @@ def test_describe_installed_abilities_has_only_the_expected_top_level_shape():
 # --- Real default registry: the smoke test tying it all together -----------
 
 
-def test_real_default_registry_produces_the_known_v02a_tools_and_capabilities():
+def test_real_default_registry_produces_the_known_tools_and_capabilities():
+    """The production registry's V0.2A tools and V0.3C self-inspection tools
+    are always present; web.search is configuration-dependent (see
+    tests/test_tool_registry.py) so it is not asserted either way here."""
     description = describe_installed_abilities(get_tool_registry())
 
     tool_names = {entry["name"] for entry in description["tools"]}
-    assert tool_names == {"projects.list", "memory.search", "tasks.list", "tasks.create"}
+    assert {
+        "projects.list",
+        "memory.search",
+        "tasks.list",
+        "tasks.create",
+        "self.state",
+        "self.architecture",
+    } <= tool_names
 
     capability_ids = {entry["id"] for entry in description["capabilities"]}
-    assert capability_ids == {"projects.view", "memory.recall", "tasks.manage"}
+    assert {"projects.view", "memory.recall", "tasks.manage", "self.inspect"} <= capability_ids
 
     by_id = {entry["id"]: entry for entry in description["capabilities"]}
     assert by_id["tasks.manage"]["tools"] == ["tasks.create", "tasks.list"]
+    assert by_id["self.inspect"]["tools"] == ["self.architecture", "self.state"]

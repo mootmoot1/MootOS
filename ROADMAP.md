@@ -51,14 +51,26 @@ Implemented and merged:
   Registry instead of hand-maintained. See `docs/TOOL_SYSTEM.md` §16 and
   ADR-028/ADR-029. No new tool, no new HTTP route, no schema migration.
 
-**Implemented, pending merge:** V0.3B Structured Gap Reasoning, on branch
-`claude/v0.3b-structured-gap-reasoning` — `backend/gap_reasoning.py` turns
-a natural-language goal into a structured, audited Gap Report (classified
-`already_possible` / `composable` / `capability_gap` / `externally_
-blocked`), with model interpretation strictly separated from deterministic
-resolution against the V0.3A capability catalog. Reasoning only -- no tool
-execution, no capability installation. See `docs/GAP_REASONING.md` and
-ADR-030. No new tool, no new HTTP route, no schema migration.
+- V0.3B Structured Gap Reasoning: `backend/gap_reasoning.py` turns a
+  natural-language goal into a structured, audited Gap Report (classified
+  `already_possible` / `composable` / `capability_gap` /
+  `externally_blocked`), with model interpretation strictly separated from
+  deterministic resolution against the V0.3A capability catalog. Reasoning
+  only — no tool execution, no capability installation. See
+  `docs/GAP_REASONING.md` and ADR-030. No new tool, no new HTTP route, no
+  schema migration.
+
+**Implemented, pending merge:** V0.3C Narrow Self-Inspection + Read-Only
+Web Awareness, on branch `claude/v0.3c-self-inspection-web-awareness` —
+adds three read-only registered tools. `self.state` and
+`self.architecture` let MootOS answer questions about its own architecture
+and current phase from an explicit allow-list of curated documents plus
+live registry state, with the registry always authoritative over
+documentation (`docs/SELF_INSPECTION.md`). `web.search` adds MootOS's
+first external connector: bounded, read-only public web search, treating
+retrieved content as untrusted data and registering only when a search
+service is configured (`docs/WEB_AWARENESS.md`, ADR-035). No write-capable
+external operation, no filesystem or shell access, no schema migration.
 
 The repository currently has no scheduler, reminder delivery, recurrence,
 background worker, multi-user system, or capability-builder automation.
@@ -77,10 +89,12 @@ definitions; this section is a pointer, not a duplicate.
 Phase sequence at a glance: **V0.3A** capability-aware Tool System (richer
 tool metadata, truthful "what can you do" answers) — **implemented and
 merged**, see `docs/TOOL_SYSTEM.md` §16 — → **V0.3B** structured,
-advisory gap reasoning — **implemented on branch
-`claude/v0.3b-structured-gap-reasoning`, pending merge**, see
+advisory gap reasoning — **implemented and merged**, see
 `docs/GAP_REASONING.md` — → **V0.3C** narrow self-awareness + read-only web
-awareness → **V0.3D** protected core enforced as mechanical release gates
+awareness — **implemented on branch
+`claude/v0.3c-self-inspection-web-awareness`, pending merge**, see
+`docs/SELF_INSPECTION.md` and `docs/WEB_AWARENESS.md` — → **V0.3D**
+protected core enforced as mechanical release gates
 → **V0.3E** a manual, human-run capability-build pipeline proven on at
 least two real capabilities → **V0.4A** capability-builder automation
 (isolated builds only, no self-install) → **V0.4B** a usage-gated,

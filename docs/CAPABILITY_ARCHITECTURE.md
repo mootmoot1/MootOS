@@ -4,10 +4,11 @@
 2026. This document is a plan, not an implementation record. **V0.3A
 (Capability-Aware Tool System) is implemented and merged** — see
 `docs/TOOL_SYSTEM.md` §16 for what exists in code. **V0.3B (Structured Gap
-Reasoning) is implemented on branch
-`claude/v0.3b-structured-gap-reasoning`, pending merge** — see
-`docs/GAP_REASONING.md`. V0.3C–V0.3E and V0.4A–V0.4D remain plan only,
-nothing implemented.
+Reasoning) is implemented and merged** — see `docs/GAP_REASONING.md`.
+**V0.3C (Narrow Self-Awareness + World Awareness) is implemented on branch
+`claude/v0.3c-self-inspection-web-awareness`, pending merge** — see
+`docs/SELF_INSPECTION.md` and `docs/WEB_AWARENESS.md`. V0.3D–V0.3E and
+V0.4A–V0.4D remain plan only, nothing implemented.
 **Applies to:** design and build order for everything after V0.2A.
 **Companion documents:** `docs/TOOL_SYSTEM.md` (the current executable Tool
 System), ADR-027 (the V0.2A decision record), ADR-028 through ADR-034 (the
@@ -131,9 +132,9 @@ do?" from the live registry/catalog — see Definition of Done §10, item 1.
 
 ### V0.3B — Structured Gap Reasoning
 
-**Implemented on branch `claude/v0.3b-structured-gap-reasoning`, pending
-merge.** See `docs/GAP_REASONING.md` for the concrete result
-(`backend/gap_reasoning.py`) and ADR-030 for the decision it carries out.
+**Implemented and merged.** See `docs/GAP_REASONING.md` for the concrete
+result (`backend/gap_reasoning.py`) and ADR-030 for the decision it
+carries out.
 
 Natural-language goal interpretation is inherently non-deterministic; the
 architecture doesn't pretend otherwise. The flow is two stages with a hard
@@ -173,6 +174,12 @@ always goes through V0.3E's human-approved build pipeline, never
 automatically.
 
 ### V0.3C — Narrow Self-Awareness + World Awareness
+
+**Implemented on branch `claude/v0.3c-self-inspection-web-awareness`,
+pending merge.** See `docs/SELF_INSPECTION.md` and
+`docs/WEB_AWARENESS.md` for the concrete result
+(`backend/self_inspection.py`, `backend/web_connector.py`,
+`backend/tools_web.py`) and ADR-035 for the one new decision it required.
 
 Both are read-only and can ship in the same broad phase; neither depends on
 the other.

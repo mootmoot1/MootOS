@@ -29,13 +29,15 @@ As of August 9, 2026:
   Railway/OpenAI (`docs/TOOL_SYSTEM.md`, ADR-027)
 - the V0.3A Capability-Aware Tool System exists, merged to `main`
   (`docs/TOOL_SYSTEM.md` §16, ADR-028/ADR-029)
-- V0.3B Structured Gap Reasoning is implemented on branch
-  `claude/v0.3b-structured-gap-reasoning`, **not yet merged**
+- V0.3B Structured Gap Reasoning exists, merged to `main`
   (`docs/GAP_REASONING.md`, ADR-030)
+- V0.3C Narrow Self-Inspection + Read-Only Web Awareness is implemented on
+  branch `claude/v0.3c-self-inspection-web-awareness`, **not yet merged**
+  (`docs/SELF_INSPECTION.md`, `docs/WEB_AWARENESS.md`, ADR-035)
 - scheduler/reminder delivery does **not** exist
 
 The locked next-phase plan is `docs/CAPABILITY_ARCHITECTURE.md` and
-ADR-028 through ADR-034's full V0.3/V0.4 sequence. Scheduler/Reminder v0.1
+ADR-028 through ADR-035's full V0.3/V0.4 sequence. Scheduler/Reminder v0.1
 remains a deferred, planned capability (Decision 011, `ROADMAP.md`), not
 the active next feature.
 
@@ -47,8 +49,11 @@ Useful focused documents include:
   model, source-of-truth hierarchy, phase sequence, protected core,
   review roles, and deferred items
 - `TOOL_SYSTEM.md` — the current, implemented, executable Tool System
-- `GAP_REASONING.md` — V0.3B structured gap reasoning (not yet merged to
-  `main` — see its own Status line)
+- `GAP_REASONING.md` — V0.3B structured gap reasoning
+- `SELF_INSPECTION.md` — V0.3C narrow, curated self-inspection (not yet
+  merged to `main` — see its own Status line)
+- `WEB_AWARENESS.md` — V0.3C read-only web awareness and MootOS's first
+  external connector (not yet merged to `main`)
 - `FOUNDATION_HARDENING.md`
 - `CHAT_PROVIDER_PIPELINE.md`
 - `MODEL_INPUT_AND_CAPABILITIES.md`
@@ -78,6 +83,7 @@ Key later ADRs include:
   parallel executable registry
 - ADR-029 — generated capability manifest instead of hand-maintained prose
 - ADR-030 — structured, logged, advisory gap reports
+- ADR-035 — a tool that cannot run in this deployment is not registered
 - ADR-031 — protected core enforced mechanically before builder automation
 - ADR-032 — multi-AI review is advisory with distinct, non-overlapping roles
 - ADR-033 — Local Companion / automatic Codex dispatch are usage-gated
