@@ -3,7 +3,39 @@
 ## Status
 
 Accepted. Recorded August 9, 2026, as part of the V0.3/V0.4 architecture
-lock. See `docs/CAPABILITY_ARCHITECTURE.md` §6 (V0.3E, V0.4A).
+lock. **First manual proof run completed on branch
+`claude/v0.3e-manual-capability-pipeline`, pending merge** (August 2026)
+— see `docs/CAPABILITY_BUILD_PIPELINE.md`. One of the two required proof
+capabilities (`tasks.status_summary`) has passed the full pipeline; a
+second, independent capability must still pass it before any part of
+this process is automated (V0.4A). See `docs/CAPABILITY_ARCHITECTURE.md`
+§6 (V0.3E, V0.4A).
+
+**Two clarifications recorded against the original decision text below,
+based on what V0.3E's first proof run actually required:**
+
+1. **The recommended first proof capability changed.** This ADR's
+   original text recommends live web/current-information search as the
+   first proof capability. That connector was built and merged as part
+   of V0.3C before V0.3E began, so it was no longer available to serve as
+   V0.3E's *first* proof run. V0.3E used `tasks.status_summary` instead —
+   see `docs/CAPABILITY_BUILD_PIPELINE.md` §10 for why it was a suitable
+   substitute (low-risk, read-only, no external service/credential, and
+   a real `capability_gap` verified against the live V0.3B gap-reasoning
+   pipeline before implementation began).
+2. **"Deferred to this phase" (the lifecycle state machine) is narrower
+   in practice than the original text might read.** V0.3E implements a
+   small, seven-state, human-transition-only lifecycle
+   (`proposed -> specified -> implemented -> tested -> reviewed ->
+   ready_for_pr -> merged`, in `scripts/capability_pipeline/lifecycle.py`)
+   — the *minimum* needed to prove the manual pipeline once by hand, not
+   the larger `proposed -> ... -> installed -> deprecated -> rolled-back`
+   machine this ADR's Decision section describes for V0.4A. That larger
+   machine remains deferred to V0.4A exactly as originally decided; V0.3E's
+   lifecycle is a distinct, smaller, file-based artifact with no
+   automatic transitions and no coupling whatsoever to
+   `backend/tool_registry.py` — see
+   `docs/CAPABILITY_BUILD_PIPELINE.md` §4.
 
 ## Context
 

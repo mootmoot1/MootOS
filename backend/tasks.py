@@ -164,6 +164,42 @@ def list_tasks(
     return [dict(row) for row in rows]
 
 
+def count_tasks_by_status(project: Optional[str] = None) -> dict[str, int]:
+    """Count Tasks grouped by status, optionally scoped to one project.
+
+    A deterministic aggregate over the same rows ``list_tasks`` already
+    exposes -- no new table, no new column, no migration. Every one of
+    ``TASK_STATUSES`` is always present in the result (as ``0`` when a
+    project/status combination has no rows) so a caller never has to guess
+    whether a missing key means "zero" or "not computed".
+    """
+    with database_connection() as connection:
+        canonical_project = None
+        if project is not None:
+            canonical_project = _get_project_name(connection, project)
+
+        clauses = []
+        params: list[Any] = []
+        if project is not None:
+            clauses.append("project = ?")
+            params.append(canonical_project)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = connection.execute(
+            f"""
+            SELECT status, COUNT(*) AS task_count
+            FROM tasks
+            {where}
+            GROUP BY status
+            """,
+            params,
+        ).fetchall()
+
+    counts = {status: 0 for status in TASK_STATUSES}
+    for row in rows:
+        counts[row["status"]] = int(row["task_count"])
+    return counts
+
+
 def list_recent_tasks(limit: int = 15) -> list[dict[str, Any]]:
     """List the most recently created tasks, newest first, regardless of status.
 

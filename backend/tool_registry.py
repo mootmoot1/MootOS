@@ -47,13 +47,19 @@ class ToolRegistry:
 
 
 def build_default_registry() -> ToolRegistry:
-    """Build the standard MootOS registry: V0.2A reference tools + V0.3C.
+    """Build the standard MootOS registry: V0.2A reference tools + V0.3C + V0.3E.
 
-    Both registration calls are explicit, by direct reference -- there is
+    Every registration call is explicit, by direct reference -- there is
     still no plugin discovery, no filesystem scanning, and no way for a
     request or a model to add a tool. ``register_v03c_tools`` additionally
     registers ``web.search`` only when a search service is configured, so an
     unconfigured deployment honestly reports no web capability.
+    `register_v03e_tools`` registers V0.3E's manual-pipeline proof
+    capability, ``tasks.status_summary`` -- read-only, no configuration
+    gate needed. This is the one line V0.3E's proof capability requires
+    here, and it is why this edit is expected to (and does) fail V0.3D's
+    protected-path gate: see ``docs/GATES_AND_RELEASE_SAFETY.md`` Sec9 and
+    ``docs/CAPABILITY_BUILD_PIPELINE.md``.
     """
     # Imported here (not at module load) to avoid a load-order cycle:
     # backend.tools_reference imports ToolDefinition/ToolRegistry from this
@@ -61,11 +67,13 @@ def build_default_registry() -> ToolRegistry:
     # free of a hard dependency on the concrete reference tools at import
     # time.
     from backend.tools_reference import register_reference_tools
+    from backend.tools_task_summary import register_v03e_tools
     from backend.tools_web import register_v03c_tools
 
     registry = ToolRegistry()
     register_reference_tools(registry)
     register_v03c_tools(registry)
+    register_v03e_tools(registry)
     return registry
 
 

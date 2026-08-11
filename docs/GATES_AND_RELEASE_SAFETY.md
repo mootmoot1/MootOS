@@ -1,10 +1,13 @@
 # MootOS Protected Core + Mechanical Release Gates (V0.3D)
 
-**Status:** Implemented on branch `claude/v0.3d-protected-core-gates`,
-pending merge. See `docs/CAPABILITY_ARCHITECTURE.md` §6 (V0.3D) and
-ADR-031 for the decision this document carries out. **This PR itself
-requires a one-time bootstrap override of the protected-path gate — see
-§6 before approving or merging it.**
+**Status:** Implemented and merged. See `docs/CAPABILITY_ARCHITECTURE.md`
+§6 (V0.3D) and ADR-031 for the decision this document carries out. The PR
+that merged this used the one-time bootstrap override of the
+protected-path gate described in §6; that exception has already retired
+itself -- every PR since (including V0.3E's) runs the normal,
+trusted-extraction path. V0.3E (`docs/CAPABILITY_BUILD_PIPELINE.md`) has
+since exercised the "protected-path failure as elevated-review signal"
+flow for real, on `backend/tool_registry.py` -- see §9.
 **Applies to:** `scripts/gates/`, `tests/test_gates_*.py`, and the
 `protected-core-gates` job in `.github/workflows/python-package.yml`.
 
@@ -313,6 +316,16 @@ its own narrower, safer review path instead of the blanket
 **deferred to V0.3E/V0.4A and is not solved by V0.3D.** V0.3D's job is
 only to make sure the boundary exists and holds; designing a way through
 it for legitimate future work is explicitly out of scope here.
+
+**V0.3E's first proof capability confirmed this design holds up against a
+real change, not just a hypothetical one.** Adding `tasks.status_summary`
+required exactly the one-line registration edit this section describes,
+and the protected-path gate correctly failed on it. V0.3E deliberately
+did **not** build a narrower registration extension point to avoid that
+failure — the explicit-reference registration pattern already scales to
+"one more line per capability" without friction, so no such extension
+point was found to be needed yet. See
+`docs/CAPABILITY_BUILD_PIPELINE.md` §6.
 
 ## 10. Enabling enforcement
 

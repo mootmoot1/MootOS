@@ -3,9 +3,9 @@
 **Last updated:** August 9, 2026  
 **Repository:** `mootmoot1/MootOS`  
 **Default branch:** `main`  
-**Current release on `main`:** Version 0.1 foundation plus the V0.2A Tool Foundation, V0.3A Capability-Aware Tool System, and V0.3B Structured Gap Reasoning  
+**Current release on `main`:** Version 0.1 foundation plus the V0.2A Tool Foundation, V0.3A Capability-Aware Tool System, V0.3B Structured Gap Reasoning, V0.3C Narrow Self-Inspection + Read-Only Web Awareness, and V0.3D Protected Core + Mechanical Release Gates  
 **Current schema on `main`:** `5 — tool_system`  
-**Also implemented, pending merge:** V0.3C Narrow Self-Inspection + Read-Only Web Awareness, on branch `claude/v0.3c-self-inspection-web-awareness` (adds no migration -- schema stays `5 — tool_system` once merged); V0.3D Protected Core + Mechanical Release Gates, on branch `claude/v0.3d-protected-core-gates` (adds no migration and no runtime behavior change -- new CI-only gate scripts under `scripts/gates/`)
+**Also implemented, pending merge:** V0.3E Manual Capability-Build Pipeline, on branch `claude/v0.3e-manual-capability-pipeline` (adds no migration -- schema stays `5 — tool_system` once merged; adds one new read-only registered tool, `tasks.status_summary`, pending merge)
 
 ## Current production topology
 
@@ -66,9 +66,8 @@ none is ever stored. No new tool, no new HTTP route, no schema migration.
 is not yet invoked by normal chat. Deliberately unchanged in V0.3C; see
 `docs/GAP_REASONING.md` §8 and the V0.3C section below.
 
-### V0.3C Narrow Self-Inspection + Read-Only Web Awareness — implemented on branch, pending merge
+### V0.3C Narrow Self-Inspection + Read-Only Web Awareness — merged
 
-Branch `claude/v0.3c-self-inspection-web-awareness`.
 `docs/SELF_INSPECTION.md`, `docs/WEB_AWARENESS.md`, ADR-035. Adds three
 read-only registered tools:
 
@@ -94,9 +93,9 @@ or shell access, no new HTTP route, no schema migration. `httpx` is now
 declared explicitly in `requirements.txt` (already a transitive dependency
 of `openai`); `railway.toml` is untouched.
 
-### V0.3D Protected Core + Mechanical Release Gates — implemented on branch, pending merge
+### V0.3D Protected Core + Mechanical Release Gates — merged
 
-Branch `claude/v0.3d-protected-core-gates`. `docs/GATES_AND_RELEASE_SAFETY.md`,
+`docs/GATES_AND_RELEASE_SAFETY.md`,
 ADR-031. Converts ADR-031's protected-core rules into five deterministic
 CI gates under `scripts/gates/`: a protected-path diff check
 (`protected_paths.py`), an AST-based migration-safety check that
@@ -118,21 +117,22 @@ directory (`scripts/gates/` is itself a denied path) and CI runs the gate
 code extracted from the base ref rather than the PR's own copy, so a diff
 cannot weaken the policy and have that weakening apply to itself.
 
-**This PR is the one-time bootstrap exception.** Because `main` does not
-yet contain `scripts/gates/`, the trusted-base-extraction path cannot
-apply to this first PR, and the protected-path gate correctly fails on
-it (it touches `scripts/gates/` and `.github/workflows/` to introduce
-itself). Merging it requires one explicit human override limited to
-those two paths -- not a general precedent for merging with a red gate.
-The exception disappears automatically once this PR merges: every later
-PR runs against a real trusted `scripts/gates/` on `main` and must pass
-the normal gate like any other change. See
+**The PR that merged this used a one-time bootstrap exception**, since
+`main` did not yet contain `scripts/gates/` for the trusted-base-extraction
+path to run against, and the protected-path gate correctly failed on that
+PR (it touched `scripts/gates/` and `.github/workflows/` to introduce
+itself). It required one explicit human override limited to those two
+paths -- not a general precedent for merging with a red gate. That
+exception has already retired itself: every PR since (including V0.3E's)
+runs against a real trusted `scripts/gates/` on `main` and must pass the
+normal gate like any other change. See
 `docs/GATES_AND_RELEASE_SAFETY.md` §6.
 
-`backend/tool_registry.py` remains protected intentionally; the
-mechanics of how a future, human-approved capability change adds a
-registration entry there without tripping this gate are deferred to
-V0.3E/V0.4A, not solved here.
+`backend/tool_registry.py` remains protected intentionally. V0.3E's first
+proof capability confirmed the intended flow: its one registration edit
+to that file correctly failed the protected-path gate, surfacing it for
+elevated human review rather than needing (or getting) a bypass — see
+`docs/CAPABILITY_BUILD_PIPELINE.md` §6.
 
 Every gate is a deterministic script — none of them calls a model, and
 none of them is a source of merge authority; human approval still
@@ -141,8 +141,35 @@ Codex bridge, external write tool, workflow persistence, or
 self-installation exists yet or is enabled by this work. No new tool, no
 new HTTP route, no schema migration, no runtime behavior change.
 
-Next planned work is V0.3E (a manual, human-run capability-build
-pipeline), not yet started.
+### V0.3E Manual Capability-Build Pipeline — implemented on branch, pending merge
+
+Branch `claude/v0.3e-manual-capability-pipeline`.
+`docs/CAPABILITY_BUILD_PIPELINE.md`, ADR-034. Proves the manual
+capability-build lifecycle end to end on one real capability,
+`tasks.status_summary` -- a new `RISK_READ_ONLY` tool
+(`backend/tools_task_summary.py`) that reports Task counts by status,
+backed by a new `backend.tasks.count_tasks_by_status()` aggregate (no
+schema change). Adds `scripts/capability_pipeline/`: a validated
+`CapabilitySpec` schema (`spec.py`, fail-closed on unknown fields,
+invalid risk/data-exposure, a read_only spec declaring side effects, or a
+protected-core touch left unflagged) and a small, explicit,
+human-transition-only lifecycle record (`lifecycle.py`:
+`proposed -> specified -> implemented -> tested -> reviewed ->
+ready_for_pr -> merged`, one step at a time, no automatic transitions,
+zero coupling to `backend/tool_registry.py`) plus three distinct advisory
+review roles (`review.py`: correctness/test quality, security/
+permissions, architecture/duplication -- all advisory only, never able to
+mutate lifecycle state). The one protected-core touch this capability
+needs -- one line registering it in `build_default_registry()` -- fails
+V0.3D's protected-path gate exactly as intended; no gate was weakened and
+no alternate registration path was created. No autonomous builder exists:
+no automatic branch/commit/PR/merge/registration/deployment anywhere in
+this phase. This is the first of the two proof capabilities ADR-034
+requires before V0.4A (capability-builder automation) can begin. No new
+HTTP route, no schema migration.
+
+Next planned work is a second, independent V0.3E proof capability
+(required by ADR-034 before any automation begins), not yet started.
 
 ## Production-verified capabilities
 
