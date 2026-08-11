@@ -54,11 +54,13 @@ def build_default_registry() -> ToolRegistry:
     request or a model to add a tool. ``register_v03c_tools`` additionally
     registers ``web.search`` only when a search service is configured, so an
     unconfigured deployment honestly reports no web capability.
-    `register_v03e_tools`` registers V0.3E's manual-pipeline proof
-    capability, ``tasks.status_summary`` -- read-only, no configuration
-    gate needed. This is the one line V0.3E's proof capability requires
-    here, and it is why this edit is expected to (and does) fail V0.3D's
-    protected-path gate: see ``docs/GATES_AND_RELEASE_SAFETY.md`` Sec9 and
+    ``register_v03e_tools`` registers V0.3E manual-pipeline proof #1,
+    ``tasks.status_summary``; ``register_v03e_proof2_tools`` registers
+    proof #2, ``projects.overview``. Both are read-only and need no
+    configuration gate. Each is the one line its proof capability
+    requires here, and is why each such edit is expected to (and does)
+    fail V0.3D's protected-path gate: see
+    ``docs/GATES_AND_RELEASE_SAFETY.md`` Sec9 and
     ``docs/CAPABILITY_BUILD_PIPELINE.md``.
     """
     # Imported here (not at module load) to avoid a load-order cycle:
@@ -66,6 +68,7 @@ def build_default_registry() -> ToolRegistry:
     # module's sibling files, and this keeps backend.tool_registry itself
     # free of a hard dependency on the concrete reference tools at import
     # time.
+    from backend.tools_project_insight import register_v03e_proof2_tools
     from backend.tools_reference import register_reference_tools
     from backend.tools_task_summary import register_v03e_tools
     from backend.tools_web import register_v03c_tools
@@ -74,6 +77,7 @@ def build_default_registry() -> ToolRegistry:
     register_reference_tools(registry)
     register_v03c_tools(registry)
     register_v03e_tools(registry)
+    register_v03e_proof2_tools(registry)
     return registry
 
 
