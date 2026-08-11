@@ -1,0 +1,31 @@
+{
+  "goal": "Give me an overview of how much is going on in each of my projects.",
+  "requirements": [
+    {
+      "capability": "projects.insight",
+      "reason": "The goal asks how much activity each project holds, which requires counting memories, Tasks, and conversations per project -- no installed capability can do that.",
+      "externally_blocked": false,
+      "installed": false,
+      "tools": []
+    },
+    {
+      "capability": "projects.view",
+      "reason": "The goal is about the user's projects, which must be enumerable.",
+      "externally_blocked": false,
+      "installed": true,
+      "tools": [
+        "projects.list"
+      ]
+    }
+  ],
+  "available_capabilities": [
+    "projects.view"
+  ],
+  "composable_capabilities": [],
+  "missing_capabilities": [
+    "projects.insight"
+  ],
+  "externally_blocked_capabilities": [],
+  "classification": "capability_gap",
+  "notes": "Missing: projects.insight. Already installed: projects.view."
+}
