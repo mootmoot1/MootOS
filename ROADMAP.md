@@ -80,10 +80,17 @@ that distinguishes additive migrations from history rewrites, a risk-
 metadata check that fails a `ToolDefinition.risk` field given a default
 value, a narrow registration-authority scan for plugin-discovery/dynamic-
 import/executor-bypass patterns, and a repo-local secret scan. All five
-run automatically in a new `protected-core-gates` CI job and block merge
-on failure; none of them is a model call or a source of merge authority —
-human approval still controls merge (`docs/GATES_AND_RELEASE_SAFETY.md`,
-ADR-031). No new tool, no new HTTP route, no schema migration.
+run automatically in a new `protected-core-gates` CI job; making that
+check actually block the merge button also requires a one-time GitHub
+branch-protection setting a repo admin enables after merge (workflow
+presence alone does not enforce it). None of the five gates is a model
+call or a source of merge authority — human approval still controls
+merge (`docs/GATES_AND_RELEASE_SAFETY.md`, ADR-031). This PR is a
+one-time bootstrap exception to the protected-path gate itself (no
+trusted `scripts/gates/` exists on `main` yet for it to run against) —
+see `docs/GATES_AND_RELEASE_SAFETY.md` §6; it is not a precedent for
+merging any future PR with a red gate. No new tool, no new HTTP route,
+no schema migration.
 
 The repository currently has no scheduler, reminder delivery, recurrence,
 background worker, multi-user system, or capability-builder automation.

@@ -2,7 +2,9 @@
 
 **Status:** Implemented on branch `claude/v0.3d-protected-core-gates`,
 pending merge. See `docs/CAPABILITY_ARCHITECTURE.md` §6 (V0.3D) and
-ADR-031 for the decision this document carries out.
+ADR-031 for the decision this document carries out. **This PR itself
+requires a one-time bootstrap override of the protected-path gate — see
+§6 before approving or merging it.**
 **Applies to:** `scripts/gates/`, `tests/test_gates_*.py`, and the
 `protected-core-gates` job in `.github/workflows/python-package.yml`.
 
@@ -60,7 +62,7 @@ that review, only a person can.
 
 All five live in `scripts/gates/` and are orchestrated by
 `scripts/gates/run_gates.py`. Every gate is deterministic: none of them
-calls a model, and a passing result is not merge authority (§7).
+calls a model, and a passing result is not merge authority (§8).
 
 ### 3.1 Protected-path gate (`protected_paths.py`)
 
@@ -131,7 +133,7 @@ allowed to invoke a tool's executor callable.
 
 ### 3.5 Secret scan (`secret_scan.py`)
 
-See §6 — kept separate below because its limitations need their own
+See §7 — kept separate below because its limitations need their own
 explanation.
 
 ## 4. Migration nuance in practice
@@ -180,7 +182,63 @@ Two independent mechanisms, both required:
 Together: a diff cannot both weaken this policy and have that weakened
 policy apply to itself.
 
-## 6. Secret scan: behavior and limitations
+## 6. This PR is the one-time bootstrap exception, not a precedent
+
+`origin/main` does not yet contain `scripts/gates/` — `git show
+origin/main:scripts/gates/run_gates.py` fails, because the V0.3D PR
+(branch `claude/v0.3d-protected-core-gates`) is what introduces that tree
+in the first place. That means the trusted-extraction mechanism in §5
+cannot apply to this one PR: there is no trusted base copy to extract yet.
+CI's fallback for exactly this case copies the branch's own
+`scripts/gates/` and runs it, logging an explicit `::warning::` marking
+the run as a bootstrap (see the "Extract trusted gate tooling" step in
+`.github/workflows/python-package.yml`).
+
+Running under that fallback, the protected-path gate still correctly
+**FAILS** this PR — it touches both `scripts/gates/` (introducing the
+gate tree itself) and `.github/workflows/` (adding the CI job that runs
+it). That is expected, not a bug: those are exactly the two paths this PR
+must touch to exist at all, and the gate has no special case that lets a
+PR exempt itself just because it's the one introducing the gate.
+
+Because of that, merging this specific PR requires a **one-time, explicit
+human override** of the protected-path failure, and only for the two
+paths this PR legitimately needs to touch:
+
+- `scripts/gates/`
+- `.github/workflows/`
+
+**This override does not extend to any other protected-core path.** If a
+future revision of this PR's diff touched `backend/tool_executor.py`,
+`backend/auth.py`, `railway.toml`, or any other entry in `DENIED_PATHS`
+for a reason other than "this is the gate tooling being introduced," that
+would still be a real violation requiring separate justification — the
+bootstrap exception covers exactly the two paths above, nothing else. The
+protected-path gate's own output on any given run is the authoritative
+list of what a specific diff actually touches; a reviewer approving the
+override should read that list, not assume it.
+
+**This exception disappears automatically the moment this PR merges to
+`main`.** Every PR after this one will find a real `scripts/gates/` on
+its base ref, so the trusted-extraction path in §5 applies
+unconditionally from then on. No configuration step retires the bootstrap
+fallback — it retires itself, because the condition it checks for
+(`git show base:scripts/gates/run_gates.py` failing) will no longer be
+true for any PR based on a post-merge `main`.
+
+**Future changes to `scripts/gates/`, `.github/workflows/`, or any other
+protected-core path must fail the normal protected-path gate and go
+through the same deliberate, elevated human review every other
+protected-core change requires (§2) — not a repeat of this bootstrap
+override.** This PR is the only one expected to ever need it.
+**"Merge with a red gate" is not a normal workflow and must not be
+repeated as general practice.** If a reviewer ever sees this section cited
+as precedent for merging a *later* red `protected-core-gates` result, that
+citation is wrong: this section describes a one-time condition (no
+trusted base copy existed yet), not a standing policy that a failing gate
+can be waved through.
+
+## 7. Secret scan: behavior and limitations
 
 `scripts/gates/secret_scan.py` runs two independent, dependency-free
 checks against the diff's changed paths:
@@ -209,7 +267,7 @@ used, per V0.3D's constraints; a stronger complementary product (e.g.
 GitHub Advanced Security, if ever enabled) would sit alongside this, not
 replace it.
 
-## 7. Mechanical gates vs. advisory review vs. human approval
+## 8. Mechanical gates vs. advisory review vs. human approval
 
 This is a locked rule (ADR-032), and V0.3D does not change it:
 
@@ -225,7 +283,7 @@ This is a locked rule (ADR-032), and V0.3D does not change it:
   merged." A gate passing means "no known mechanical violation," never
   "approved."
 
-## 8. What future capability work (V0.3E/V0.4A) can and cannot do here
+## 9. What future capability work (V0.3E/V0.4A) can and cannot do here
 
 V0.3D is deliberately built so that adding a new tool module, its tests,
 its docs, and its explicit registration entry — the shape V0.3E's manual
@@ -242,29 +300,43 @@ What it still cannot do, by design, without an explicit human-reviewed
 change to `scripts/gates/policy.py` itself (which is, in turn, protected —
 see §5): touch the executor, the approval state machine, auth, production
 routing/deployment configuration, or `backend/tool_registry.py`'s
-registration call path. That is intentional — "core registration
-authority remains the existing explicit registry/build path" (ADR-031) —
-and nothing in V0.3D automates an exception to it. Making that workflow
-possible without loosening this boundary is future work (V0.3E onward),
-not something this phase implements.
+registration call path. **`backend/tool_registry.py` remains protected
+intentionally** — that is not an oversight to fix later; it is "core
+registration authority remains the existing explicit registry/build path"
+(ADR-031), and nothing in V0.3D automates an exception to it.
 
-## 9. Enabling enforcement
+Designing the actual mechanics of how a future, human-approved capability
+change adds a registration entry to `backend/tool_registry.py` without
+that touch tripping this protected-path gate — or how such a change gets
+its own narrower, safer review path instead of the blanket
+`DENIED_PATHS` treatment every other protected-core edit gets — is
+**deferred to V0.3E/V0.4A and is not solved by V0.3D.** V0.3D's job is
+only to make sure the boundary exists and holds; designing a way through
+it for legitimate future work is explicitly out of scope here.
 
-The `protected-core-gates` CI job runs on every push/PR and reports a
-pass/fail check, exactly like the existing `build` job. That alone makes
-a failure **visible**; making it actually **block** the merge button is a
+## 10. Enabling enforcement
+
+**Workflow presence alone does not make GitHub enforce the check.** The
+`protected-core-gates` CI job runs on every push/PR and reports a
+pass/fail check, exactly like the existing `build` job — but a job simply
+existing in `.github/workflows/` does not, by itself, stop GitHub from
+letting a PR merge while that check is red. That alone makes a failure
+**visible**; making it actually **block** the merge button is a separate,
 one-time GitHub repository setting (Settings → Branches → branch
 protection rule for the default branch → "Require status checks to pass
 before merging" → select `protected-core-gates`), which a repository
-admin must configure — no workflow file can grant that on its own. Until
-that setting is turned on, a red `protected-core-gates` check is still a
-strong signal a human reviewer should not ignore, but is not yet a
-mechanical hard block. This is a deliberate, minimal scope: V0.3D builds
-the check; wiring it to branch protection is a one-click repository
-administration action, not application code, and is left to whoever
-administers `mootmoot1/MootOS`.
+admin must configure — no workflow file can grant that on its own.
 
-## 10. Running the gates locally
+**After V0.3D merges, the repo admin must perform this step.** Until that
+setting is turned on, a red `protected-core-gates` check is still a
+strong signal a human reviewer should not ignore, but is not yet a
+mechanical hard block on the merge button itself. This is a deliberate,
+minimal scope: V0.3D builds the check and makes it run automatically;
+wiring it to branch protection is a one-click repository administration
+action, not application code, and is left to whoever administers
+`mootmoot1/MootOS` to do once this PR is merged.
+
+## 11. Running the gates locally
 
 ```sh
 python scripts/gates/run_gates.py --base origin/main --head HEAD
