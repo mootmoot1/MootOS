@@ -72,6 +72,26 @@ retrieved content as untrusted data and registering only when a search
 service is configured (`docs/WEB_AWARENESS.md`, ADR-035). No write-capable
 external operation, no filesystem or shell access, no schema migration.
 
+**Implemented, pending merge:** V0.3D Protected Core + Mechanical Release
+Gates, on branch `claude/v0.3d-protected-core-gates` — converts ADR-031's
+protected-core rules into deterministic CI gates
+(`scripts/gates/`): a protected-path diff check, a migration-safety check
+that distinguishes additive migrations from history rewrites, a risk-
+metadata check that fails a `ToolDefinition.risk` field given a default
+value, a narrow registration-authority scan for plugin-discovery/dynamic-
+import/executor-bypass patterns, and a repo-local secret scan. All five
+run automatically in a new `protected-core-gates` CI job; making that
+check actually block the merge button also requires a one-time GitHub
+branch-protection setting a repo admin enables after merge (workflow
+presence alone does not enforce it). None of the five gates is a model
+call or a source of merge authority — human approval still controls
+merge (`docs/GATES_AND_RELEASE_SAFETY.md`, ADR-031). This PR is a
+one-time bootstrap exception to the protected-path gate itself (no
+trusted `scripts/gates/` exists on `main` yet for it to run against) —
+see `docs/GATES_AND_RELEASE_SAFETY.md` §6; it is not a precedent for
+merging any future PR with a red gate. No new tool, no new HTTP route,
+no schema migration.
+
 The repository currently has no scheduler, reminder delivery, recurrence,
 background worker, multi-user system, or capability-builder automation.
 
@@ -94,7 +114,9 @@ advisory gap reasoning — **implemented and merged**, see
 awareness — **implemented on branch
 `claude/v0.3c-self-inspection-web-awareness`, pending merge**, see
 `docs/SELF_INSPECTION.md` and `docs/WEB_AWARENESS.md` — → **V0.3D**
-protected core enforced as mechanical release gates
+protected core enforced as mechanical release gates — **implemented on
+branch `claude/v0.3d-protected-core-gates`, pending merge**, see
+`docs/GATES_AND_RELEASE_SAFETY.md`
 → **V0.3E** a manual, human-run capability-build pipeline proven on at
 least two real capabilities → **V0.4A** capability-builder automation
 (isolated builds only, no self-install) → **V0.4B** a usage-gated,

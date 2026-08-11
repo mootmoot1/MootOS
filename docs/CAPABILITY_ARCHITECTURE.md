@@ -7,8 +7,11 @@
 Reasoning) is implemented and merged** — see `docs/GAP_REASONING.md`.
 **V0.3C (Narrow Self-Awareness + World Awareness) is implemented on branch
 `claude/v0.3c-self-inspection-web-awareness`, pending merge** — see
-`docs/SELF_INSPECTION.md` and `docs/WEB_AWARENESS.md`. V0.3D–V0.3E and
-V0.4A–V0.4D remain plan only, nothing implemented.
+`docs/SELF_INSPECTION.md` and `docs/WEB_AWARENESS.md`. **V0.3D (Protected
+Core + Mechanical Release Gates) is implemented on branch
+`claude/v0.3d-protected-core-gates`, pending merge** — see
+`docs/GATES_AND_RELEASE_SAFETY.md`. V0.3E and V0.4A–V0.4D remain plan
+only, nothing implemented.
 **Applies to:** design and build order for everything after V0.2A.
 **Companion documents:** `docs/TOOL_SYSTEM.md` (the current executable Tool
 System), ADR-027 (the V0.2A decision record), ADR-028 through ADR-034 (the
@@ -203,6 +206,17 @@ built because a real capability needs it, not a generalized framework built
 in advance.
 
 ### V0.3D — Protected Core + Mechanical Release Gates
+
+**Implemented on branch `claude/v0.3d-protected-core-gates`, pending
+merge.** See `docs/GATES_AND_RELEASE_SAFETY.md` for the concrete result
+(`scripts/gates/`: `protected_paths.py`, `migration_safety.py`,
+`risk_metadata.py`, `registration_authority.py`, `secret_scan.py`,
+orchestrated by `run_gates.py`) and ADR-031 for the decision it carries
+out. All five gates are deterministic scripts run automatically by a new
+`protected-core-gates` CI job — none of them calls a model, and none of
+them is a source of merge authority (§8). No capability builder, local
+node, Codex bridge, external write tool, workflow persistence, or
+self-installation exists yet or is enabled by this work.
 
 Safety rules become enforceable gates before any self-building work begins.
 

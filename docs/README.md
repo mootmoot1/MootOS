@@ -34,6 +34,9 @@ As of August 9, 2026:
 - V0.3C Narrow Self-Inspection + Read-Only Web Awareness is implemented on
   branch `claude/v0.3c-self-inspection-web-awareness`, **not yet merged**
   (`docs/SELF_INSPECTION.md`, `docs/WEB_AWARENESS.md`, ADR-035)
+- V0.3D Protected Core + Mechanical Release Gates is implemented on branch
+  `claude/v0.3d-protected-core-gates`, **not yet merged**
+  (`docs/GATES_AND_RELEASE_SAFETY.md`, ADR-031)
 - scheduler/reminder delivery does **not** exist
 
 The locked next-phase plan is `docs/CAPABILITY_ARCHITECTURE.md` and
@@ -54,6 +57,8 @@ Useful focused documents include:
   merged to `main` — see its own Status line)
 - `WEB_AWARENESS.md` — V0.3C read-only web awareness and MootOS's first
   external connector (not yet merged to `main`)
+- `GATES_AND_RELEASE_SAFETY.md` — V0.3D protected core + mechanical CI
+  gates (not yet merged to `main`)
 - `FOUNDATION_HARDENING.md`
 - `CHAT_PROVIDER_PIPELINE.md`
 - `MODEL_INPUT_AND_CAPABILITIES.md`
