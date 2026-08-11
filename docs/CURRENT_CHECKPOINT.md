@@ -5,7 +5,7 @@
 **Default branch:** `main`  
 **Current release on `main`:** Version 0.1 foundation plus the V0.2A Tool Foundation, V0.3A Capability-Aware Tool System, V0.3B Structured Gap Reasoning, V0.3C Narrow Self-Inspection + Read-Only Web Awareness, and V0.3D Protected Core + Mechanical Release Gates  
 **Current schema on `main`:** `5 — tool_system`  
-**Also implemented, pending merge:** V0.3E Manual Capability-Build Pipeline, on branch `claude/v0.3e-manual-capability-pipeline` (adds no migration -- schema stays `5 — tool_system` once merged; adds one new read-only registered tool, `tasks.status_summary`, pending merge)
+**Also implemented, pending merge:** V0.3E proof #2, on branch `claude/v0.3e-proof-2-capability` (adds no migration -- schema stays `5 — tool_system` once merged; adds one new read-only registered tool, `projects.overview`, pending merge). This completes ADR-034's two-proof prerequisite for V0.4A, which remains unimplemented and still requires its own design/review step.
 
 ## Current production topology
 
@@ -141,9 +141,8 @@ Codex bridge, external write tool, workflow persistence, or
 self-installation exists yet or is enabled by this work. No new tool, no
 new HTTP route, no schema migration, no runtime behavior change.
 
-### V0.3E Manual Capability-Build Pipeline — implemented on branch, pending merge
+### V0.3E Manual Capability-Build Pipeline — merged (proof #1); proof #2 on branch, pending merge
 
-Branch `claude/v0.3e-manual-capability-pipeline`.
 `docs/CAPABILITY_BUILD_PIPELINE.md`, ADR-034. Proves the manual
 capability-build lifecycle end to end on one real capability,
 `tasks.status_summary` -- a new `RISK_READ_ONLY` tool
@@ -164,12 +163,40 @@ needs -- one line registering it in `build_default_registry()` -- fails
 V0.3D's protected-path gate exactly as intended; no gate was weakened and
 no alternate registration path was created. No autonomous builder exists:
 no automatic branch/commit/PR/merge/registration/deployment anywhere in
-this phase. This is the first of the two proof capabilities ADR-034
-requires before V0.4A (capability-builder automation) can begin. No new
-HTTP route, no schema migration.
+this phase. No new HTTP route, no schema migration.
 
-Next planned work is a second, independent V0.3E proof capability
-(required by ADR-034 before any automation begins), not yet started.
+**Proof #2 -- `projects.overview`, on branch
+`claude/v0.3e-proof-2-capability`, pending merge.** A read-only
+cross-table rollup (`backend/project_insight.py`,
+`backend/tools_project_insight.py`) reporting per-project active-memory,
+open/total-Task, and conversation counts plus a last-activity timestamp,
+scoped optionally to one project. Deliberately a different resource and
+query shape from proof #1, so the second pass tested whether the pipeline
+generalizes rather than repeating the first exercise. It did: the V0.3E
+spec schema, lifecycle model, artifact pattern, and V0.3D gates were all
+used unchanged, with no pipeline redesign needed.
+
+The advisory review stage proved load-bearing rather than ceremonial.
+Run with three genuinely independent reviewer instances (separate model
+instances, independent contexts, read-only tools, all reviewing the same
+immutable commit) instead of one model writing three reviews in
+sequence, two of the three returned `concerns_noted` against the first
+implementation and surfaced four reproducible correctness defects (a
+case-merge that overwrote instead of accumulating; rows naming a
+deleted project vanishing from both the per-project entries and
+`unassigned`; a last-activity timestamp that did not move when a Task
+was completed; and one that could move backward when a memory was
+archived), plus a CI regression the diff itself introduced, a false
+docstring claim, and an unbounded result size. All were fixed with
+regression tests before the lifecycle record reached `ready_for_pr`.
+Proof #1's single-model reviews had found nothing.
+
+**Both proof capabilities ADR-034 requires are now complete.** That
+satisfies the two-pass prerequisite and removes a blocker on V0.4A --
+it does not start or approve it. V0.4A (capability-builder automation)
+remains unimplemented and still requires its own design and review step.
+
+Next planned work is V0.4A's design/review step, not yet started.
 
 ## Production-verified capabilities
 

@@ -1,12 +1,16 @@
 # MootOS Manual Capability-Build Pipeline (V0.3E)
 
-**Status:** Implemented on branch `claude/v0.3e-manual-capability-pipeline`,
-pending merge. One proof capability (`tasks.status_summary`) has been
-driven through this pipeline; ADR-034 requires **two** before any part of
-this process is automated. See `docs/CAPABILITY_ARCHITECTURE.md` §6
-(V0.3E) and ADR-034 for the decision this document carries out.
+**Status:** Pipeline and proof #1 (`tasks.status_summary`) implemented and
+merged. **Proof #2 (`projects.overview`) implemented on branch
+`claude/v0.3e-proof-2-capability`, pending merge** — see §12. With both
+proofs complete, ADR-034's two-pass prerequisite is satisfied; **V0.4A
+remains unimplemented and still requires its own design/review step**
+(§11). See `docs/CAPABILITY_ARCHITECTURE.md` §6 (V0.3E) and ADR-034 for
+the decision this document carries out.
 **Applies to:** `scripts/capability_pipeline/`, `capability_specs/`,
-`backend/tools_task_summary.py` (the first proof capability).
+`backend/tools_task_summary.py` (proof #1), and
+`backend/project_insight.py` / `backend/tools_project_insight.py`
+(proof #2).
 
 This document is the literal, step-by-step process a human (or Claude,
 working manually, under human direction) follows to add exactly one new
@@ -332,6 +336,105 @@ because:
 
 **One proof capability is not sufficient to automate any part of this
 pipeline.** ADR-034 requires at least two real capabilities to pass this
-pipeline before automation begins -- `tasks.status_summary` is the first.
-A second, independent capability must go through this same process,
-end to end, before V0.4A (Capability Builder Automation) begins.
+pipeline before automation begins. `tasks.status_summary` was the first
+(§10); `projects.overview` is the second (§12).
+
+**Both proofs are now complete**, which satisfies ADR-034's two-pass
+prerequisite. That does **not** mean V0.4A has started or is approved:
+V0.4A remains unimplemented and still requires its own design and review
+step before any automation is built. Satisfying a prerequisite removes a
+blocker; it does not authorize the next phase.
+
+## 12. Proof #2 — `projects.overview`
+
+**Chosen after inspecting the live registry and the actual domain code.**
+Five candidates were considered:
+
+| Candidate | Capability / tool | Why not chosen |
+| --- | --- | --- |
+| Memory statistics | `memory.insight` / `memory.stats` | Genuine gap, but a counts-by-status shape — nearly the same exercise as proof #1, so it would prove little about generalization |
+| Run/audit summary | `self.activity` / `self.activity_summary` | Genuine gap and useful, but arguably inside the existing `self.inspect` capability, risking a manufactured-gap objection |
+| Conversation search/listing | `conversations.*` | Rejected on data sensitivity: message content is the most sensitive local data, and `memory.search` already covers cross-chat recall by design |
+| Single-memory history | `memory.history` | Rejected: needs a `memory_id` the model would never have, so the input surface is unusable in practice |
+| **Per-project activity rollup** | **`projects.insight` / `projects.overview`** | **Chosen** |
+
+`projects.overview` is the stronger proof #2 because:
+
+- **It is a different resource and a genuinely different query shape.**
+  Proof #1 was a single-table count grouped by one column. This is a
+  cross-table rollup joining projects, memories, tasks, and conversations
+  into per-entity rows — so it actually tests whether the pipeline
+  generalizes rather than repeating the same exercise.
+- **The gap is verifiable rather than asserted.** Running the real V0.3B
+  `analyze_goal()` against the pre-proof-#2 registry (exactly what is
+  merged on `main`) classified the goal `capability_gap`. The report
+  deliberately proposes *two* capabilities, and the deterministic
+  resolver independently confirms `projects.view` **is** installed while
+  `projects.insight` is **not** — so the gap is a fact about the registry,
+  not an artifact of inventing a new dotted string.
+- **It has a real input surface worth attacking.** An optional project
+  name that must be matched case-insensitively against a
+  `UNIQUE COLLATE NOCASE` column, which gives the adversarial tests
+  something substantive to probe.
+- **Same low-risk profile as proof #1:** read-only, local, no credential,
+  no migration, no configuration gate, and none of the excluded
+  categories (filesystem, shell, email/calendar, Dropbox, paid APIs,
+  local node, Codex, external writes).
+
+## 13. What proof #2 changed about the process
+
+Proof #2 was run against the *unchanged* V0.3E pipeline — no redesign was
+needed, which is itself part of what the second pass was meant to test.
+Two things did change, both in process hygiene rather than tooling:
+
+**Genuinely independent reviewers.** In proof #1 one model wrote all
+three advisory reviews in sequence. For proof #2 each role ran as a
+**separate model instance with its own independent context and read-only
+tools**, all three reviewing the same immutable commit (`f483ae1`):
+
+| Role | Reviewer | Verdict |
+| --- | --- | --- |
+| Correctness + test quality | Claude Opus 5 | `concerns_noted` |
+| Security + permissions | Claude Sonnet 5 | `concerns_noted` |
+| Architecture + duplication | Claude Haiku 4.5 | `no_concerns` |
+
+This is "independent" in a specific and limited sense worth stating
+plainly: separate instances, separate contexts, no shared scratchpad, and
+no ability to edit — but all three are Claude-family models orchestrated
+by the same session. It is not third-party or human review, and it should
+not be described as such.
+
+**The review stage actually caught things.** This is the important
+result. Two of three reviewers returned `concerns_noted`, and the
+concerns were real, reproducible defects — not style opinions:
+
+- the case-insensitive merge **overwrote instead of accumulating**, so
+  differently-cased project rows silently evicted each other's counts;
+- rows naming a project absent from the `projects` table **vanished from
+  both** the per-project entries and `unassigned`, the exact undercount
+  `unassigned` exists to prevent;
+- `last_activity_at` **did not move when a Task was completed**, despite
+  the tool description promising "when it was last touched";
+- `last_activity_at` could move **backward** when the newest memory was
+  archived;
+- the module docstring's stated justification for string-comparing
+  timestamps was **factually wrong** (the conclusion held for a different
+  reason);
+- the diff introduced a **CI regression** that only fails under a
+  supported-but-not-default configuration;
+- the rollup had **no result bound**, unlike every sibling tool.
+
+All were fixed with regression tests before the `reviewed` transition;
+one finding (non-transactional multi-statement reads) was accepted and
+documented rather than fixed. **Proof #1's reviews found nothing.**
+Whether that is because proof #1 was genuinely cleaner or because one
+model reviewing its own work three times is weaker review is not settled
+by a single comparison — but it is a strong argument for keeping
+independent reviewers in the pipeline, and for treating a
+`no_concerns` sweep with suspicion rather than satisfaction.
+
+**Consequence for V0.4A:** the "fixes" stage between review and PR is not
+optional decoration. Any future automation of this pipeline must preserve
+a real fix-and-re-verify loop, because on the second proof the first
+implementation was genuinely wrong in four ways that all tests passed
+through.

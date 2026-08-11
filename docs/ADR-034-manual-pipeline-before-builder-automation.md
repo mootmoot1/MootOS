@@ -3,13 +3,33 @@
 ## Status
 
 Accepted. Recorded August 9, 2026, as part of the V0.3/V0.4 architecture
-lock. **First manual proof run completed on branch
-`claude/v0.3e-manual-capability-pipeline`, pending merge** (August 2026)
-— see `docs/CAPABILITY_BUILD_PIPELINE.md`. One of the two required proof
-capabilities (`tasks.status_summary`) has passed the full pipeline; a
-second, independent capability must still pass it before any part of
-this process is automated (V0.4A). See `docs/CAPABILITY_ARCHITECTURE.md`
-§6 (V0.3E, V0.4A).
+lock.
+
+**Both required manual proof runs are now complete** (August 2026) — see
+`docs/CAPABILITY_BUILD_PIPELINE.md`:
+
+1. `tasks.status_summary` (capability `tasks.status_insight`) — merged.
+2. `projects.overview` (capability `projects.insight`) — implemented on
+   branch `claude/v0.3e-proof-2-capability`, **pending merge**.
+
+**The two-pass prerequisite this ADR imposes is therefore satisfied once
+proof #2 merges.** That removes the blocker on V0.4A; it does not start
+it. **V0.4A remains unimplemented and still requires its own design and
+review step** before any capability-builder automation is built. Nothing
+in either proof run granted MootOS authority to create a branch, commit,
+open a PR, merge, register a tool, or deploy.
+
+**What the second pass actually established**, beyond satisfying a
+count: the pipeline generalized without redesign (proof #2 used the
+V0.3E spec schema, lifecycle model, artifact pattern, and gates
+unchanged), and the advisory review stage proved load-bearing rather
+than ceremonial — two of three independent reviewers returned
+`concerns_noted` against proof #2's first implementation, surfacing four
+reproducible correctness defects, a CI regression, a false docstring
+claim, and an unbounded result size, all fixed before the record reached
+`ready_for_pr`. Proof #1's reviews, written by a single model in
+sequence, had found nothing. See
+`docs/CAPABILITY_BUILD_PIPELINE.md` §13.
 
 **Two clarifications recorded against the original decision text below,
 based on what V0.3E's first proof run actually required:**
@@ -22,7 +42,10 @@ based on what V0.3E's first proof run actually required:**
    see `docs/CAPABILITY_BUILD_PIPELINE.md` §10 for why it was a suitable
    substitute (low-risk, read-only, no external service/credential, and
    a real `capability_gap` verified against the live V0.3B gap-reasoning
-   pipeline before implementation began).
+   pipeline before implementation began). Proof #2 (`projects.overview`)
+   was deliberately chosen to be a different resource and a different
+   query shape, so the second pass tested generalization rather than
+   repeating the first exercise — §12.
 2. **"Deferred to this phase" (the lifecycle state machine) is narrower
    in practice than the original text might read.** V0.3E implements a
    small, seven-state, human-transition-only lifecycle

@@ -82,8 +82,24 @@ def test_capability_manifest_names_exactly_the_registered_v03a_tools():
     hand-maintained list -- see tests/test_capability_catalog.py for the
     dynamic add/remove/hallucination-prevention proof of that."""
     # Read-only tools are named in sorted order by the generator; V0.3C
-    # added self.architecture/self.state (and web.search when configured).
-    assert "memory.search, projects.list, self.architecture, self.state" in CAPABILITY_MANIFEST
+    # added self.architecture/self.state (and web.search when configured),
+    # V0.3E added tasks.status_summary (proof #1) and projects.overview
+    # (proof #2).
+    #
+    # Deliberately asserts a PREFIX of the generated sequence, stopping
+    # before the final element. The generator joins with an Oxford comma,
+    # so the last name is preceded by "and" -- meaning any assertion that
+    # includes the final element only matches one of the two supported
+    # configurations (web.search registers only when a search service is
+    # configured, see ADR-035). A prefix is still exact about membership
+    # and ordering, which is the drift protection ADR-029 wants, without
+    # silently failing under a configuration CI does not currently
+    # exercise.
+    assert (
+        "memory.search, projects.list, projects.overview, self.architecture, "
+        "self.state, tasks.list"
+    ) in CAPABILITY_MANIFEST
+    assert "tasks.status_summary" in CAPABILITY_MANIFEST
     assert "run automatically and only read existing MootOS data" in CAPABILITY_MANIFEST
     assert "tasks.create is registered as a write-capable tool" in CAPABILITY_MANIFEST
     assert "You may not invent, assume, or ask MootOS to run any other tool name" in CAPABILITY_MANIFEST
