@@ -214,15 +214,71 @@ def test_git_changed_paths_returns_a_list_of_strings():
     assert paths == []
 
 
-def test_git_changed_paths_uses_three_dot_merge_base_semantics():
-    """Sanity check that this really shells out to `git diff A...B`, not
-    `git diff A B` -- verified by confirming the invocation succeeds
-    against a real ref and returns a list (exact contents depend on repo
-    state, which is why this only checks the type/shape, not specific
-    paths)."""
-    paths = git_changed_paths("HEAD~1", "HEAD")
-    assert isinstance(paths, list)
-    assert all(isinstance(path, str) for path in paths)
+def test_git_changed_paths_uses_three_dot_merge_base_semantics(tmp_path, monkeypatch):
+    """Proves this really shells out to `git diff A...B` (merge-base
+    semantics, matching GitHub's PR "Files changed" tab), not `git diff
+    A B` (a plain two-ref diff) -- by building a small, throwaway repo
+    with a real divergence and checking the *contents* of the result,
+    not just its shape.
+
+    Deliberately does not depend on this repository's own checkout depth
+    (a bare `HEAD~1` used to be used here, which fails with "ambiguous
+    argument" under CI's shallow `fetch-depth: 1` checkout, since no
+    parent commit is present locally -- this test must pass identically
+    however this repository itself happens to be checked out)."""
+
+    def run(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+    run("init", "-q")
+    # Name the initial branch explicitly rather than relying on git's
+    # configured default (which varies -- "master" vs "main" -- across
+    # environments and would make this test flaky).
+    run("symbolic-ref", "HEAD", "refs/heads/base-branch")
+    run("config", "user.email", "gate-test@example.invalid")
+    run("config", "user.name", "Gate Test")
+
+    (tmp_path / "shared.txt").write_text("shared\n")
+    run("add", "shared.txt")
+    run("commit", "-q", "-m", "initial")
+
+    # head-branch diverges from base-branch here and adds its own file.
+    run("checkout", "-q", "-b", "head-branch")
+    (tmp_path / "head_only.txt").write_text("head only\n")
+    run("add", "head_only.txt")
+    run("commit", "-q", "-m", "head-only change")
+
+    # base-branch then moves on independently, simulating unrelated
+    # commits landing on the real base after this branch's merge-base --
+    # exactly what three-dot semantics must ignore.
+    run("checkout", "-q", "base-branch")
+    (tmp_path / "base_only.txt").write_text("base only\n")
+    run("add", "base_only.txt")
+    run("commit", "-q", "-m", "base-only change")
+
+    monkeypatch.chdir(tmp_path)
+    paths = git_changed_paths("base-branch", "head-branch")
+
+    # Three-dot semantics: only what head-branch introduced since the
+    # merge-base (head_only.txt) -- never base-branch's own unrelated
+    # base_only.txt, which a plain two-dot `git diff base head` would
+    # incorrectly include (asserted directly below for contrast).
+    assert paths == ["head_only.txt"]
+
+    two_dot = subprocess.run(
+        ["git", "diff", "--name-only", "base-branch", "head-branch"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    two_dot_paths = set(two_dot.stdout.splitlines())
+    assert two_dot_paths == {"head_only.txt", "base_only.txt"}
+    assert two_dot_paths != set(paths), (
+        "two-dot and three-dot diffs must differ here -- if they don't, "
+        "this test's divergence setup isn't actually exercising the "
+        "distinction git_changed_paths() is supposed to prove"
+    )
 
 
 def test_evaluate_end_to_end_against_a_real_but_trivial_diff():
