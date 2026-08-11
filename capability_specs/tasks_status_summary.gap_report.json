@@ -1,0 +1,20 @@
+{
+  "goal": "How many open Tasks do I have right now, broken down by status?",
+  "requirements": [
+    {
+      "capability": "tasks.status_insight",
+      "reason": "The goal asks for a breakdown of Task counts by status, which no installed capability currently provides in one call.",
+      "externally_blocked": false,
+      "installed": false,
+      "tools": []
+    }
+  ],
+  "available_capabilities": [],
+  "composable_capabilities": [],
+  "missing_capabilities": [
+    "tasks.status_insight"
+  ],
+  "externally_blocked_capabilities": [],
+  "classification": "capability_gap",
+  "notes": "Missing: tasks.status_insight."
+}
