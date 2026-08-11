@@ -24,7 +24,7 @@ route around. See ``docs/GATES_AND_RELEASE_SAFETY.md`` §9.
 
 from typing import Any
 
-from backend.project_insight import summarize_projects as _summarize_projects
+from backend.project_insight import MAX_PROJECT_ENTRIES, summarize_projects as _summarize_projects
 from backend.runs import DATA_EXPOSURE_LOCAL
 from backend.tool_registry import ToolRegistry
 from backend.tool_types import (
@@ -55,7 +55,8 @@ PROJECTS_OVERVIEW = ToolDefinition(
     description=(
         "Report an activity overview across MootOS projects: for each "
         "project, how many active memories, open and total Tasks, and "
-        "conversations it has, plus when it was last touched. Optionally "
+        "conversations it has, plus when anything in it was last created "
+        "or changed. Optionally "
         "scope to one project by name. Use this to answer questions like "
         "'what's going on in my projects', 'which project has been quiet', "
         "or 'how much do I have stored under Studio'. Returns counts and "
@@ -80,10 +81,14 @@ PROJECTS_OVERVIEW = ToolDefinition(
     limitations=(
         "Returns counts and one last-activity timestamp per project, never "
         "any memory/Task/conversation content. Counts active memories only "
-        "(archived and superseded memories are excluded). Every project is "
-        "listed even when it has no activity. Items not assigned to any "
-        "project are reported separately under 'unassigned', which is "
-        "omitted when the call is scoped to a single project."
+        "(archived and superseded memories are excluded from the count, "
+        "though they still count as activity for the timestamp). Every "
+        "project is listed even when it has no activity. Items not "
+        "assigned to any project -- or assigned to a project name that no "
+        "longer exists -- are reported together under 'unassigned', which "
+        "is omitted when the call is scoped to a single project. At most "
+        f"{MAX_PROJECT_ENTRIES} projects are returned; 'truncated' is true "
+        "if there were more."
     ),
     depends_on=("projects.list",),
 )

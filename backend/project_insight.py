@@ -19,22 +19,56 @@ queries total, independent of how many projects exist. This is
 deliberately **not** an N+1 loop issuing per-project counts, so the cost
 does not grow with the number of projects.
 
-## Two correctness details worth knowing
+## Correctness details worth knowing
 
-1. **Project names are matched case-insensitively.** ``projects.name`` is
-   ``UNIQUE COLLATE NOCASE``, and ``memories``/``tasks``/``conversations``
-   each store the canonical project *name* (resolved through their own
-   ``_get_project``-style lookups at write time). Merging on a
-   ``casefold()``-ed key means a row stored under a differently-cased
-   spelling still lands on the right project instead of silently
-   disappearing from the rollup.
-2. **Timestamps are compared as strings, and that is sound here.** Every
-   ``created_at``/``updated_at`` in these tables is written as
-   ``datetime.now(timezone.utc).isoformat()`` -- always UTC, always the
-   same fixed-width shape -- so lexicographic ``max()`` over them equals
-   chronological max. This would stop being true if a caller ever stored
-   a local-timezone or differently-formatted timestamp; nothing in
-   MootOS does.
+1. **Project names are matched case-insensitively, and counts accumulate.**
+   ``projects.name`` is ``UNIQUE COLLATE NOCASE``, and
+   ``memories``/``tasks``/``conversations`` each store the canonical
+   project *name*. Every current write path canonicalizes, so mixed-case
+   values should not occur -- but if a legacy or directly-inserted row
+   does carry one, ``GROUP BY project`` yields it as a separate row.
+   Those rows are merged on a ``casefold()``-ed key and their counts are
+   **added together**, never overwritten. (An earlier revision assigned
+   instead of accumulating, so the last row silently evicted the other
+   spelling's counts; that was caught in advisory review and is covered
+   by a regression test.)
+2. **A ``project`` value with no matching row in ``projects`` is folded
+   into ``unassigned``, not dropped.** Otherwise those rows would vanish
+   from both the per-project entries and the unassigned bucket, which
+   would defeat the whole point of reporting ``unassigned`` at all.
+3. **Timestamps are compared as strings, and that is sound here -- but
+   not for the reason it might appear.** ``isoformat()`` is *not*
+   fixed-width: it emits ``2026-01-01T00:00:00+00:00`` (25 chars) when
+   microseconds are exactly zero and ``...00.000001+00:00`` (32 chars)
+   otherwise. Lexicographic order still matches chronological order
+   because the two possible characters at the divergence point are ``+``
+   (0x2B) and ``.`` (0x2E), and ``+`` sorts first -- which is the correct
+   answer, since a timestamp with no microseconds precedes one with any.
+   All six write paths use the same UTC ``isoformat()`` constructor. Do
+   not rely on these strings being a fixed length.
+4. **``last_activity_at`` is monotonic and genuinely means "last
+   touched".** It is computed over *all* rows of each table -- not just
+   the ones being counted -- using ``COALESCE(updated_at, created_at)``.
+   That matters: an earlier revision took ``MAX(created_at)`` over
+   *active* memories only, so completing a Task did not move the
+   timestamp and archiving the newest memory moved it *backward*. Both
+   were caught in advisory review and are covered by regression tests.
+
+## Consistency and cost
+
+The four reads run inside one connection but are four separate
+statements, and Python's ``sqlite3`` does not hold a read snapshot across
+them (it opens transactions only for DML). A writer interleaving between
+statements could therefore produce a slightly inconsistent rollup. This
+is accepted rather than fixed: MootOS is single-user and single-replica,
+and taking an explicit transaction here would add write-path contention
+for a read-only convenience view.
+
+Each aggregate is a full scan of its table, and the number of entries
+returned is capped at ``MAX_PROJECT_ENTRIES`` with an explicit
+``truncated`` flag, so the output can never grow without bound (raised in
+advisory review: every sibling list-shaped tool in this codebase bounds
+its results).
 
 ## What this deliberately does not expose
 
@@ -56,6 +90,14 @@ from backend.tasks import TASK_STATUS_OPEN
 # intermediate mapping. Never a legal project name (project names are
 # non-empty), so it cannot collide with a real one.
 _UNASSIGNED_KEY = None
+
+# Hard cap on how many project entries one call returns. Projects are
+# user-created and realistically number in the tens, so this is not
+# expected to bind -- it exists so the response can never grow without
+# bound, matching the bounded-output pattern every other list-shaped tool
+# in this codebase already follows. When it does bind, `truncated` says so
+# explicitly rather than silently returning a partial answer.
+MAX_PROJECT_ENTRIES = 200
 
 
 def _empty_entry() -> dict[str, Any]:
@@ -135,28 +177,29 @@ def summarize_projects(project: Optional[str] = None) -> dict[str, Any]:
                 merged[key] = _empty_entry()
             return merged[key]
 
+        # Counts are filtered (active memories, open tasks) but the
+        # activity timestamp deliberately is not -- see docstring note 4.
         memory_rows = connection.execute(
             """
             SELECT project,
-                   COUNT(*) AS active_memories,
-                   MAX(created_at) AS last_created_at
+                   SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS active_memories,
+                   MAX(COALESCE(updated_at, created_at)) AS last_touched_at
             FROM memories
-            WHERE status = ?
             GROUP BY project
             """,
             (MEMORY_STATUS_ACTIVE,),
         ).fetchall()
         for row in memory_rows:
             entry = entry_for(row["project"])
-            entry["active_memories"] = int(row["active_memories"])
-            entry["last_activity_at"] = _newer(entry["last_activity_at"], row["last_created_at"])
+            entry["active_memories"] += int(row["active_memories"] or 0)
+            entry["last_activity_at"] = _newer(entry["last_activity_at"], row["last_touched_at"])
 
         task_rows = connection.execute(
             """
             SELECT project,
                    COUNT(*) AS total_tasks,
                    SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS open_tasks,
-                   MAX(created_at) AS last_created_at
+                   MAX(COALESCE(updated_at, created_at)) AS last_touched_at
             FROM tasks
             GROUP BY project
             """,
@@ -164,27 +207,29 @@ def summarize_projects(project: Optional[str] = None) -> dict[str, Any]:
         ).fetchall()
         for row in task_rows:
             entry = entry_for(row["project"])
-            entry["total_tasks"] = int(row["total_tasks"])
-            entry["open_tasks"] = int(row["open_tasks"] or 0)
-            entry["last_activity_at"] = _newer(entry["last_activity_at"], row["last_created_at"])
+            entry["total_tasks"] += int(row["total_tasks"] or 0)
+            entry["open_tasks"] += int(row["open_tasks"] or 0)
+            entry["last_activity_at"] = _newer(entry["last_activity_at"], row["last_touched_at"])
 
         conversation_rows = connection.execute(
             """
             SELECT project,
                    COUNT(*) AS conversations,
-                   MAX(updated_at) AS last_updated_at
+                   MAX(COALESCE(updated_at, created_at)) AS last_touched_at
             FROM conversations
             GROUP BY project
             """
         ).fetchall()
         for row in conversation_rows:
             entry = entry_for(row["project"])
-            entry["conversations"] = int(row["conversations"])
-            entry["last_activity_at"] = _newer(entry["last_activity_at"], row["last_updated_at"])
+            entry["conversations"] += int(row["conversations"] or 0)
+            entry["last_activity_at"] = _newer(entry["last_activity_at"], row["last_touched_at"])
 
         project_rows = connection.execute(
             "SELECT name FROM projects ORDER BY name COLLATE NOCASE ASC"
         ).fetchall()
+
+    known_keys = {_merge_key(str(row["name"])) for row in project_rows}
 
     entries = []
     for row in project_rows:
@@ -194,7 +239,27 @@ def summarize_projects(project: Optional[str] = None) -> dict[str, Any]:
         entry = dict(merged.get(_merge_key(name), _empty_entry()))
         entries.append({"name": name, **entry})
 
-    result: dict[str, Any] = {"projects": entries, "count": len(entries)}
+    truncated = len(entries) > MAX_PROJECT_ENTRIES
+    entries = entries[:MAX_PROJECT_ENTRIES]
+
+    result: dict[str, Any] = {
+        "projects": entries,
+        "count": len(entries),
+        "truncated": truncated,
+    }
     if canonical_project is None:
-        result["unassigned"] = dict(merged.get(_UNASSIGNED_KEY, _empty_entry()))
+        # Fold rows whose project value matches no known project into
+        # `unassigned` rather than dropping them -- see docstring note 2.
+        unassigned = _empty_entry()
+        for key, entry in merged.items():
+            if key in known_keys:
+                continue
+            unassigned["active_memories"] += entry["active_memories"]
+            unassigned["open_tasks"] += entry["open_tasks"]
+            unassigned["total_tasks"] += entry["total_tasks"]
+            unassigned["conversations"] += entry["conversations"]
+            unassigned["last_activity_at"] = _newer(
+                unassigned["last_activity_at"], entry["last_activity_at"]
+            )
+        result["unassigned"] = unassigned
     return result
