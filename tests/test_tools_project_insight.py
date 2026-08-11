@@ -186,6 +186,72 @@ def test_differently_cased_project_rows_accumulate_instead_of_overwriting(clean_
     assert entry["open_tasks"] == 2
 
 
+def test_unicode_names_distinct_under_sqlite_nocase_do_not_merge(clean_db):
+    """The in-memory merge identity must exactly match SQLite NOCASE.
+
+    SQLite folds ASCII case but does not broadly Unicode-casefold, so
+    STRASSE and Straße are distinct legal project names. Python casefold
+    would collapse both and duplicate their combined aggregates onto each
+    project entry.
+    """
+    create_project(name="STRASSE")
+    create_project(name="Straße")
+    create_memory(content="upper only", project="STRASSE")
+    create_memory(content="eszett one", project="Straße")
+    create_memory(content="eszett two", project="Straße")
+    create_task(title="eszett task", project="Straße")
+
+    upper_timestamp = "2026-01-01T00:00:00+00:00"
+    eszett_timestamp = "2026-03-01T00:00:00+00:00"
+    with database_connection() as connection:
+        connection.execute(
+            "UPDATE memories SET updated_at = ? WHERE project = 'STRASSE'",
+            (upper_timestamp,),
+        )
+        connection.execute(
+            "UPDATE memories SET updated_at = ? WHERE project = 'Straße'",
+            ("2026-02-01T00:00:00+00:00",),
+        )
+        connection.execute(
+            "UPDATE tasks SET updated_at = ? WHERE project = 'Straße'",
+            (eszett_timestamp,),
+        )
+
+    result = summarize_projects()
+    entries = _by_name(result)
+
+    assert entries["STRASSE"] == {
+        "name": "STRASSE",
+        "active_memories": 1,
+        "open_tasks": 0,
+        "total_tasks": 0,
+        "conversations": 0,
+        "last_activity_at": upper_timestamp,
+    }
+    assert entries["Straße"] == {
+        "name": "Straße",
+        "active_memories": 2,
+        "open_tasks": 1,
+        "total_tasks": 1,
+        "conversations": 0,
+        "last_activity_at": eszett_timestamp,
+    }
+    collision_names = ("STRASSE", "Straße")
+    assert sum(
+        entries[name]["active_memories"] for name in collision_names
+    ) == 3
+    assert sum(entries[name]["total_tasks"] for name in collision_names) == 1
+
+    assert summarize_projects(project="STRASSE")["projects"] == [
+        entries["STRASSE"]
+    ]
+    assert summarize_projects(project="Straße")["projects"] == [
+        entries["Straße"]
+    ]
+    ascii_scoped = summarize_projects(project="mootos")
+    assert ascii_scoped["projects"][0]["name"] == "MootOS"
+
+
 def test_rows_naming_a_project_that_does_not_exist_land_in_unassigned(clean_db):
     """Regression (advisory review, correctness role): a project value with
     no matching row in `projects` was dropped from BOTH the per-project

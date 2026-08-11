@@ -21,17 +21,19 @@ does not grow with the number of projects.
 
 ## Correctness details worth knowing
 
-1. **Project names are matched case-insensitively, and counts accumulate.**
+1. **Project names are matched using SQLite's built-in ``NOCASE`` rule,
+   and counts accumulate.**
    ``projects.name`` is ``UNIQUE COLLATE NOCASE``, and
    ``memories``/``tasks``/``conversations`` each store the canonical
    project *name*. Every current write path canonicalizes, so mixed-case
    values should not occur -- but if a legacy or directly-inserted row
    does carry one, ``GROUP BY project`` yields it as a separate row.
-   Those rows are merged on a ``casefold()``-ed key and their counts are
-   **added together**, never overwritten. (An earlier revision assigned
-   instead of accumulating, so the last row silently evicted the other
-   spelling's counts; that was caught in advisory review and is covered
-   by a regression test.)
+   Those rows are merged using the same ASCII-only case-insensitivity as
+   SQLite: ASCII letters fold while non-ASCII code points remain distinct.
+   Their counts are **added together**, never overwritten. (An earlier
+   revision assigned instead of accumulating, so the last row silently
+   evicted the other spelling's counts; that was caught in advisory review
+   and is covered by a regression test.)
 2. **A ``project`` value with no matching row in ``projects`` is folded
    into ``unassigned``, not dropped.** Otherwise those rows would vanish
    from both the per-project entries and the unassigned bucket, which
@@ -79,6 +81,7 @@ never what any of it says.
 """
 
 import sqlite3
+import string
 from typing import Any, Optional
 
 from backend.db import database_connection
@@ -90,6 +93,12 @@ from backend.tasks import TASK_STATUS_OPEN
 # intermediate mapping. Never a legal project name (project names are
 # non-empty), so it cannot collide with a real one.
 _UNASSIGNED_KEY = None
+
+# Match SQLite's built-in NOCASE collation: only ASCII A-Z fold to a-z.
+# Broad Unicode case folding would merge project names SQLite considers
+# distinct, making their aggregate counts and timestamps contaminate each
+# other.
+_ASCII_FOLD = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
 
 # Hard cap on how many project entries one call returns. Projects are
 # user-created and realistically number in the tens, so this is not
@@ -121,7 +130,9 @@ def _newer(current: Optional[str], candidate: Optional[str]) -> Optional[str]:
 
 
 def _merge_key(project: Optional[str]) -> Optional[str]:
-    return _UNASSIGNED_KEY if project is None else project.casefold()
+    if project is None:
+        return _UNASSIGNED_KEY
+    return project.translate(_ASCII_FOLD)
 
 
 def _canonical_project_name(connection: sqlite3.Connection, project: str) -> str:
