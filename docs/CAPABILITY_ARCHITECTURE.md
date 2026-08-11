@@ -8,10 +8,14 @@ Reasoning) is implemented and merged** — see `docs/GAP_REASONING.md`.
 **V0.3C (Narrow Self-Awareness + World Awareness) is implemented on branch
 `claude/v0.3c-self-inspection-web-awareness`, pending merge** — see
 `docs/SELF_INSPECTION.md` and `docs/WEB_AWARENESS.md`. **V0.3D (Protected
-Core + Mechanical Release Gates) is implemented on branch
-`claude/v0.3d-protected-core-gates`, pending merge** — see
-`docs/GATES_AND_RELEASE_SAFETY.md`. V0.3E and V0.4A–V0.4D remain plan
-only, nothing implemented.
+Core + Mechanical Release Gates) is implemented and merged** — see
+`docs/GATES_AND_RELEASE_SAFETY.md`. **V0.3E (Manual Capability-Build
+Pipeline) is implemented on branch
+`claude/v0.3e-manual-capability-pipeline`, pending merge** — one proof
+capability (`tasks.status_summary`) has been driven through the pipeline;
+ADR-034 requires two before any automation begins — see
+`docs/CAPABILITY_BUILD_PIPELINE.md`. V0.4A–V0.4D remain plan only,
+nothing implemented.
 **Applies to:** design and build order for everything after V0.2A.
 **Companion documents:** `docs/TOOL_SYSTEM.md` (the current executable Tool
 System), ADR-027 (the V0.2A decision record), ADR-028 through ADR-034 (the
@@ -207,8 +211,7 @@ in advance.
 
 ### V0.3D — Protected Core + Mechanical Release Gates
 
-**Implemented on branch `claude/v0.3d-protected-core-gates`, pending
-merge.** See `docs/GATES_AND_RELEASE_SAFETY.md` for the concrete result
+**Implemented and merged.** See `docs/GATES_AND_RELEASE_SAFETY.md` for the concrete result
 (`scripts/gates/`: `protected_paths.py`, `migration_safety.py`,
 `risk_metadata.py`, `registration_authority.py`, `secret_scan.py`,
 orchestrated by `run_gates.py`) and ADR-031 for the decision it carries
@@ -259,6 +262,12 @@ deploy — always, with no exception carved out for this phase.
 
 ### V0.3E — Manual Capability-Build Pipeline
 
+**Implemented on branch `claude/v0.3e-manual-capability-pipeline`,
+pending merge.** See `docs/CAPABILITY_BUILD_PIPELINE.md` for the concrete
+result (`scripts/capability_pipeline/`: `spec.py`, `lifecycle.py`,
+`review.py`; `capability_specs/` for the actual spec/lifecycle
+artifacts) and ADR-034 for the decision it carries out.
+
 Before MootOS writes new capabilities itself, the process is proven by
 hand, end to end:
 
@@ -282,10 +291,15 @@ goal
 it is automated.** One success could be luck or an easy case; two
 establishes the process actually generalizes.
 
-**Recommended first proof capability:** live web/current-information
-search (the V0.3C world-awareness connector) — low-risk, read-only, and
-genuinely useful, so the first run of this pipeline proves the process on
-something real rather than a toy.
+**The originally recommended first proof capability -- live
+web/current-information search (the V0.3C world-awareness connector) --
+was already implemented and merged as part of V0.3C before this phase
+began**, so it could not serve as V0.3E's first proof run. V0.3E instead
+proved the pipeline on `tasks.status_summary` (a new, read-only Task
+status-count aggregate) -- see `docs/CAPABILITY_BUILD_PIPELINE.md` §10
+for why it was chosen. **This is the first of the two required proof
+runs; a second, independent capability must still pass this pipeline
+before any part of it is automated (V0.4A).**
 
 ### V0.4A — Capability Builder Automation
 

@@ -60,9 +60,8 @@ Implemented and merged:
   `docs/GAP_REASONING.md` and ADR-030. No new tool, no new HTTP route, no
   schema migration.
 
-**Implemented, pending merge:** V0.3C Narrow Self-Inspection + Read-Only
-Web Awareness, on branch `claude/v0.3c-self-inspection-web-awareness` —
-adds three read-only registered tools. `self.state` and
+**Merged:** V0.3C Narrow Self-Inspection + Read-Only
+Web Awareness — adds three read-only registered tools. `self.state` and
 `self.architecture` let MootOS answer questions about its own architecture
 and current phase from an explicit allow-list of curated documents plus
 live registry state, with the registry always authoritative over
@@ -72,8 +71,8 @@ retrieved content as untrusted data and registering only when a search
 service is configured (`docs/WEB_AWARENESS.md`, ADR-035). No write-capable
 external operation, no filesystem or shell access, no schema migration.
 
-**Implemented, pending merge:** V0.3D Protected Core + Mechanical Release
-Gates, on branch `claude/v0.3d-protected-core-gates` — converts ADR-031's
+**Merged:** V0.3D Protected Core + Mechanical Release
+Gates — converts ADR-031's
 protected-core rules into deterministic CI gates
 (`scripts/gates/`): a protected-path diff check, a migration-safety check
 that distinguishes additive migrations from history rewrites, a risk-
@@ -82,15 +81,30 @@ value, a narrow registration-authority scan for plugin-discovery/dynamic-
 import/executor-bypass patterns, and a repo-local secret scan. All five
 run automatically in a new `protected-core-gates` CI job; making that
 check actually block the merge button also requires a one-time GitHub
-branch-protection setting a repo admin enables after merge (workflow
+branch-protection setting a repo admin enables (workflow
 presence alone does not enforce it). None of the five gates is a model
 call or a source of merge authority — human approval still controls
-merge (`docs/GATES_AND_RELEASE_SAFETY.md`, ADR-031). This PR is a
-one-time bootstrap exception to the protected-path gate itself (no
-trusted `scripts/gates/` exists on `main` yet for it to run against) —
-see `docs/GATES_AND_RELEASE_SAFETY.md` §6; it is not a precedent for
-merging any future PR with a red gate. No new tool, no new HTTP route,
-no schema migration.
+merge (`docs/GATES_AND_RELEASE_SAFETY.md`, ADR-031).
+
+**Implemented, pending merge:** V0.3E Manual Capability-Build Pipeline, on
+branch `claude/v0.3e-manual-capability-pipeline` — proves the full manual
+capability lifecycle (goal → gap → validated spec → isolated branch →
+implementation → V0.3D gates → three distinct advisory reviews → PR →
+human merge → live install) on one real capability,
+`tasks.status_summary` (a new, read-only Task status-count aggregate;
+`docs/CAPABILITY_BUILD_PIPELINE.md`, ADR-034). Adds
+`scripts/capability_pipeline/` (a validated `CapabilitySpec` schema and a
+small, explicit, human-transition-only lifecycle record --
+`proposed → specified → implemented → tested → reviewed → ready_for_pr →
+merged`, with no automatic transitions and no coupling to
+`backend/tool_registry.py`). The one protected-core touch this capability
+needs -- one line registering it in `build_default_registry()` -- fails
+V0.3D's protected-path gate exactly as intended, surfacing it for
+explicit human review rather than bypassing it; no gate was weakened and
+no alternate registration path was created. No autonomous builder exists
+-- no automatic branch/commit/PR/merge/registration/deployment. One of
+the two proof capabilities ADR-034 requires before any automation begins
+is now complete. No schema migration.
 
 The repository currently has no scheduler, reminder delivery, recurrence,
 background worker, multi-user system, or capability-builder automation.
@@ -111,14 +125,16 @@ tool metadata, truthful "what can you do" answers) — **implemented and
 merged**, see `docs/TOOL_SYSTEM.md` §16 — → **V0.3B** structured,
 advisory gap reasoning — **implemented and merged**, see
 `docs/GAP_REASONING.md` — → **V0.3C** narrow self-awareness + read-only web
-awareness — **implemented on branch
-`claude/v0.3c-self-inspection-web-awareness`, pending merge**, see
+awareness — **implemented and merged**, see
 `docs/SELF_INSPECTION.md` and `docs/WEB_AWARENESS.md` — → **V0.3D**
-protected core enforced as mechanical release gates — **implemented on
-branch `claude/v0.3d-protected-core-gates`, pending merge**, see
-`docs/GATES_AND_RELEASE_SAFETY.md`
-→ **V0.3E** a manual, human-run capability-build pipeline proven on at
-least two real capabilities → **V0.4A** capability-builder automation
+protected core enforced as mechanical release gates — **implemented and
+merged**, see
+`docs/GATES_AND_RELEASE_SAFETY.md` — → **V0.3E** a manual, human-run
+capability-build pipeline proven on at least two real capabilities —
+**implemented on branch `claude/v0.3e-manual-capability-pipeline`,
+pending merge, one of two required proof capabilities complete**, see
+`docs/CAPABILITY_BUILD_PIPELINE.md`
+→ **V0.4A** capability-builder automation
 (isolated builds only, no self-install) → **V0.4B** a usage-gated,
 read-only-first Local Companion → **V0.4C** an automatic Codex worker
 bridge built on `AGENTS.md`'s existing manual boundaries → **V0.4D** a
