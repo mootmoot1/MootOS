@@ -1,6 +1,6 @@
 # MootOS Tool System (V0.2A, extended in V0.3A)
 
-**Status:** V0.2A implemented and merged to `main`. Live-verified on Railway/OpenAI, including a successful frozen approval → execution → persisted Task. V0.3A's capability-aware metadata and generated catalog/manifest (Sec16) and V0.3B's structured gap reasoning (`docs/GAP_REASONING.md`) are both implemented and merged on top of it. V0.3C's three read-only tools -- `self.state`, `self.architecture` (`docs/SELF_INSPECTION.md`), and `web.search` (`docs/WEB_AWARENESS.md`) -- are implemented on branch `claude/v0.3c-self-inspection-web-awareness`, pending merge.
+**Status:** V0.2A implemented and merged to `main`. Live-verified on Railway/OpenAI, including a successful frozen approval → execution → persisted Task. V0.3A's capability-aware metadata and generated catalog/manifest (Sec16) and V0.3B's structured gap reasoning (`docs/GAP_REASONING.md`) are both implemented and merged on top of it. V0.3C's three read-only tools -- `self.state`, `self.architecture` (`docs/SELF_INSPECTION.md`), and `web.search` (`docs/WEB_AWARENESS.md`) -- are implemented on branch `claude/v0.3c-self-inspection-web-awareness`, pending merge. V0.3D adds mechanical CI gates (`scripts/gates/`, `docs/GATES_AND_RELEASE_SAFETY.md`) that enforce parts of this document's own rules -- see §5 and §7 -- implemented on branch `claude/v0.3d-protected-core-gates`, pending merge.
 **Schema:** `5 — tool_system` (V0.3A added no migration -- its metadata lives on `ToolDefinition` in code, not in the database.)
 **Applies to:** the Tool System added in V0.2A on top of the V0.1 foundation (PR #34), plus the V0.3A capability catalog described in Sec16.
 
@@ -157,6 +157,16 @@ path. It is not reinterpreted by the Tool System and does not go through
 `tasks.create`'s approval gate — that gate exists specifically for
 *model-selected* tool calls.
 
+**Mechanically enforced (V0.3D):** a CI gate
+(`scripts/gates/risk_metadata.py`) fails a diff that gives
+`ToolDefinition.risk` a default value (which would let a tool silently
+register at the most permissive level if an author forgot to pass `risk`
+explicitly), and fails if any registered tool's `risk` is outside
+`RISK_READ_ONLY` / `RISK_INTERNAL_WRITE` / `RISK_HIGH_RISK`. This gate
+only checks that classification is present and valid — it never changes
+how `execute_tool` authorizes a call. See
+`docs/GATES_AND_RELEASE_SAFETY.md`.
+
 ## 6. Tool Call Budget / Loop Protection
 
 `backend.tool_budget.ToolCallBudget`, created fresh per chat turn:
@@ -233,6 +243,14 @@ closed to `tool_version = None` / `data_exposure = local` when it is not.
 It is also reused by `backend.tool_operations.approve_operation` for an
 approval that turns out to name an unregistered tool or a tool whose
 version has since changed (§9) — those rejections are audited the same way.
+
+**Mechanically enforced (V0.3D):** a CI gate
+(`scripts/gates/registration_authority.py`) checks that no code under
+`backend/` calls `<something>.executor(...)` outside this file and
+`backend/tool_types.py`, and that `backend/tool_executor.py`,
+`backend/tool_operations.py`, and `backend/tool_registry.py` are
+protected paths a diff cannot silently modify. See
+`docs/GATES_AND_RELEASE_SAFETY.md`.
 
 ## 8. Tool Runs / Audit Trail
 

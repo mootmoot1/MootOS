@@ -3,7 +3,10 @@
 ## Status
 
 Accepted. Recorded August 9, 2026, as part of the V0.3/V0.4 architecture
-lock. See `docs/CAPABILITY_ARCHITECTURE.md` §6 (V0.3D).
+lock. **Implemented on branch `claude/v0.3d-protected-core-gates`, pending
+merge** (August 2026) — see `docs/GATES_AND_RELEASE_SAFETY.md` for the
+concrete gates, `scripts/gates/` for the implementation, and
+`docs/CAPABILITY_ARCHITECTURE.md` §6 (V0.3D).
 
 ## Context
 

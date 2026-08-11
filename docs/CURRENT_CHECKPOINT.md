@@ -5,7 +5,7 @@
 **Default branch:** `main`  
 **Current release on `main`:** Version 0.1 foundation plus the V0.2A Tool Foundation, V0.3A Capability-Aware Tool System, and V0.3B Structured Gap Reasoning  
 **Current schema on `main`:** `5 — tool_system`  
-**Also implemented, pending merge:** V0.3C Narrow Self-Inspection + Read-Only Web Awareness, on branch `claude/v0.3c-self-inspection-web-awareness` (adds no migration -- schema stays `5 — tool_system` once merged)
+**Also implemented, pending merge:** V0.3C Narrow Self-Inspection + Read-Only Web Awareness, on branch `claude/v0.3c-self-inspection-web-awareness` (adds no migration -- schema stays `5 — tool_system` once merged); V0.3D Protected Core + Mechanical Release Gates, on branch `claude/v0.3d-protected-core-gates` (adds no migration and no runtime behavior change -- new CI-only gate scripts under `scripts/gates/`)
 
 ## Current production topology
 
@@ -94,8 +94,34 @@ or shell access, no new HTTP route, no schema migration. `httpx` is now
 declared explicitly in `requirements.txt` (already a transitive dependency
 of `openai`); `railway.toml` is untouched.
 
-Next planned work is V0.3D (protected core + mechanical release gates),
-not yet started.
+### V0.3D Protected Core + Mechanical Release Gates — implemented on branch, pending merge
+
+Branch `claude/v0.3d-protected-core-gates`. `docs/GATES_AND_RELEASE_SAFETY.md`,
+ADR-031. Converts ADR-031's protected-core rules into five deterministic
+CI gates under `scripts/gates/`: a protected-path diff check
+(`protected_paths.py`), an AST-based migration-safety check that
+distinguishes a brand-new additive migration from a rewrite of migration
+machinery or history (`migration_safety.py`), a risk-metadata check that
+fails a `ToolDefinition.risk` field given a default value or an invalid
+live registry risk value (`risk_metadata.py`), a narrow pattern scan for
+plugin-discovery/dynamic-import/executor-bypass constructs
+(`registration_authority.py`), and a repo-local secret/database-file scan
+(`secret_scan.py`), orchestrated by `run_gates.py`. All five run
+automatically in a new `protected-core-gates` CI job (added to
+`.github/workflows/python-package.yml`, alongside the existing unchanged
+test/lint job) and block merge on failure. The gate policy protects its
+own directory (`scripts/gates/` is itself a denied path) and CI runs the
+gate code extracted from the base ref rather than the PR's own copy, so a
+diff cannot weaken the policy and have that weakening apply to itself.
+Every gate is a deterministic script — none of them calls a model, and
+none of them is a source of merge authority; human approval still
+controls merge (ADR-032, unchanged). No capability builder, local node,
+Codex bridge, external write tool, workflow persistence, or
+self-installation exists yet or is enabled by this work. No new tool, no
+new HTTP route, no schema migration, no runtime behavior change.
+
+Next planned work is V0.3E (a manual, human-run capability-build
+pipeline), not yet started.
 
 ## Production-verified capabilities
 
