@@ -252,6 +252,34 @@ def test_unicode_names_distinct_under_sqlite_nocase_do_not_merge(clean_db):
     assert ascii_scoped["projects"][0]["name"] == "MootOS"
 
 
+def test_kelvin_sign_project_is_not_folded_into_ascii_k(clean_db):
+    """Guards the specific reason ``str.lower()`` is not an acceptable
+    simplification of ``_merge_key``'s ASCII-only fold.
+
+    The Kelvin sign (U+212A) lowercases to ASCII 'k' in Python but is a
+    distinct project to SQLite's NOCASE, so swapping ``translate`` for
+    ``lower()`` would reintroduce H-1 for a different code point. The
+    premise assertions fail loudly if this file's code point is ever
+    normalized to a plain ASCII 'K', rather than letting the test decay
+    into a meaningless ASCII-vs-ASCII comparison.
+    """
+    kelvin = "K"  # U+212A KELVIN SIGN -- deliberately not an ASCII K
+    assert kelvin != "K", "premise: must be U+212A, not an ASCII K"
+    assert kelvin.lower() == "k", "premise: folds under lower(), but SQLite keeps it distinct"
+
+    create_project(name=kelvin)
+    create_project(name="k")
+    create_memory(content="kelvin note", project=kelvin)
+    create_memory(content="ascii note one", project="k")
+    create_memory(content="ascii note two", project="k")
+
+    entries = _by_name(summarize_projects())
+
+    assert entries[kelvin]["active_memories"] == 1
+    assert entries["k"]["active_memories"] == 2
+    assert entries[kelvin]["last_activity_at"] != entries["k"]["last_activity_at"]
+
+
 def test_rows_naming_a_project_that_does_not_exist_land_in_unassigned(clean_db):
     """Regression (advisory review, correctness role): a project value with
     no matching row in `projects` was dropped from BOTH the per-project
