@@ -10,12 +10,13 @@ Reasoning) is implemented and merged** — see `docs/GAP_REASONING.md`.
 `docs/SELF_INSPECTION.md` and `docs/WEB_AWARENESS.md`. **V0.3D (Protected
 Core + Mechanical Release Gates) is implemented and merged** — see
 `docs/GATES_AND_RELEASE_SAFETY.md`. **V0.3E (Manual Capability-Build
-Pipeline) is implemented on branch
-`claude/v0.3e-manual-capability-pipeline`, pending merge** — one proof
-capability (`tasks.status_summary`) has been driven through the pipeline;
-ADR-034 requires two before any automation begins — see
-`docs/CAPABILITY_BUILD_PIPELINE.md`. V0.4A–V0.4D remain plan only,
-nothing implemented.
+Pipeline) is implemented and merged, with proof #1
+(`tasks.status_summary`) merged and proof #2 (`projects.overview`)
+implemented on branch `claude/v0.3e-proof-2-capability`, pending
+merge** — ADR-034's two-pass prerequisite is satisfied once proof #2
+merges; see `docs/CAPABILITY_BUILD_PIPELINE.md`. **V0.4A–V0.4D remain
+plan only, nothing implemented** — the two-pass prerequisite being met
+removes a blocker on V0.4A, it does not start or approve it.
 **Applies to:** design and build order for everything after V0.2A.
 **Companion documents:** `docs/TOOL_SYSTEM.md` (the current executable Tool
 System), ADR-027 (the V0.2A decision record), ADR-028 through ADR-034 (the
@@ -262,11 +263,13 @@ deploy — always, with no exception carved out for this phase.
 
 ### V0.3E — Manual Capability-Build Pipeline
 
-**Implemented on branch `claude/v0.3e-manual-capability-pipeline`,
-pending merge.** See `docs/CAPABILITY_BUILD_PIPELINE.md` for the concrete
-result (`scripts/capability_pipeline/`: `spec.py`, `lifecycle.py`,
-`review.py`; `capability_specs/` for the actual spec/lifecycle
-artifacts) and ADR-034 for the decision it carries out.
+**Implemented and merged.** See `docs/CAPABILITY_BUILD_PIPELINE.md` for
+the concrete result (`scripts/capability_pipeline/`: `spec.py`,
+`lifecycle.py`, `review.py`; `capability_specs/` for the actual
+spec/lifecycle artifacts) and ADR-034 for the decision it carries out.
+**Proof #1 (`tasks.status_summary`) is merged; proof #2
+(`projects.overview`) is implemented on branch
+`claude/v0.3e-proof-2-capability`, pending merge.**
 
 Before MootOS writes new capabilities itself, the process is proven by
 hand, end to end:
@@ -297,13 +300,42 @@ was already implemented and merged as part of V0.3C before this phase
 began**, so it could not serve as V0.3E's first proof run. V0.3E instead
 proved the pipeline on `tasks.status_summary` (a new, read-only Task
 status-count aggregate) -- see `docs/CAPABILITY_BUILD_PIPELINE.md` §10
-for why it was chosen. **This is the first of the two required proof
-runs; a second, independent capability must still pass this pipeline
-before any part of it is automated (V0.4A).**
+for why it was chosen.
+
+**Proof #2 is `projects.overview`** (capability `projects.insight`), a
+read-only cross-table per-project activity rollup -- deliberately a
+different resource and a different query shape, so the second pass tested
+generalization rather than repeating the first exercise. See
+`docs/CAPABILITY_BUILD_PIPELINE.md` §12.
+
+**Both required proof runs are now complete**, satisfying ADR-034's
+two-pass prerequisite once proof #2 merges. The second pass also
+established that the advisory review stage is load-bearing: run with
+three genuinely independent reviewer instances (rather than one model
+writing three reviews), it surfaced four reproducible correctness
+defects, a CI regression, a false docstring claim, and an unbounded
+result size in proof #2's first implementation -- all fixed before the
+lifecycle record reached `ready_for_pr`. Proof #1's single-model reviews
+had found nothing. See `docs/CAPABILITY_BUILD_PIPELINE.md` §13.
 
 ### V0.4A — Capability Builder Automation
 
+**Not started. Plan only, nothing implemented.**
+
 Only after the manual pipeline (V0.3E) has proven itself at least twice.
+**That prerequisite is now met** (proof #1 `tasks.status_summary`, proof
+#2 `projects.overview`) — but meeting it only removes the blocker. V0.4A
+still requires its own design and review step before any automation is
+built; no part of it is authorized by the two proof runs alone.
+
+One concrete finding from proof #2 that any V0.4A design must carry
+forward: the **fixes** stage between review and PR is load-bearing, not
+decoration. Proof #2's first implementation passed all of its own tests
+and all mechanical gates while containing four reproducible correctness
+defects, which only independent advisory review caught. Automation that
+generates code and runs gates without a real fix-and-re-verify loop —
+and without reviewers independent of the generator — would have shipped
+those defects. See `docs/CAPABILITY_BUILD_PIPELINE.md` §13.
 
 MootOS may generate, in an isolated build environment:
 

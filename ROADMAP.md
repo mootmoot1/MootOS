@@ -86,25 +86,38 @@ presence alone does not enforce it). None of the five gates is a model
 call or a source of merge authority — human approval still controls
 merge (`docs/GATES_AND_RELEASE_SAFETY.md`, ADR-031).
 
-**Implemented, pending merge:** V0.3E Manual Capability-Build Pipeline, on
-branch `claude/v0.3e-manual-capability-pipeline` — proves the full manual
-capability lifecycle (goal → gap → validated spec → isolated branch →
-implementation → V0.3D gates → three distinct advisory reviews → PR →
-human merge → live install) on one real capability,
-`tasks.status_summary` (a new, read-only Task status-count aggregate;
+**Merged:** V0.3E Manual Capability-Build Pipeline — proves the full
+manual capability lifecycle (goal → gap → validated spec → isolated
+branch → implementation → V0.3D gates → three distinct advisory reviews →
+PR → human merge → live install) on real capabilities, starting with
+proof #1 `tasks.status_summary` (a read-only Task status-count aggregate;
 `docs/CAPABILITY_BUILD_PIPELINE.md`, ADR-034). Adds
 `scripts/capability_pipeline/` (a validated `CapabilitySpec` schema and a
 small, explicit, human-transition-only lifecycle record --
 `proposed → specified → implemented → tested → reviewed → ready_for_pr →
 merged`, with no automatic transitions and no coupling to
-`backend/tool_registry.py`). The one protected-core touch this capability
+`backend/tool_registry.py`). The one protected-core touch each capability
 needs -- one line registering it in `build_default_registry()` -- fails
 V0.3D's protected-path gate exactly as intended, surfacing it for
 explicit human review rather than bypassing it; no gate was weakened and
 no alternate registration path was created. No autonomous builder exists
--- no automatic branch/commit/PR/merge/registration/deployment. One of
-the two proof capabilities ADR-034 requires before any automation begins
-is now complete. No schema migration.
+-- no automatic branch/commit/PR/merge/registration/deployment.
+
+**Implemented, pending merge:** V0.3E proof #2, on branch
+`claude/v0.3e-proof-2-capability` — `projects.overview` (capability
+`projects.insight`), a read-only cross-table rollup reporting per-project
+active-memory, open/total-Task, and conversation counts plus a
+last-activity timestamp. Deliberately a different resource and query
+shape from proof #1 so the second pass tested whether the pipeline
+generalizes; it did, with no pipeline redesign needed. The advisory
+review stage proved load-bearing: run with three genuinely independent
+reviewer instances, it caught four reproducible correctness defects, a CI
+regression, a false docstring claim, and an unbounded result size in the
+first implementation — all fixed with regression tests before the record
+reached `ready_for_pr`. **This completes ADR-034's two-proof
+prerequisite**, which removes a blocker on V0.4A but does not start or
+approve it; V0.4A remains unimplemented and needs its own design/review
+step. No schema migration.
 
 The repository currently has no scheduler, reminder delivery, recurrence,
 background worker, multi-user system, or capability-builder automation.
@@ -131,11 +144,13 @@ protected core enforced as mechanical release gates — **implemented and
 merged**, see
 `docs/GATES_AND_RELEASE_SAFETY.md` — → **V0.3E** a manual, human-run
 capability-build pipeline proven on at least two real capabilities —
-**implemented on branch `claude/v0.3e-manual-capability-pipeline`,
-pending merge, one of two required proof capabilities complete**, see
+**pipeline and proof #1 merged; proof #2 (`projects.overview`)
+implemented on branch `claude/v0.3e-proof-2-capability`, pending merge,
+completing both required proofs**, see
 `docs/CAPABILITY_BUILD_PIPELINE.md`
 → **V0.4A** capability-builder automation
-(isolated builds only, no self-install) → **V0.4B** a usage-gated,
+(isolated builds only, no self-install) — **not started; the two-proof
+prerequisite is met but V0.4A still requires its own design/review step** → **V0.4B** a usage-gated,
 read-only-first Local Companion → **V0.4C** an automatic Codex worker
 bridge built on `AGENTS.md`'s existing manual boundaries → **V0.4D** a
 real composition mission proving capabilities compose instead of requiring

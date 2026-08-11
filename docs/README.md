@@ -35,10 +35,14 @@ As of August 9, 2026:
   to `main` (`docs/SELF_INSPECTION.md`, `docs/WEB_AWARENESS.md`, ADR-035)
 - V0.3D Protected Core + Mechanical Release Gates exists, merged to
   `main` (`docs/GATES_AND_RELEASE_SAFETY.md`, ADR-031)
-- V0.3E Manual Capability-Build Pipeline is implemented on branch
-  `claude/v0.3e-manual-capability-pipeline`, **not yet merged** — one of
-  the two proof capabilities ADR-034 requires is complete
+- V0.3E Manual Capability-Build Pipeline exists, merged to `main`, with
+  proof capability #1 (`tasks.status_summary`)
   (`docs/CAPABILITY_BUILD_PIPELINE.md`, ADR-034)
+- V0.3E proof capability #2 (`projects.overview`) is implemented on branch
+  `claude/v0.3e-proof-2-capability`, **not yet merged** — completing
+  ADR-034's two-proof prerequisite, which removes a blocker on V0.4A but
+  does **not** start it (V0.4A remains unimplemented and needs its own
+  design/review step)
 - scheduler/reminder delivery does **not** exist
 
 The locked next-phase plan is `docs/CAPABILITY_ARCHITECTURE.md` and
@@ -61,7 +65,8 @@ Useful focused documents include:
 - `GATES_AND_RELEASE_SAFETY.md` — V0.3D protected core + mechanical CI
   gates
 - `CAPABILITY_BUILD_PIPELINE.md` — V0.3E manual capability-build pipeline
-  (not yet merged to `main` — see its own Status line)
+  (pipeline and proof #1 merged; proof #2 pending — see its own Status
+  line)
 - `FOUNDATION_HARDENING.md`
 - `CHAT_PROVIDER_PIPELINE.md`
 - `MODEL_INPUT_AND_CAPABILITIES.md`
