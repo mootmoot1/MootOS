@@ -80,28 +80,30 @@ def test_default_registry_registers_exactly_the_expected_tools(monkeypatch):
     V0.3C added self.state/self.architecture (always registered) and
     web.search (registered only when a search service is configured, so an
     unconfigured deployment never advertises it -- see backend/tools_web.py).
-    Both configurations are asserted exactly, so an accidentally-registered
-    extra tool fails here.
+    V0.3E added tasks.status_summary (always registered, no configuration
+    gate -- see backend/tools_task_summary.py). Every configuration is
+    asserted exactly, so an accidentally-registered extra tool fails here.
     """
     from backend.web_connector import SEARCH_API_KEY_VARIABLE
 
-    v02a_and_self_inspection = {
+    v02a_v03c_and_v03e = {
         "projects.list",
         "memory.search",
         "tasks.list",
         "tasks.create",
         "self.state",
         "self.architecture",
+        "tasks.status_summary",
     }
 
     monkeypatch.delenv(SEARCH_API_KEY_VARIABLE, raising=False)
     unconfigured = build_default_registry()
-    assert {d.name for d in unconfigured.list_definitions()} == v02a_and_self_inspection
+    assert {d.name for d in unconfigured.list_definitions()} == v02a_v03c_and_v03e
 
     monkeypatch.setenv(SEARCH_API_KEY_VARIABLE, "test-key")
     configured = build_default_registry()
     assert {d.name for d in configured.list_definitions()} == (
-        v02a_and_self_inspection | {"web.search"}
+        v02a_v03c_and_v03e | {"web.search"}
     )
 
 

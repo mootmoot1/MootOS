@@ -46,6 +46,7 @@ CAPABILITY_LABELS: dict[str, str] = {
     "tasks.manage": "View and create MootOS Tasks",
     "self.inspect": "Inspect MootOS's own architecture and current capability state",
     "web.current_information": "Search the public web for current information",
+    "tasks.status_insight": "Summarize MootOS Task counts by status",
 }
 
 
