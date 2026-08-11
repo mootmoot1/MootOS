@@ -29,3 +29,65 @@ jobs:
         run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
       - name: Test
         run: python -m pytest
+
+  # V0.3D (ADR-031, docs/GATES_AND_RELEASE_SAFETY.md). Separate from `build`
+  # above, which is untouched, per ADR-031's "preserve the existing test/lint
+  # workflow". This job converts the protected-core rules into a mechanical,
+  # required check: protected-path, migration-safety, risk-metadata,
+  # registration-authority, and secret-scan. It is advisory to no one -- a
+  # failure here means the PR does not auto-merge; a human decides what
+  # happens next (ADR-032). Making this job's check REQUIRED for merge is a
+  # one-time GitHub branch-protection setting a repository admin must
+  # configure (this workflow file cannot do that itself) -- see
+  # docs/GATES_AND_RELEASE_SAFETY.md "Enabling enforcement".
+  protected-core-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Determine base ref to diff against
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1
+            echo "ref=origin/${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            echo "ref=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=HEAD~1" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Extract trusted gate tooling from the base ref
+        run: |
+          # Run the gates using the BASE ref's copy of scripts/gates/, never
+          # this branch's own (possibly modified) copy -- otherwise a diff
+          # could weaken the policy or the gate logic and have that weakening
+          # apply to evaluating itself. See scripts/gates/__init__.py and
+          # docs/GATES_AND_RELEASE_SAFETY.md "Self-protection".
+          #
+          # Falls back to this branch's own copy only when the base ref has
+          # no scripts/gates/ yet -- the one-time bootstrap case of the PR
+          # that first introduces this tooling, which has nothing trusted to
+          # extract.
+          rm -rf /tmp/trusted_gates
+          mkdir -p /tmp/trusted_gates
+          if git show "${{ steps.base.outputs.ref }}:scripts/gates/run_gates.py" > /dev/null 2>&1; then
+            git archive "${{ steps.base.outputs.ref }}" -- scripts | tar -x -C /tmp/trusted_gates
+            echo "Using trusted scripts/gates/ from ${{ steps.base.outputs.ref }}"
+          else
+            cp -r scripts /tmp/trusted_gates/
+            echo "::warning::${{ steps.base.outputs.ref }} has no scripts/gates/ yet -- bootstrap run using this branch's own copy (expected only for the PR that introduces V0.3D)"
+          fi
+      - name: Run V0.3D mechanical release gates
+        run: |
+          PYTHONPATH="/tmp/trusted_gates:${GITHUB_WORKSPACE}" \
+            python /tmp/trusted_gates/scripts/gates/run_gates.py \
+            --base "${{ steps.base.outputs.ref }}" --head "${{ github.sha }}"
