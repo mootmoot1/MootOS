@@ -67,6 +67,8 @@ Useful focused documents include:
 - `CAPABILITY_BUILD_PIPELINE.md` — V0.3E manual capability-build pipeline
   (pipeline and proof #1 merged; proof #2 pending — see its own Status
   line)
+- `CAPABILITY_BUILD_AUTOMATION.md` — V0.4A capability-build automation
+  **design/implementation specification only; not implemented** (ADR-036)
 - `FOUNDATION_HARDENING.md`
 - `CHAT_PROVIDER_PIPELINE.md`
 - `MODEL_INPUT_AND_CAPABILITIES.md`
@@ -101,6 +103,9 @@ Key later ADRs include:
 - ADR-032 — multi-AI review is advisory with distinct, non-overlapping roles
 - ADR-033 — Local Companion / automatic Codex dispatch are usage-gated
 - ADR-034 — capability-build pipeline proven manually before automation
+- ADR-036 — V0.4A capability-build automation is offline, human-invoked
+  tooling; MootOS owns the evidence and the worker owns nothing
+  (**Proposed; not implemented** — see `CAPABILITY_BUILD_AUTOMATION.md`)
 
 ## Production verification records
 
