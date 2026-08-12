@@ -36,13 +36,16 @@ As of August 9, 2026:
 - V0.3D Protected Core + Mechanical Release Gates exists, merged to
   `main` (`docs/GATES_AND_RELEASE_SAFETY.md`, ADR-031)
 - V0.3E Manual Capability-Build Pipeline exists, merged to `main`, with
-  proof capability #1 (`tasks.status_summary`)
-  (`docs/CAPABILITY_BUILD_PIPELINE.md`, ADR-034)
-- V0.3E proof capability #2 (`projects.overview`) is implemented on branch
-  `claude/v0.3e-proof-2-capability`, **not yet merged** — completing
-  ADR-034's two-proof prerequisite, which removes a blocker on V0.4A but
-  does **not** start it (V0.4A remains unimplemented and needs its own
-  design/review step)
+  both required proof capabilities complete, merged, deployed, and
+  live-verified: proof #1 (`tasks.status_summary`) and proof #2
+  (`projects.overview`, merged via PR #43 at `0f8d81d`)
+  (`docs/CAPABILITY_BUILD_PIPELINE.md`, ADR-034) — ADR-034's two-proof
+  prerequisite is satisfied, which removes a blocker on V0.4A but did
+  **not** by itself start it
+- V0.4A (capability-build automation) has its required separate
+  design/review step recorded as **ADR-036** (Proposed; not
+  implemented) — see `docs/CAPABILITY_BUILD_AUTOMATION.md`. Slice 1
+  begins only after that documentation is reviewed and merged
 - scheduler/reminder delivery does **not** exist
 
 The locked next-phase plan is `docs/CAPABILITY_ARCHITECTURE.md` and
