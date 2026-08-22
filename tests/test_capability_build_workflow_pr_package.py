@@ -243,8 +243,9 @@ def test_package_binds_to_handoff_evidence_and_checklist():
 
     package = result.pr_package
     assert tuple(item.check_name for item in package.evidence) == (
-        "python_compile",
-        "pytest",
+        "blocking-python-lint",
+        "python-syntax",
+        "targeted-tests",
     )
     assert all(item.status == "passed" for item in package.evidence)
     assert tuple(item.description for item in package.human_checklist) == (
