@@ -12,6 +12,7 @@ class PriorityPolicyError(ConflictAnalysisError):
 
 
 POLICY_VERSION = "adr-043-v1"
+MAX_ANALYSIS_BYTES = 256 * 1024
 _PRIORITY = {"critical": 0, "high": 1, "normal": 2, "low": 3}
 
 
@@ -156,9 +157,14 @@ class PriorityAnalysis:
             "policy_version": self.policy_version,
             "ranked_slice_ids": list(self.ranked_slice_ids),
         }
-        return json.dumps(value, sort_keys=True, separators=(",", ":")).encode(
+        encoded = json.dumps(
+            value, sort_keys=True, separators=(",", ":")
+        ).encode(
             "utf-8"
         )
+        if len(encoded) > MAX_ANALYSIS_BYTES:
+            raise PriorityPolicyError("priority analysis exceeds bound")
+        return encoded
 
 
 def rank_eligible_slices(analysis, advisory_metadata=()):

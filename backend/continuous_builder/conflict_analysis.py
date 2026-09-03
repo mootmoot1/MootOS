@@ -6,6 +6,9 @@ from dataclasses import dataclass
 
 from .dependency_analysis import DependencyAnalysis, DependencyAnalysisError
 
+MAX_ANALYSIS_BYTES = 256 * 1024
+MAX_RESOURCE_TEXT_BYTES = 256
+
 
 class ConflictAnalysisError(DependencyAnalysisError):
     """Raised when conflict/authority eligibility input is inconsistent."""
@@ -16,7 +19,9 @@ def _values(values, name):
         raise ConflictAnalysisError(f"{name} must be a collection")
     values = tuple(values)
     if len(values) > 128 or any(
-        not isinstance(value, str) or not value for value in values
+        not isinstance(value, str) or not value
+        or len(value.encode("utf-8")) > MAX_RESOURCE_TEXT_BYTES
+        for value in values
     ):
         raise ConflictAnalysisError(f"{name} is malformed or excessive")
     if len(values) != len(set(values)):
@@ -170,9 +175,14 @@ class ConflictAnalysis:
             "results": [item.to_dict() for item in self.results],
             "worker_dispatched": False,
         }
-        return json.dumps(value, sort_keys=True, separators=(",", ":")).encode(
+        encoded = json.dumps(
+            value, sort_keys=True, separators=(",", ":")
+        ).encode(
             "utf-8"
         )
+        if len(encoded) > MAX_ANALYSIS_BYTES:
+            raise ConflictAnalysisError("conflict analysis exceeds bound")
+        return encoded
 
 
 def analyze_conflicts(dependency_analysis, resources):

@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from .blueprint_parser import ParsedBlueprint
 from .queue_proposal import CandidateSliceProposal, QueueProposalError
 
+MAX_ANALYSIS_BYTES = 256 * 1024
+MAX_RECEIPT_IDENTITY_BYTES = 256
+
 
 class DependencyAnalysisError(QueueProposalError):
     """Raised when dependency facts cannot prove eligibility."""
@@ -20,9 +23,13 @@ class DependencyReceipt:
     authoritative: bool
 
     def __post_init__(self):
-        if any(not isinstance(value, str) or not value for value in (
-            self.receipt_id, self.slice_id, self.slice_version,
-        )):
+        if any(
+            not isinstance(value, str) or not value
+            or len(value.encode("utf-8")) > MAX_RECEIPT_IDENTITY_BYTES
+            for value in (
+                self.receipt_id, self.slice_id, self.slice_version,
+            )
+        ):
             raise DependencyAnalysisError("receipt identity is malformed")
         if (
             type(self.passed) is not bool
@@ -182,9 +189,14 @@ class DependencyAnalysis:
             "dispatch_authorized": False,
             "results": [item.to_dict() for item in self.results],
         }
-        return json.dumps(value, sort_keys=True, separators=(",", ":")).encode(
+        encoded = json.dumps(
+            value, sort_keys=True, separators=(",", ":")
+        ).encode(
             "utf-8"
         )
+        if len(encoded) > MAX_ANALYSIS_BYTES:
+            raise DependencyAnalysisError("dependency analysis exceeds bound")
+        return encoded
 
 
 def analyze_dependencies(parsed, candidates, receipts=()):

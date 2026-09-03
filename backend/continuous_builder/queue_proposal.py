@@ -1,6 +1,7 @@
 """Pure in-memory candidate and queue transition proposal models."""
 
 import json
+import re
 from dataclasses import dataclass
 
 from .blueprint import BlueprintError, ContinuousBuilderBlueprint
@@ -16,6 +17,8 @@ LIFECYCLE_INTENTS = ("evaluate", "hold_for_human")
 TRANSITION_INTENTS = ("propose_ready", "propose_blocked", "no_change")
 MAX_REASONS = 64
 MAX_SERIALIZED_BYTES = 128 * 1024
+MAX_METADATA_BYTES = 256
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _string_tuple(values, name, limit=MAX_REASONS):
@@ -23,7 +26,9 @@ def _string_tuple(values, name, limit=MAX_REASONS):
         raise QueueProposalError(f"{name} must be a collection")
     values = tuple(values)
     if len(values) > limit or any(
-        not isinstance(value, str) or not value.strip() for value in values
+        not isinstance(value, str) or not value.strip()
+        or len(value.encode("utf-8")) > MAX_METADATA_BYTES
+        for value in values
     ):
         raise QueueProposalError(f"{name} is malformed or excessive")
     if len(values) != len(set(values)):
@@ -93,8 +98,13 @@ class CandidateSliceProposal:
             (self.slice_id, "slice ID"),
             (self.slice_version, "slice version"),
         ):
-            if not isinstance(value, str) or not value:
+            if (
+                not isinstance(value, str) or not value
+                or len(value.encode("utf-8")) > MAX_METADATA_BYTES
+            ):
                 raise QueueProposalError(f"{name} is invalid")
+        if _SHA256.fullmatch(self.blueprint_digest) is None:
+            raise QueueProposalError("blueprint digest is malformed")
 
     def to_dict(self):
         return {
