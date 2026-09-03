@@ -20,7 +20,6 @@ from backend.composition_proposal import (
 )
 from backend.tool_budget import (
     OUTCOME_ERROR,
-    OUTCOME_PENDING_OPERATION,
     OUTCOME_SKIPPED,
     OUTCOME_SUCCESS,
     ToolCallBudget,
@@ -576,9 +575,6 @@ def run_composition_mission(plan, registry, *, conversation_id=None):
                     memory_match_count=memory_count,
                     failed=True,
                 )
-            budget.record(
-                definition.name, arguments, OUTCOME_PENDING_OPERATION
-            )
             signatures.append(signature)
             step_runs.append(
                 CompositionStepRun(
@@ -594,7 +590,7 @@ def run_composition_mission(plan, registry, *, conversation_id=None):
                 plan=plan,
                 status=STATUS_APPROVAL_PENDING,
                 step_runs=tuple(step_runs),
-                processed_requests=budget.total_calls,
+                processed_requests=len(signatures),
                 executed_requests=budget.executions,
                 request_signatures=tuple(signatures),
                 selected_project=selected_project,

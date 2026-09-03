@@ -5,7 +5,6 @@ from backend.tool_budget import (
     MAX_IDENTICAL_CALLS_PER_TURN,
     MAX_TOOL_CALLS_PER_TURN,
     OUTCOME_ERROR,
-    OUTCOME_PENDING_OPERATION,
     OUTCOME_SUCCESS,
     OUTCOME_UNKNOWN_TOOL,
     ToolCallBudget,
@@ -40,7 +39,7 @@ def test_repeated_identical_calls_are_capped():
     assert budget.allow_call("memory.search", same_args) is True
     budget.record("memory.search", same_args, OUTCOME_SUCCESS)
 
-    # A third identical call is blocked with room under the total-call cap.
+    # A third identical call is blocked even though total calls remain under budget.
     assert MAX_IDENTICAL_CALLS_PER_TURN == 2
     assert budget.allow_call("memory.search", same_args) is False
     assert budget.remaining() == MAX_TOOL_CALLS_PER_TURN - 2
@@ -92,18 +91,3 @@ def test_a_success_resets_the_consecutive_failure_streak():
     budget.record("tool", {"n": 3}, OUTCOME_ERROR)
 
     assert budget.allow_next() is True
-
-
-def test_pending_operation_consumes_request_without_claiming_execution():
-    budget = ToolCallBudget()
-    arguments = {"title": "Review project", "project": "MootOS"}
-
-    assert budget.allow_call("tasks.create", arguments) is True
-    budget.record(
-        "tasks.create", arguments, OUTCOME_PENDING_OPERATION
-    )
-
-    assert budget.total_calls == 1
-    assert budget.executions == 0
-    assert budget.consecutive_failures == 0
-    assert budget.remaining() == MAX_TOOL_CALLS_PER_TURN - 1

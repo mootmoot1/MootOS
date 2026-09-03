@@ -39,15 +39,12 @@ OUTCOME_SUCCESS = "success"
 OUTCOME_ERROR = "error"
 OUTCOME_UNKNOWN_TOOL = "unknown_tool"
 OUTCOME_SKIPPED = "skipped"
-OUTCOME_PENDING_OPERATION = "pending_operation"
 
 
 def _call_signature(tool_name: str, arguments: dict[str, Any]) -> str:
-    """Return an order-independent fingerprint for a tool and arguments."""
+    """A stable fingerprint for one (tool, arguments) pair, order-independent."""
     canonical = json.dumps(arguments, sort_keys=True, default=str)
-    return hashlib.sha256(
-        f"{tool_name}:{canonical}".encode("utf-8")
-    ).hexdigest()
+    return hashlib.sha256(f"{tool_name}:{canonical}".encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -67,7 +64,7 @@ class ToolCallBudget:
         return max(0, self.max_calls - self.total_calls)
 
     def allow_next(self) -> bool:
-        """Whether the budget allows one more tool request at all."""
+        """Whether the budget allows attempting one more tool request at all."""
         if self.total_calls >= self.max_calls:
             return False
         if self.consecutive_failures >= self.max_consecutive_failures:
@@ -75,37 +72,25 @@ class ToolCallBudget:
         return True
 
     def allow_call(self, tool_name: str, arguments: dict[str, Any]) -> bool:
-        """Whether this tool and argument pair may be attempted now."""
+        """Whether this specific (tool, arguments) pair may be attempted now."""
         if not self.allow_next():
             return False
         signature = _call_signature(tool_name, arguments)
-        return (
-            self._signature_counts.get(signature, 0)
-            < self.max_identical_calls
-        )
+        return self._signature_counts.get(signature, 0) < self.max_identical_calls
 
-    def record(
-        self, tool_name: str, arguments: dict[str, Any], outcome: str
-    ) -> None:
-        """Record a processed request and its outcome. Always call this --
-        including for a request this budget denied (``OUTCOME_SKIPPED``)
+    def record(self, tool_name: str, arguments: dict[str, Any], outcome: str) -> None:
+        """Record one processed tool request and its outcome. Always call this --
+        including for a request this budget itself denied (``OUTCOME_SKIPPED``)
         -- so the loop is guaranteed to terminate. See the module docstring
         for why ``total_calls`` (every processed request) and ``executions``
         (only ``OUTCOME_SUCCESS``) are deliberately different numbers.
         """
         self.total_calls += 1
         signature = _call_signature(tool_name, arguments)
-        self._signature_counts[signature] = (
-            self._signature_counts.get(signature, 0) + 1
-        )
+        self._signature_counts[signature] = self._signature_counts.get(signature, 0) + 1
 
         if outcome == OUTCOME_SUCCESS:
             self.executions += 1
             self.consecutive_failures = 0
-        elif outcome == OUTCOME_PENDING_OPERATION:
-            # A validated internal-write request consumes the request budget
-            # when it is frozen for approval, but no tool executor ran and
-            # nothing failed. Preserve both distinctions mechanically.
-            pass
         else:
             self.consecutive_failures += 1
