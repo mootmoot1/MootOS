@@ -9,6 +9,7 @@ import json
 from dataclasses import dataclass, field
 
 from scripts.capability_build.pr_package import (
+    MAX_PR_PACKAGE_SUMMARY_BYTES,
     PRPackageProposal,
 )
 
@@ -18,7 +19,10 @@ class PRPackageRenderError(ValueError):
 
 
 SCHEMA_VERSION = 1
-MAX_RENDERED_PR_BODY_BYTES = 16 * 1024
+# The proposal's bounded JSON is at most 128 KiB. Doubling that bound leaves
+# deterministic room for Markdown headings and list syntax without reducing
+# any valid proposal field or silently truncating review content.
+MAX_RENDERED_PR_BODY_BYTES = 2 * MAX_PR_PACKAGE_SUMMARY_BYTES
 MAX_REVIEW_SUMMARY_BYTES = 16 * 1024
 
 

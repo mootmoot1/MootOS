@@ -11,6 +11,8 @@ from scripts.capability_build.pr_package import (
     BLOCKED,
     EVIDENCE_FAILED,
     EVIDENCE_PASSED,
+    MAX_BODY_BYTES,
+    MAX_STRUCTURED_ITEMS,
     READY,
     PREvidenceSummary,
     PRChecklistItem,
@@ -19,6 +21,7 @@ from scripts.capability_build.pr_package import (
     PRRiskSummary,
     PRRollbackNote,
 )
+from scripts.capability_build import pr_package_renderer
 from scripts.capability_build.pr_package_renderer import (
     MAX_RENDERED_PR_BODY_BYTES,
     MAX_REVIEW_SUMMARY_BYTES,
@@ -186,7 +189,122 @@ def test_rendering_is_deterministic_for_stable_proposals():
     assert first == second
     assert render_pr_body(first) == render_pr_body(second)
     assert render_review_summary(first) == render_review_summary(second)
-    assert render_pr_package(first).summary() == render_pr_package(second).summary()
+    assert (
+        render_pr_package(first).summary()
+        == render_pr_package(second).summary()
+    )
+
+
+def test_maximum_size_valid_proposed_body_renders_without_truncation():
+    proposed_body = "x" * MAX_BODY_BYTES
+    proposal = _proposal(proposed_pr_body=proposed_body)
+
+    rendered = render_pr_body(proposal)
+
+    assert proposed_body in rendered
+    assert len(rendered.encode("utf-8")) <= MAX_RENDERED_PR_BODY_BYTES
+
+
+@pytest.mark.parametrize(
+    ("byte_count", "should_render"),
+    [
+        (MAX_RENDERED_PR_BODY_BYTES - 1, True),
+        (MAX_RENDERED_PR_BODY_BYTES, True),
+        (MAX_RENDERED_PR_BODY_BYTES + 1, False),
+    ],
+)
+def test_rendered_output_byte_limit(byte_count, should_render):
+    value = "x" * byte_count
+
+    if should_render:
+        assert (
+            pr_package_renderer._bounded_text(
+                value,
+                "rendered PR body",
+                MAX_RENDERED_PR_BODY_BYTES,
+            )
+            == value
+        )
+    else:
+        with pytest.raises(PRPackageRenderError, match="exceeds"):
+            pr_package_renderer._bounded_text(
+                value,
+                "rendered PR body",
+                MAX_RENDERED_PR_BODY_BYTES,
+            )
+
+
+def test_rendered_output_limit_counts_multibyte_unicode_bytes():
+    exact = "é" * (MAX_RENDERED_PR_BODY_BYTES // 2)
+    above = exact + "é"
+
+    assert len(exact.encode("utf-8")) == MAX_RENDERED_PR_BODY_BYTES
+    assert (
+        pr_package_renderer._bounded_text(
+            exact,
+            "rendered PR body",
+            MAX_RENDERED_PR_BODY_BYTES,
+        )
+        == exact
+    )
+    with pytest.raises(PRPackageRenderError, match="exceeds"):
+        pr_package_renderer._bounded_text(
+            above,
+            "rendered PR body",
+            MAX_RENDERED_PR_BODY_BYTES,
+        )
+
+
+def test_maximum_valid_structured_collections_render_with_maximum_body():
+    proposal = _proposal(
+        proposed_pr_body="x" * MAX_BODY_BYTES,
+        changed_files=tuple(
+            PRFileSummary(
+                path=f"changed/file-{index:03d}.py",
+                operation="modify",
+                summary=f"Changed file {index}.",
+            )
+            for index in range(MAX_STRUCTURED_ITEMS)
+        ),
+        evidence=tuple(
+            PREvidenceSummary(
+                check_name=f"check-{index:03d}",
+                status=EVIDENCE_PASSED,
+            )
+            for index in range(MAX_STRUCTURED_ITEMS)
+        ),
+        risks=tuple(
+            PRRiskSummary(
+                risk_id=f"risk-{index:03d}",
+                level="low",
+                summary=f"Risk {index}.",
+                mitigation=f"Mitigation {index}.",
+            )
+            for index in range(MAX_STRUCTURED_ITEMS)
+        ),
+        rollback_notes=tuple(
+            PRRollbackNote(index + 1, f"Rollback step {index + 1}.")
+            for index in range(MAX_STRUCTURED_ITEMS)
+        ),
+        human_checklist=tuple(
+            PRChecklistItem(
+                f"item-{index:03d}",
+                f"Review item {index}.",
+            )
+            for index in range(MAX_STRUCTURED_ITEMS)
+        ),
+    )
+
+    rendering = render_pr_package(proposal)
+
+    assert len(rendering.pr_body.encode("utf-8")) <= (
+        MAX_RENDERED_PR_BODY_BYTES
+    )
+    assert "`changed/file-127.py`" in rendering.pr_body
+    assert "`check-127`: passed" in rendering.pr_body
+    assert "`risk-127` (low)" in rendering.pr_body
+    assert "128. Rollback step 128." in rendering.pr_body
+    assert "- [ ] Review item 127." in rendering.pr_body
 
 
 @pytest.mark.parametrize("invalid", [None, {}, "package", object()])
