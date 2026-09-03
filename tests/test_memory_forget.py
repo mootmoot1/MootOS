@@ -21,13 +21,13 @@ from backend.memory import (
 
 
 @pytest.fixture
-def clean_db():
-    if DATABASE_PATH.exists():
-        DATABASE_PATH.unlink()
+def clean_db(tmp_path, monkeypatch):
+    database_path = tmp_path / "mootos.db"
+    monkeypatch.setattr("backend.db.DATABASE_PATH", database_path)
+    monkeypatch.setattr("backend.memory.DATABASE_PATH", database_path)
+    monkeypatch.setitem(globals(), "DATABASE_PATH", database_path)
     init_db()
     yield
-    if DATABASE_PATH.exists():
-        DATABASE_PATH.unlink()
 
 
 @pytest.fixture
@@ -73,12 +73,18 @@ def test_archive_and_restore_preserve_correction_history(clean_db, client):
         json={"content": "Corrected value"},
     ).json()["data"]["replacement"]
 
-    assert client.post(f"/memories/{replacement['id']}/archive").status_code == 200
+    assert client.post(
+        f"/memories/{replacement['id']}/archive"
+    ).status_code == 200
     history = client.get(f"/memories/{original['id']}/history").json()["data"]
     assert [item["status"] for item in history] == ["superseded", "archived"]
-    assert [item["content"] for item in history] == ["Old value", "Corrected value"]
+    assert [item["content"] for item in history] == [
+        "Old value", "Corrected value",
+    ]
 
-    assert client.post(f"/memories/{replacement['id']}/restore").status_code == 200
+    assert client.post(
+        f"/memories/{replacement['id']}/restore"
+    ).status_code == 200
     restored_history = client.get(
         f"/memories/{replacement['id']}/history"
     ).json()["data"]
@@ -118,12 +124,20 @@ def test_archived_memory_is_protected_from_hard_delete(clean_db, client):
     response = client.delete(f"/memories/{created['id']}")
 
     assert response.status_code == 409
-    assert client.get(f"/memories/{created['id']}").json()["data"]["status"] == "archived"
+    assert client.get(
+        f"/memories/{created['id']}"
+    ).json()["data"]["status"] == "archived"
 
 
-def test_memory_status_filter_rejects_superseded_and_unknown_values(clean_db, client):
-    assert client.get("/memories", params={"status": "superseded"}).status_code == 422
-    assert client.get("/memories", params={"status": "unknown"}).status_code == 422
+def test_memory_status_filter_rejects_superseded_and_unknown_values(
+    clean_db, client
+):
+    assert client.get(
+        "/memories", params={"status": "superseded"}
+    ).status_code == 422
+    assert client.get(
+        "/memories", params={"status": "unknown"}
+    ).status_code == 422
 
 
 def test_failed_archive_rolls_back_to_active(clean_db, client):
@@ -195,7 +209,9 @@ def test_competing_archive_and_restore_requests_serialize(clean_db, client):
         archive_results = list(executor.map(attempt_archive, range(2)))
 
     assert len([item for item in archive_results if item is not None]) == 1
-    assert client.get(f"/memories/{created['id']}").json()["data"]["status"] == "archived"
+    assert client.get(
+        f"/memories/{created['id']}"
+    ).json()["data"]["status"] == "archived"
 
     def attempt_restore(_):
         try:
@@ -207,10 +223,14 @@ def test_competing_archive_and_restore_requests_serialize(clean_db, client):
         restore_results = list(executor.map(attempt_restore, range(2)))
 
     assert len([item for item in restore_results if item is not None]) == 1
-    assert client.get(f"/memories/{created['id']}").json()["data"]["status"] == "active"
+    assert client.get(
+        f"/memories/{created['id']}"
+    ).json()["data"]["status"] == "active"
 
 
-def test_competing_correction_and_forget_leave_one_valid_outcome(clean_db, client):
+def test_competing_correction_and_forget_leave_one_valid_outcome(
+    clean_db, client
+):
     created = client.post(
         "/memories",
         json={"content": "Original concurrent value"},
@@ -218,7 +238,9 @@ def test_competing_correction_and_forget_leave_one_valid_outcome(clean_db, clien
 
     def attempt_correction():
         try:
-            result = correct_memory(created["id"], "Corrected concurrent value")
+            result = correct_memory(
+                created["id"], "Corrected concurrent value"
+            )
             return ("corrected", result)
         except MemoryNotActiveError:
             return ("conflict", None)
@@ -258,7 +280,9 @@ def test_competing_correction_and_forget_leave_one_valid_outcome(clean_db, clien
 
 def test_forget_and_restore_endpoints_require_authentication(monkeypatch):
     monkeypatch.setenv("MOOTOS_PASSWORD", "correct-horse")
-    monkeypatch.setenv("MOOTOS_SESSION_SECRET", "test-secret-that-is-long-enough")
+    monkeypatch.setenv(
+        "MOOTOS_SESSION_SECRET", "test-secret-that-is-long-enough"
+    )
     monkeypatch.delenv("MOOTOS_ALLOW_PUBLIC", raising=False)
     monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
     monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN", raising=False)
@@ -266,7 +290,9 @@ def test_forget_and_restore_endpoints_require_authentication(monkeypatch):
 
     archive = private_client.post("/memories/missing/archive")
     restore = private_client.post("/memories/missing/restore")
-    archived_list = private_client.get("/memories", params={"status": "archived"})
+    archived_list = private_client.get(
+        "/memories", params={"status": "archived"}
+    )
 
     assert archive.status_code == 401
     assert restore.status_code == 401
@@ -282,7 +308,10 @@ def test_memory_interface_exposes_confirmed_forget_and_restore_controls():
     assert 'id="memoryStatusFilter"' in page.text
     assert 'id="memoryLifecycleDialog"' in page.text
     assert "Forget is recoverable" in page.text
-    assert "`/memories/${encodeURIComponent(memoryId)}/${action}`" in script.text
+    assert (
+        "`/memories/${encodeURIComponent(memoryId)}/${action}`"
+        in script.text
+    )
     assert 'action === "restore"' in script.text
     assert 'method: "POST"' in script.text
     assert "textContent = memory.content" in script.text
