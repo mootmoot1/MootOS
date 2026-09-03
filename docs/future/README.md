@@ -15,6 +15,8 @@ It must never be confused with `docs/CURRENT_IMPLEMENTATION.md`, the live Tool R
 7. `evolution-lab/README.md`
 8. `evolution-lab/PROMOTION_PROTOCOL.md`
 9. `adrs/`
+10. `CONTINUOUS_BUILDER_THREAT_MODEL.md`
+11. `CONTINUOUS_BUILDER_IMPLEMENTATION_PROGRAM.md`
 
 ## Bootstrap rule
 
