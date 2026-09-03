@@ -398,18 +398,17 @@ output.
 
 ### V0.4D — Real Composition Mission
 
-Prove the whole architecture on a real mission, e.g.:
+ADR-040 selects a mission supported by the current live registry: review
+project activity and Tasks, consult stored context, and prepare one follow-up
+Task for human approval. It composes `projects.overview`,
+`tasks.status_summary`, `tasks.list`, `memory.search`, and `tasks.create`
+through the existing registry, executor, Run, budget, and frozen-operation
+boundaries. See `docs/V0.4D_REAL_COMPOSITION_MISSION.md` for the implemented
+data flow and trust limits.
 
-> "Organize local storage and archive selected files to cloud without
-> permanent deletion."
-
-The point of this milestone is proving that a higher-level goal is
-achieved by *composing existing capabilities* — file search/move, a cloud
-archive connector, approval-gated writes — rather than by building one
-large, single-purpose "computer cleaner" tool. If this mission ends up
-needing one giant bespoke tool instead of composed smaller ones, that's a
-signal the capability model in §3 needs revisiting, not that this mission
-was the wrong test.
+The older local-file/cloud-archive example remains future connector work. Its
+filesystem, credential, and external-write authority does not exist in the
+current architecture and is not silently introduced by V0.4D.
 
 ## 7. Review responsibilities
 
