@@ -32,6 +32,18 @@ def _running_on_railway() -> bool:
     )
 
 
+def running_on_railway() -> bool:
+    """Public wrapper so other modules (e.g. backend.migrations) can gate
+    on deployment context without duplicating the Railway env-var check."""
+    return _running_on_railway()
+
+
+def environment_flag(name: str) -> bool:
+    """Public wrapper around the same truthy-env-var parsing this module
+    uses for its own safety flags."""
+    return _environment_flag(name)
+
+
 def _normalized_path(path: Path) -> Path:
     return path.expanduser().resolve(strict=False)
 
