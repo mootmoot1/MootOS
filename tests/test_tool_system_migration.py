@@ -27,7 +27,7 @@ def clean_db():
 
 
 def test_schema_five_adds_tool_identity_and_operations_table(clean_db):
-    assert get_schema_version() == LATEST_SCHEMA_VERSION == 6
+    assert get_schema_version() == LATEST_SCHEMA_VERSION == 7
     with database_connection() as connection:
         run_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(runs)").fetchall()
@@ -46,7 +46,7 @@ def test_upgraded_v01_database_reaches_new_schema_without_losing_data(tmp_path: 
     """Simulate a real V0.1 (schema 4) database and confirm the V0.2A migration
     upgrades it cleanly while preserving existing rows."""
     database_path = tmp_path / "v01-upgrade.db"
-    assert run_migrations(database_path) == 6
+    assert run_migrations(database_path) == 7
 
     with sqlite3.connect(database_path) as connection:
         connection.execute("DELETE FROM schema_migrations WHERE version >= 5")
@@ -60,7 +60,7 @@ def test_upgraded_v01_database_reaches_new_schema_without_losing_data(tmp_path: 
         )
         connection.commit()
 
-    assert run_migrations(database_path) == 6
+    assert run_migrations(database_path) == 7
 
     with sqlite3.connect(database_path) as connection:
         connection.row_factory = sqlite3.Row
