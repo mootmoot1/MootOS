@@ -61,11 +61,18 @@ def _digest(values):
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def append_event(database_path, event, expected_sequence, expected_digest):
+def append_event(
+    database_path, event, expected_sequence, expected_digest,
+    expected_dependency_digest=None,
+):
     if not isinstance(event, QueueEventInput):
         raise QueueStoreError("event input is invalid")
     if type(event.actor_authenticated) is not bool:
         raise QueueStoreError("authentication flag must be boolean")
+    if expected_dependency_digest is not None and (
+        event.dependency_digest != expected_dependency_digest
+    ):
+        raise QueueStoreError("dependency snapshot drift")
     connection = connect(database_path)
     try:
         connection.execute("BEGIN IMMEDIATE")
