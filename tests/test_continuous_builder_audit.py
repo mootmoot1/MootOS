@@ -67,6 +67,14 @@ def test_audit_is_bounded_and_artifacts_are_digest_only(tmp_path):
         record_artifact_reference(
             path, "a", "CB-001", None, "raw", "secret", 1, T0,
         )
+    with pytest.raises(AuditError, match="attempt binding"):
+        record_artifact_reference(
+            path, "a", "CB-001", None, "patch", "a" * 64, 1, T0,
+        )
+    with pytest.raises(AuditError, match="attempt binding mismatch"):
+        record_artifact_reference(
+            path, "a", "CB-001", "missing", "patch", "a" * 64, 1, T0,
+        )
 
 
 def test_dependency_snapshot_drift_fails_before_transaction(tmp_path):

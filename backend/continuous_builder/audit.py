@@ -41,9 +41,17 @@ def record_artifact_reference(
     if any(not isinstance(value, str) or not value or len(value) > 256
            for value in (artifact_id, slice_id, kind, created_at)):
         raise AuditError("artifact metadata is malformed")
+    if not isinstance(attempt_id, str) or not attempt_id:
+        raise AuditError("artifact attempt binding is required")
     connection = connect(database_path)
     try:
         connection.execute("BEGIN IMMEDIATE")
+        attempt = connection.execute(
+            "SELECT slice_id FROM builder_attempts WHERE attempt_id=?",
+            (attempt_id,),
+        ).fetchone()
+        if attempt is None or attempt["slice_id"] != slice_id:
+            raise AuditError("artifact attempt binding mismatch")
         connection.execute(
             "INSERT INTO builder_artifacts VALUES (?,?,?,?,?,?,?)",
             (artifact_id, slice_id, attempt_id, kind, content_digest,
@@ -82,15 +90,20 @@ def read_slice_audit(
             (blueprint_id, blueprint_version, slice_id, limit),
         ).fetchall()
         leases = connection.execute(
-            "SELECT lease_id, attempt_id, owner_id, acquired_at, expires_at, "
-            "released_at FROM builder_leases WHERE slice_id=? "
-            "ORDER BY acquired_at DESC LIMIT ?", (slice_id, limit),
+            "SELECT l.lease_id, l.attempt_id, l.owner_id, l.acquired_at, "
+            "l.expires_at, l.released_at FROM builder_leases l "
+            "JOIN builder_attempts a ON a.attempt_id=l.attempt_id "
+            "WHERE a.blueprint_id=? AND a.blueprint_version=? "
+            "AND a.slice_id=? ORDER BY l.acquired_at DESC LIMIT ?",
+            (blueprint_id, blueprint_version, slice_id, limit),
         ).fetchall()
         artifacts = connection.execute(
-            "SELECT artifact_id, attempt_id, kind, content_digest, "
-            "size_bytes, "
-            "created_at FROM builder_artifacts WHERE slice_id=? "
-            "ORDER BY created_at DESC LIMIT ?", (slice_id, limit),
+            "SELECT r.artifact_id, r.attempt_id, r.kind, r.content_digest, "
+            "r.size_bytes, r.created_at FROM builder_artifacts r "
+            "JOIN builder_attempts a ON a.attempt_id=r.attempt_id "
+            "WHERE a.blueprint_id=? AND a.blueprint_version=? "
+            "AND a.slice_id=? ORDER BY r.created_at DESC LIMIT ?",
+            (blueprint_id, blueprint_version, slice_id, limit),
         ).fetchall()
     finally:
         connection.close()
