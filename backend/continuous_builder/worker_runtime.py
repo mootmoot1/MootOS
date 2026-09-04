@@ -40,6 +40,7 @@ DOCKER_HOME_ROOT = Path("/var/tmp/mootos-continuous-builder-docker-home")
 CONTAINER_SOURCE = "/source"
 CONTAINER_WORKSPACE = "/workspace"
 CONTAINER_USER = "65532:65532"
+CONTAINER_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 FIXTURE_OUTPUT = "cb022-fixture-output.json"
 MAX_COMMAND_BYTES = 1024 * 1024
 MAX_SAMPLE_BYTES = 4096
@@ -988,9 +989,18 @@ class DockerWorkerRuntime:
         payload = _one_json_object(result.stdout, "image inspection")
         repo_digests = payload.get("RepoDigests") or []
         config = payload.get("Config") or {}
+        descriptor = payload.get("Descriptor") or {}
+        annotations = descriptor.get("annotations") or {}
+        observed_config_digest = annotations.get(
+            "config.digest", payload.get("Id")
+        )
         if (
             image.image_reference not in repo_digests
-            or payload.get("Id") != "sha256:" + image.config_sha256
+            or observed_config_digest != "sha256:" + image.config_sha256
+            or (
+                descriptor
+                and descriptor.get("digest") != image.image_digest
+            )
             or payload.get("Os") != image.platform
             or payload.get("Architecture") != image.architecture
             or tuple(config.get("Entrypoint") or ()) != ENTRYPOINT_ARGV
@@ -1033,6 +1043,7 @@ class DockerWorkerRuntime:
         environment = {
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
+            "PATH": CONTAINER_PATH,
             "PYTHONHASHSEED": "0",
         }
         if set(policy.environment_allowlist) != set(environment) or any(
@@ -1056,6 +1067,7 @@ class DockerWorkerRuntime:
             "--log-driver", "local",
             "--log-opt", f"max-size={resources.max_log_bytes}b",
             "--log-opt", "max-file=1",
+            "--log-opt", "compress=false",
             "--mount", source_mount,
             "--tmpfs", (
                 f"{CONTAINER_WORKSPACE}:rw,nosuid,nodev,noexec,"
@@ -1100,7 +1112,12 @@ class DockerWorkerRuntime:
         config = container_inspect.get("Config") or {}
         mounts = container_inspect.get("Mounts") or []
         state = container_inspect.get("State") or {}
-        expected_env = {"LANG=C.UTF-8", "LC_ALL=C.UTF-8", "PYTHONHASHSEED=0"}
+        expected_env = {
+            "LANG=C.UTF-8",
+            "LC_ALL=C.UTF-8",
+            f"PATH={CONTAINER_PATH}",
+            "PYTHONHASHSEED=0",
+        }
         mount_ok = len(mounts) == 1 and (
             mounts[0].get("Source") == str(workspace.source_root)
             and mounts[0].get("Destination") == CONTAINER_SOURCE
@@ -1124,13 +1141,20 @@ class DockerWorkerRuntime:
         }
         security = set(host.get("SecurityOpt") or ())
         capabilities = set(host.get("CapDrop") or ())
+        log_config = host.get("LogConfig") or {}
+        expected_log_config = {
+            "Type": "local",
+            "Config": {
+                "compress": "false",
+                "max-file": "1",
+                "max-size": f"{resources.max_log_bytes}b",
+            },
+        }
         expected_nano_cpus = resources.max_cpu_millis * 1000000
         checks = (
             container_inspect.get("Id") == container_id,
             state.get("Status") == "created",
-            container_inspect.get("Image")
-            == "sha256:"
-            + foundation.enforcement_contract.worker_image.config_sha256,
+            container_inspect.get("Image") == image_inspect.get("Id"),
             host.get("NetworkMode") == "none",
             host.get("Privileged") is False,
             host.get("ReadonlyRootfs") is True,
@@ -1139,6 +1163,7 @@ class DockerWorkerRuntime:
             host.get("Memory") == resources.max_memory_bytes,
             host.get("NanoCpus") == expected_nano_cpus,
             host.get("PidsLimit") == resources.max_processes,
+            log_config == expected_log_config,
             "ALL" in capabilities,
             "no-new-privileges:true" in security
             or "no-new-privileges" in security,
