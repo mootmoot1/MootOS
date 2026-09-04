@@ -12,6 +12,9 @@ class QueueIntegrityError(RuntimeError):
     """Raised when a durable event chain is corrupt or incomplete."""
 
 
+MAX_REPLAY_EVENTS = 10_000
+
+
 @dataclass(frozen=True)
 class QueueProjection:
     blueprint_id: str
@@ -36,6 +39,8 @@ def replay_slice(database_path, blueprint_id, blueprint_version, slice_id):
         connection.close()
     if not rows:
         raise QueueIntegrityError("event history is empty")
+    if len(rows) > MAX_REPLAY_EVENTS:
+        raise QueueIntegrityError("event history exceeds replay bound")
     previous_digest = None
     previous_state = None
     for expected_sequence, row in enumerate(rows, 1):
