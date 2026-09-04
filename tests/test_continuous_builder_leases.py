@@ -70,11 +70,17 @@ def test_explicit_release_allows_new_coordination_record(tmp_path):
     acquire_lease(path, "lease-2", "attempt-2", "CB-001", "owner-2", T1, T2)
 
 
-def test_idempotency_is_backed_by_database_uniqueness(tmp_path):
+def test_idempotency_replays_matching_requests_and_rejects_conflicts(tmp_path):
     path, _ = prepared(tmp_path)
-    reserve_idempotency(path, "key-1", "plan", "a" * 64, T0)
-    with pytest.raises(LeaseError, match="duplicate durable"):
-        reserve_idempotency(path, "key-1", "plan", "a" * 64, T0)
+    first = reserve_idempotency(path, "key-1", "plan", "a" * 64, T0)
+    assert first.replayed is False
+    replay = reserve_idempotency(path, "key-1", "plan", "a" * 64, T1)
+    assert replay.replayed is True
+    assert replay.created_at == T0
+    with pytest.raises(LeaseError, match="conflicts with a differing request"):
+        reserve_idempotency(path, "key-1", "plan", "b" * 64, T1)
+    with pytest.raises(LeaseError, match="conflicts with a differing request"):
+        reserve_idempotency(path, "key-1", "propose", "a" * 64, T1)
 
 
 def test_ownership_and_timestamp_mismatches_fail_closed(tmp_path):
@@ -95,6 +101,7 @@ def test_active_lease_rejects_transition_from_another_attempt(tmp_path):
     acquire_lease(
         path, "lease-1", "attempt-1", "CB-001", "owner-1", T0, T1,
     )
+    create(path, "other-attempt", "owner-2")
     other = replace(
         event, event_id="event-2", next_state="researching",
         attempt_id="other-attempt",

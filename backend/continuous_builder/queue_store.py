@@ -5,9 +5,10 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
 
 from backend.db import connect
+from .text_safety import utf8_length
+from .timestamps import parse_timestamp
 
 
 class QueueStoreError(RuntimeError):
@@ -40,6 +41,13 @@ for state in PRIMARY[:-1]:
         "superseded", "retired"
     })
 
+# Every state from "ready" onward commits to dispatch/execution capacity.
+# Hard-dependency completeness must be re-proven on every entry into one of
+# these states, from every route (including side-states like "paused" or
+# "changes_requested" that can reach them without passing back through
+# "ready") -- not only when the literal next_state is "ready".
+EXECUTION_CAPABLE_STATES = frozenset(PRIMARY[PRIMARY.index("ready"):])
+
 
 @dataclass(frozen=True)
 class QueueEventInput:
@@ -66,7 +74,7 @@ class QueueEventInput:
         )
         if any(
             not isinstance(value, str) or not value
-            or len(value.encode("utf-8")) > 256 for value in values
+            or utf8_length(value) > 256 for value in values
         ):
             raise QueueStoreError("event metadata is malformed or excessive")
         if self.next_state not in set(PRIMARY) | set(SIDE):
@@ -77,15 +85,10 @@ class QueueEventInput:
             raise QueueStoreError("event digest metadata is malformed")
         if self.attempt_id is not None and (
             not isinstance(self.attempt_id, str) or not self.attempt_id
-            or len(self.attempt_id.encode("utf-8")) > 256
+            or utf8_length(self.attempt_id) > 256
         ):
             raise QueueStoreError("attempt identity is malformed")
-        try:
-            timestamp = datetime.fromisoformat(self.created_at)
-        except (TypeError, ValueError) as error:
-            raise QueueStoreError("event timestamp is malformed") from error
-        if timestamp.tzinfo is None:
-            raise QueueStoreError("event timestamp requires a timezone")
+        parse_timestamp(self.created_at, "event timestamp", QueueStoreError)
         if type(self.actor_authenticated) is not bool:
             raise QueueStoreError("authentication flag must be boolean")
 
@@ -162,7 +165,7 @@ def append_event(
             and expected_dependency_digest != durable_dependency_digest
         ):
             raise QueueStoreError("dependency snapshot drift")
-        if event.next_state == "ready":
+        if event.next_state in EXECUTION_CAPABLE_STATES:
             definition = json.loads(connection.execute(
                 "SELECT canonical_json FROM builder_slices "
                 "WHERE blueprint_id=? AND blueprint_version=? AND slice_id=?",
@@ -179,8 +182,25 @@ def append_event(
                 ).fetchone()
                 if state is None or state["next_state"] != "done":
                     raise QueueStoreError(
-                        "ready dependencies are not complete"
+                        "execution-capable dependencies are not complete"
                     )
+        if event.attempt_id is not None:
+            # Knowing an attempt_id string is never proof of authorship:
+            # it must reference a real attempt bound to this exact
+            # blueprint/version/slice, not merely a valid attempt of some
+            # unrelated slice.
+            bound_attempt = connection.execute(
+                "SELECT blueprint_id, blueprint_version, slice_id "
+                "FROM builder_attempts WHERE attempt_id=?",
+                (event.attempt_id,),
+            ).fetchone()
+            if bound_attempt is None or (
+                bound_attempt["blueprint_id"] != event.blueprint_id
+                or bound_attempt["blueprint_version"]
+                != event.blueprint_version
+                or bound_attempt["slice_id"] != event.slice_id
+            ):
+                raise QueueStoreError("event attempt binding mismatch")
         active_lease = connection.execute(
             "SELECT l.attempt_id FROM builder_leases l "
             "JOIN builder_attempts a ON a.attempt_id=l.attempt_id "
