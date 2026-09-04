@@ -62,6 +62,7 @@ The authoritative durable-readiness bridge (`backend/continuous_builder/readines
 | CB-019 | Container environment provider interface and policy probe | `sandbox_provider.py`, security tests | Fail closed unless isolation features proven. No worker yet. |
 | CB-020 | Disposable repository reconstruction at pinned base | `sandbox_repository.py`, tests | No shared `.git`, hooks, host writes, or path escape. |
 | CB-021 | Environment, mount, credential, network, and resource policy | `sandbox_policy.py`, adversarial tests | Allowlist/deny-by-default, hard caps. |
+| Phase 4B foundation | Trusted Docker runtime/image/entrypoint, materialization-evidence, enforcement-class, readiness, handle, and cancellation contracts | `docker_runtime_contract.py`, `repository_materialization.py`, `runtime_enforcement.py`, tests | Docker control is supervisor-only and never exposed to a worker. Contracts remain inert: no Docker access, materialization, launch, or verified-isolation claim. |
 | CB-022 | One-worker launch/poll/cancel/collect adapter | `worker_runtime.py`, tests | Exact authorized action only; bounded process authority inside sandbox. No GitHub. |
 | CB-023 | Artifact intake, secret scan, quarantine, teardown receipt | `worker_artifact.py`, tests | Artifact untrusted; cleanup failure blocks. |
 | CB-024 | Supervisor stall/crash/uncertain/circuit-breaker policy | `supervisor.py`, tests | Receipt-driven, no endless retry; kill switch. |
@@ -115,4 +116,3 @@ Never combine in one implementation batch: authorization with its executor; exec
 ## Explicit deferrals
 
 Authenticated human/provider identity, credential ownership, GitHub execution, external state verification, durable artifact-store selection, supply-chain mirror, retry of uncertain external outcomes, autonomous Main merge/deploy, persistent generalized mission resume, arbitrary shell/filesystem/network authority, dynamic tool registration, root privileges, capability installation, and Continuous Builder self-modification remain deferred.
-
