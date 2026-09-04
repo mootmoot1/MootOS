@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from .blueprint_parser import ParsedBlueprint
 from .queue_proposal import CandidateSliceProposal, QueueProposalError
+from .text_safety import utf8_length
 
 MAX_ANALYSIS_BYTES = 256 * 1024
 MAX_RECEIPT_IDENTITY_BYTES = 256
@@ -25,7 +26,7 @@ class DependencyReceipt:
     def __post_init__(self):
         if any(
             not isinstance(value, str) or not value
-            or len(value.encode("utf-8")) > MAX_RECEIPT_IDENTITY_BYTES
+            or utf8_length(value) > MAX_RECEIPT_IDENTITY_BYTES
             for value in (
                 self.receipt_id, self.slice_id, self.slice_version,
             )

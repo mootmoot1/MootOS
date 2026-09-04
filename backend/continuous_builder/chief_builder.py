@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 
 from .priority_policy import PriorityAnalysis, PriorityPolicyError
+from .text_safety import utf8_length
 
 
 class ChiefBuilderError(PriorityPolicyError):
@@ -30,7 +31,7 @@ class BlueprintApprovalEvidence:
         ):
             if (
                 not isinstance(value, str) or not value.strip()
-                or len(value.encode("utf-8")) > 256
+                or utf8_length(value) > 256
             ):
                 raise ChiefBuilderError(f"{name} is malformed")
         if self.approved is not True:

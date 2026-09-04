@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. This decision grants no authority until its implementation slices are separately approved and merged.
+Partially implemented. Role 2 (Chief Builder: deterministic eligible-work/priority derivation from durable receipts, self-contained/non-externally-attested planning receipts) is implemented in `backend/continuous_builder/chief_builder.py`, `priority_policy.py`, `conflict_analysis.py`, and `dependency_analysis.py`, and matches this ADR's authority model exactly -- receipts recompute and verify everything from their own inputs and reject any claim of external authentication. Roles 1 (blueprint loader), 3 (worker supervisor/dispatch), 4 (verifier), and any GitHub/publication role remain unimplemented: no worker launch, process execution, or dispatch exists anywhere in this codebase. This decision continues to grant no dispatch/execution authority.
 
 ## Context
 

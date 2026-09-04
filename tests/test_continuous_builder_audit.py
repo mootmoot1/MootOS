@@ -31,15 +31,15 @@ def test_complete_durable_chain_has_bounded_integrity_audit(tmp_path):
         path, event, 0, None,
         expected_dependency_digest=event.dependency_digest,
     )
+    create_attempt(
+        path, "attempt-1", event.blueprint_id, event.blueprint_version,
+        event.slice_id, event.slice_version, "owner", T0,
+    )
     researching = replace(
         event, event_id="event-2", next_state="researching",
         attempt_id="attempt-1",
     )
     append_event(path, researching, 1, digest, event.dependency_digest)
-    create_attempt(
-        path, "attempt-1", event.blueprint_id, event.blueprint_version,
-        event.slice_id, event.slice_version, "owner", T0,
-    )
     acquire_lease(
         path, "lease-1", "attempt-1", event.slice_id, "owner", T0, T1,
     )
@@ -107,15 +107,15 @@ def test_pre_migration_backup_is_restorable_on_disposable_database(tmp_path):
     run_migrations(original)
     connection = sqlite3.connect(original)
     for table in (
-        "builder_artifacts", "builder_leases", "builder_attempts",
-        "builder_idempotency", "builder_events", "builder_slices",
-        "builder_blueprints",
+        "builder_lease_reconciliations", "builder_artifacts",
+        "builder_leases", "builder_attempts", "builder_idempotency",
+        "builder_events", "builder_slices", "builder_blueprints",
     ):
         connection.execute(f"DROP TABLE {table}")
-    connection.execute("DELETE FROM schema_migrations WHERE version=6")
+    connection.execute("DELETE FROM schema_migrations WHERE version IN (6, 7)")
     connection.commit()
     connection.close()
     shutil.copy2(original, backup)
     assert get_schema_version(backup) == 5
-    assert run_migrations(original) == 6
+    assert run_migrations(original) == 7
     assert get_schema_version(backup) == 5

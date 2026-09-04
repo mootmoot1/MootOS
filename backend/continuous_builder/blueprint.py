@@ -4,6 +4,8 @@ import json
 import re
 from dataclasses import dataclass
 
+from .paths import PathCanonicalizationError, canonicalize_repo_path
+
 
 class BlueprintError(ValueError):
     """Raised when a blueprint value is malformed or unsafe."""
@@ -18,7 +20,6 @@ MAX_ITEMS = 64
 MAX_SLICES = 128
 MAX_SERIALIZED_BYTES = 256 * 1024
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_PATH = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[^\x00-\x1f]+$")
 _SECRET = re.compile(
     r"(?i)(?:password|secret|api[_-]?key|authorization|bearer)\s*[:=]"
 )
@@ -28,7 +29,13 @@ def _text(value, name, limit=MAX_TEXT_BYTES, identifier=False):
     if not isinstance(value, str) or not value.strip():
         raise BlueprintError(f"{name} must be nonblank text")
     value = value.strip()
-    if len(value.encode("utf-8")) > limit:
+    try:
+        encoded_length = len(value.encode("utf-8"))
+    except UnicodeEncodeError as error:
+        raise BlueprintError(
+            f"{name} contains an unpaired UTF-16 surrogate"
+        ) from error
+    if encoded_length > limit:
         raise BlueprintError(f"{name} exceeds {limit} bytes")
     if any(ord(char) < 32 or ord(char) == 127 for char in value):
         raise BlueprintError(f"{name} contains control characters")
@@ -40,16 +47,21 @@ def _text(value, name, limit=MAX_TEXT_BYTES, identifier=False):
 
 
 def _texts(values, name, path=False):
-    if isinstance(values, (str, bytes)):
+    if not isinstance(values, (list, tuple)):
         raise BlueprintError(f"{name} must be a collection")
     values = tuple(values)
     if len(values) > MAX_ITEMS:
         raise BlueprintError(f"{name} exceeds item bound")
     normalized = tuple(_text(value, name) for value in values)
+    if path:
+        try:
+            normalized = tuple(
+                canonicalize_repo_path(value) for value in normalized
+            )
+        except PathCanonicalizationError as error:
+            raise BlueprintError(f"{name} contains an unsafe path") from error
     if len(normalized) != len(set(normalized)):
         raise BlueprintError(f"{name} must be unique")
-    if path and any(_PATH.fullmatch(value) is None for value in normalized):
-        raise BlueprintError(f"{name} contains an unsafe path")
     return normalized
 
 

@@ -5,6 +5,7 @@ import unicodedata
 from dataclasses import dataclass
 
 from .conflict_analysis import ConflictAnalysis, ConflictAnalysisError
+from .text_safety import utf8_length
 
 
 class PriorityPolicyError(ConflictAnalysisError):
@@ -127,7 +128,7 @@ class PriorityAnalysis:
             raise PriorityPolicyError("derived priority ranking is forged")
         advisory = tuple(self.advisory_metadata)
         if len(advisory) > 16 or any(
-            not isinstance(item, str) or len(item.encode("utf-8")) > 512
+            not isinstance(item, str) or utf8_length(item) > 512
             for item in advisory
         ):
             raise PriorityPolicyError("advisory metadata is malformed")

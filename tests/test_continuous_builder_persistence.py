@@ -24,7 +24,7 @@ def snapshot():
 
 def test_migration_creates_builder_schema_on_isolated_database(tmp_path):
     path = tmp_path / "mootos.db"
-    assert run_migrations(path) == LATEST_SCHEMA_VERSION == 6
+    assert run_migrations(path) == LATEST_SCHEMA_VERSION == 7
     connection = sqlite3.connect(path)
     tables = {row[0] for row in connection.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
@@ -32,6 +32,7 @@ def test_migration_creates_builder_schema_on_isolated_database(tmp_path):
     connection.close()
     assert "builder_blueprints" in tables
     assert "builder_events" in tables
+    assert "builder_lease_reconciliations" in tables
 
 
 def test_blueprint_snapshot_is_immutable_and_duplicate_fails(tmp_path):

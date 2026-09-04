@@ -5,6 +5,8 @@ import json
 from dataclasses import dataclass
 
 from .dependency_analysis import DependencyAnalysis, DependencyAnalysisError
+from .paths import PathCanonicalizationError, canonicalize_repo_path
+from .text_safety import utf8_length
 
 MAX_ANALYSIS_BYTES = 256 * 1024
 MAX_RESOURCE_TEXT_BYTES = 256
@@ -15,12 +17,12 @@ class ConflictAnalysisError(DependencyAnalysisError):
 
 
 def _values(values, name):
-    if isinstance(values, (str, bytes)):
+    if not isinstance(values, (list, tuple)):
         raise ConflictAnalysisError(f"{name} must be a collection")
     values = tuple(values)
     if len(values) > 128 or any(
         not isinstance(value, str) or not value
-        or len(value.encode("utf-8")) > MAX_RESOURCE_TEXT_BYTES
+        or utf8_length(value) > MAX_RESOURCE_TEXT_BYTES
         for value in values
     ):
         raise ConflictAnalysisError(f"{name} is malformed or excessive")
@@ -90,11 +92,29 @@ class SliceConflictResult:
         }
 
 
+def _canonical_for_comparison(path):
+    """Best-effort canonicalization for conflict comparison.
+
+    Blueprint-declared paths are already canonicalized at parse time
+    (blueprint.py). Runtime-supplied ``active_slice_scopes`` are not, so
+    an unparseable value here (e.g. a caller-supplied wildcard fragment)
+    falls back to the raw string rather than raising -- this function
+    must never fail closed by crashing pure analysis, only by comparing
+    conservatively.
+    """
+    try:
+        return canonicalize_repo_path(path)
+    except PathCanonicalizationError:
+        return path
+
+
 def _paths_overlap(left, right):
+    left = _canonical_for_comparison(left)
+    right = _canonical_for_comparison(right)
     left_base = left.rstrip("*").rstrip("/")
     right_base = right.rstrip("*").rstrip("/")
     return (
-        fnmatch.fnmatch(left, right) or fnmatch.fnmatch(right, left)
+        fnmatch.fnmatchcase(left, right) or fnmatch.fnmatchcase(right, left)
         or left_base == right_base
         or left_base.startswith(right_base + "/")
         or right_base.startswith(left_base + "/")

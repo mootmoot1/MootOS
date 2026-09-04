@@ -1,17 +1,24 @@
 """Versioned SQLite schema migrations for MootOS."""
 
 import sqlite3
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional, Union
 
-from backend.db import connect
+from backend.db import connect, environment_flag, running_on_railway
 
 
 DatabasePath = Union[str, Path]
 MigrationFunction = Callable[[sqlite3.Connection], None]
+
+
+class MigrationBackupRequiredError(RuntimeError):
+    """Raised when a new migration would run on Railway without an
+    operator-confirmed backup (see docs/future/CONTINUOUS_BUILDER_PHASE_2_SCHEMA.md
+    and backend.db_backup)."""
 
 DEFAULT_PROJECTS = (
     ("MootOS", "Development and planning for the MootOS personal AI system."),
@@ -33,9 +40,10 @@ REQUIRED_COLUMNS = {
     "builder_slices": {"blueprint_id", "blueprint_version", "slice_id", "slice_version", "canonical_json"},
     "builder_events": {"event_id", "blueprint_id", "blueprint_version", "blueprint_digest", "slice_id", "slice_version", "sequence", "previous_digest", "previous_state", "next_state", "reason", "actor_id", "actor_authenticated", "attempt_id", "dependency_digest", "policy_version", "created_at", "event_digest"},
     "builder_attempts": {"attempt_id", "blueprint_id", "blueprint_version", "slice_id", "slice_version", "owner_id", "created_at"},
-    "builder_leases": {"lease_id", "attempt_id", "slice_id", "owner_id", "acquired_at", "expires_at", "released_at"},
+    "builder_leases": {"lease_id", "attempt_id", "slice_id", "owner_id", "acquired_at", "expires_at", "released_at", "blueprint_id", "blueprint_version", "slice_version"},
     "builder_idempotency": {"idempotency_key", "operation", "content_digest", "created_at"},
     "builder_artifacts": {"artifact_id", "slice_id", "attempt_id", "kind", "content_digest", "size_bytes", "created_at"},
+    "builder_lease_reconciliations": {"reconciliation_id", "lease_id", "attempt_id", "verdict", "evidence", "actor_id", "reconciled_at"},
     "schema_migrations": {"version", "name", "applied_at"},
 }
 
@@ -233,6 +241,102 @@ def _migration_006_continuous_builder_state(
             connection.execute(statement)
 
 
+def _migration_007_continuous_builder_hardening(
+    connection: sqlite3.Connection,
+) -> None:
+    """Phase 2.5 hardening: scope active leases by full blueprint/slice
+    identity (not slice_id alone), bind builder_events.attempt_id with a
+    real foreign key so it can never dangle, and add an audited lease
+    reconciliation trail. Additive only: migration 006 is historical and
+    is never edited in place (scripts/gates/migration_safety.py) -- the
+    ``builder_events`` foreign key is added via SQLite's documented
+    rebuild-and-swap procedure, since ALTER TABLE cannot add a foreign key
+    to an existing table.
+    """
+    existing_lease_columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(builder_leases)").fetchall()
+    }
+    for column in ("blueprint_id", "blueprint_version", "slice_version"):
+        if column not in existing_lease_columns:
+            connection.execute(f"ALTER TABLE builder_leases ADD COLUMN {column} TEXT")
+    connection.execute("""
+        UPDATE builder_leases
+        SET blueprint_id = (
+                SELECT blueprint_id FROM builder_attempts
+                WHERE builder_attempts.attempt_id = builder_leases.attempt_id
+            ),
+            blueprint_version = (
+                SELECT blueprint_version FROM builder_attempts
+                WHERE builder_attempts.attempt_id = builder_leases.attempt_id
+            ),
+            slice_version = (
+                SELECT slice_version FROM builder_attempts
+                WHERE builder_attempts.attempt_id = builder_leases.attempt_id
+            )
+        WHERE blueprint_id IS NULL
+    """)
+    connection.execute("DROP INDEX IF EXISTS idx_builder_active_lease")
+    connection.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_builder_active_lease_identity
+          ON builder_leases (blueprint_id, blueprint_version, slice_id, slice_version)
+          WHERE released_at IS NULL
+    """)
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS builder_events__v2 (
+            event_id TEXT PRIMARY KEY,
+            blueprint_id TEXT NOT NULL, blueprint_version TEXT NOT NULL,
+            blueprint_digest TEXT NOT NULL, slice_id TEXT NOT NULL,
+            slice_version TEXT NOT NULL, sequence INTEGER NOT NULL CHECK (sequence >= 1),
+            previous_digest TEXT, previous_state TEXT, next_state TEXT NOT NULL,
+            reason TEXT NOT NULL, actor_id TEXT NOT NULL,
+            actor_authenticated INTEGER NOT NULL CHECK (actor_authenticated IN (0, 1)),
+            attempt_id TEXT, dependency_digest TEXT NOT NULL,
+            policy_version TEXT NOT NULL, created_at TEXT NOT NULL,
+            event_digest TEXT NOT NULL UNIQUE,
+            UNIQUE (blueprint_id, blueprint_version, slice_id, sequence),
+            FOREIGN KEY (blueprint_id, blueprint_version, slice_id)
+              REFERENCES builder_slices (blueprint_id, blueprint_version, slice_id),
+            FOREIGN KEY (attempt_id) REFERENCES builder_attempts (attempt_id)
+        )
+    """)
+    already_rebuilt = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='builder_events' "
+        "AND sql LIKE '%FOREIGN KEY (attempt_id)%'"
+    ).fetchone()
+    if already_rebuilt is None:
+        connection.execute(
+            "INSERT INTO builder_events__v2 SELECT event_id, blueprint_id, "
+            "blueprint_version, blueprint_digest, slice_id, slice_version, "
+            "sequence, previous_digest, previous_state, next_state, reason, "
+            "actor_id, actor_authenticated, attempt_id, dependency_digest, "
+            "policy_version, created_at, event_digest FROM builder_events"
+        )
+        connection.execute("DROP TABLE builder_events")
+        connection.execute("ALTER TABLE builder_events__v2 RENAME TO builder_events")
+    else:
+        connection.execute("DROP TABLE builder_events__v2")
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS builder_lease_reconciliations (
+            reconciliation_id TEXT PRIMARY KEY,
+            lease_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+            verdict TEXT NOT NULL CHECK (
+                verdict IN ('worker_confirmed_stopped', 'worker_confirmed_running')
+            ),
+            evidence TEXT NOT NULL, actor_id TEXT NOT NULL,
+            reconciled_at TEXT NOT NULL,
+            FOREIGN KEY (lease_id) REFERENCES builder_leases (lease_id),
+            FOREIGN KEY (attempt_id) REFERENCES builder_attempts (attempt_id)
+        )
+    """)
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_builder_lease_reconciliations_lease_id "
+        "ON builder_lease_reconciliations (lease_id, reconciled_at DESC)"
+    )
+
+
 MIGRATIONS = (
     Migration(1, "initial_schema", _migration_001_initial_schema),
     Migration(2, "memory_lifecycle", _migration_002_memory_lifecycle),
@@ -240,6 +344,7 @@ MIGRATIONS = (
     Migration(4, "tasks", _migration_004_tasks),
     Migration(5, "tool_system", _migration_005_tool_system),
     Migration(6, "continuous_builder_state", _migration_006_continuous_builder_state),
+    Migration(7, "continuous_builder_hardening", _migration_007_continuous_builder_hardening),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -295,7 +400,41 @@ def _verify_schema(connection: sqlite3.Connection) -> None:
         raise RuntimeError("Database schema is incompatible: tasks contains unsupported task metadata")
 
 
+LOCK_RETRY_ATTEMPTS = 5
+LOCK_RETRY_BASE_DELAY_SECONDS = 0.01
+
+
 def run_migrations(database_path: Optional[DatabasePath] = None) -> int:
+    """Apply pending migrations, retrying a bounded number of times on a
+    transient "database is locked" error.
+
+    SQLite's ``PRAGMA journal_mode=WAL`` (run inside ``connect()``) can
+    raise ``sqlite3.OperationalError("database is locked")`` immediately
+    -- not after the configured busy_timeout -- when multiple connections
+    race to convert a brand-new database file to WAL mode at the same
+    moment; the busy-timeout retry loop does not reliably cover this
+    specific PRAGMA. This is expected under concurrent first-boot (e.g.
+    multiple app workers starting against a fresh database
+    simultaneously): the required invariant is that migrations never
+    corrupt or partially apply the schema, not that every caller
+    succeeds on its very first attempt. A short, bounded retry lets a
+    losing caller serialize behind the winner instead of failing
+    outright; any other error, or exhausting the retry budget, still
+    propagates immediately.
+    """
+    for attempt in range(LOCK_RETRY_ATTEMPTS):
+        try:
+            return _run_migrations_once(database_path)
+        except sqlite3.OperationalError as error:
+            if (
+                "locked" not in str(error)
+                or attempt == LOCK_RETRY_ATTEMPTS - 1
+            ):
+                raise
+            time.sleep(LOCK_RETRY_BASE_DELAY_SECONDS * (2 ** attempt))
+
+
+def _run_migrations_once(database_path: Optional[DatabasePath] = None) -> int:
     connection = connect(database_path)
     try:
         connection.execute("BEGIN IMMEDIATE")
@@ -303,6 +442,18 @@ def run_migrations(database_path: Optional[DatabasePath] = None) -> int:
         current_version = _current_schema_version(connection)
         if current_version > LATEST_SCHEMA_VERSION:
             raise RuntimeError(f"Database schema is newer than this MootOS build: database={current_version}, supported={LATEST_SCHEMA_VERSION}")
+        if (
+            current_version < LATEST_SCHEMA_VERSION
+            and running_on_railway()
+            and not environment_flag("MOOTOS_MIGRATION_BACKUP_CONFIRMED")
+        ):
+            raise MigrationBackupRequiredError(
+                "Refusing to apply a new migration on Railway without an "
+                "operator-confirmed backup. Take and verify a backup with "
+                "backend.db_backup.create_sqlite_backup, stop writers, "
+                "then set MOOTOS_MIGRATION_BACKUP_CONFIRMED=true for this "
+                "deploy/run."
+            )
         for migration in MIGRATIONS:
             if migration.version <= current_version:
                 continue
