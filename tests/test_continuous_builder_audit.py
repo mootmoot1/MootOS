@@ -94,13 +94,20 @@ def test_integrity_query_reports_tampering_without_repair(tmp_path):
 
 
 def test_pre_migration_backup_is_restorable_on_disposable_database(tmp_path):
-    original = tmp_path / "pre-migration.db"
+    original = tmp_path / "upgrade-target.db"
     backup = tmp_path / "backup.db"
     run_migrations(original)
-    shutil.copy2(original, backup)
     connection = sqlite3.connect(original)
+    for table in (
+        "builder_artifacts", "builder_leases", "builder_attempts",
+        "builder_idempotency", "builder_events", "builder_slices",
+        "builder_blueprints",
+    ):
+        connection.execute(f"DROP TABLE {table}")
     connection.execute("DELETE FROM schema_migrations WHERE version=6")
     connection.commit()
     connection.close()
-    assert get_schema_version(backup) == 6
-    assert run_migrations(backup) == 6
+    shutil.copy2(original, backup)
+    assert get_schema_version(backup) == 5
+    assert run_migrations(original) == 6
+    assert get_schema_version(backup) == 5

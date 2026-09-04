@@ -11,6 +11,15 @@ class LeaseError(RuntimeError):
     """Raised when durable attempt or lease coordination fails closed."""
 
 
+def _identity(value, name):
+    if (
+        not isinstance(value, str) or not value
+        or len(value.encode("utf-8")) > 256
+    ):
+        raise LeaseError(f"{name} is malformed or excessive")
+    return value
+
+
 def _timestamp(value, name):
     if not isinstance(value, str):
         raise LeaseError(f"{name} must be an ISO timestamp")
@@ -39,6 +48,12 @@ def create_attempt(
     database_path, attempt_id, blueprint_id, blueprint_version,
     slice_id, slice_version, owner_id, created_at,
 ):
+    for value, name in (
+        (attempt_id, "attempt ID"), (blueprint_id, "blueprint ID"),
+        (blueprint_version, "blueprint version"), (slice_id, "slice ID"),
+        (slice_version, "slice version"), (owner_id, "owner ID"),
+    ):
+        _identity(value, name)
     _timestamp(created_at, "created_at")
     connection = connect(database_path)
     try:
@@ -70,6 +85,11 @@ def acquire_lease(
     database_path, lease_id, attempt_id, slice_id, owner_id,
     acquired_at, expires_at,
 ):
+    for value, name in (
+        (lease_id, "lease ID"), (attempt_id, "attempt ID"),
+        (slice_id, "slice ID"), (owner_id, "owner ID"),
+    ):
+        _identity(value, name)
     acquired = _timestamp(acquired_at, "acquired_at")
     expires = _timestamp(expires_at, "expires_at")
     if expires <= acquired:
@@ -146,6 +166,11 @@ def release_lease(database_path, lease_id, owner_id, released_at):
 def reserve_idempotency(
     database_path, key, operation, content_digest, created_at,
 ):
+    for value, name in (
+        (key, "idempotency key"), (operation, "operation"),
+        (content_digest, "content digest"),
+    ):
+        _identity(value, name)
     _timestamp(created_at, "created_at")
     connection = connect(database_path)
     try:

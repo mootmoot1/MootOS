@@ -2,8 +2,10 @@
 
 import hashlib
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime
 
 from backend.db import connect
 
@@ -32,6 +34,7 @@ TRANSITIONS = {
     ),
     "superseded": (), "retired": (), "cancelled": (), "done": (),
 }
+_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 for state in PRIMARY[:-1]:
     TRANSITIONS[state] = tuple(set(TRANSITIONS.get(state, ())) | {
         "superseded", "retired"
@@ -54,6 +57,37 @@ class QueueEventInput:
     policy_version: str
     created_at: str
     attempt_id: str = None
+
+    def __post_init__(self):
+        values = (
+            self.event_id, self.blueprint_id, self.blueprint_version,
+            self.slice_id, self.slice_version, self.reason, self.actor_id,
+            self.policy_version,
+        )
+        if any(
+            not isinstance(value, str) or not value
+            or len(value.encode("utf-8")) > 256 for value in values
+        ):
+            raise QueueStoreError("event metadata is malformed or excessive")
+        if self.next_state not in set(PRIMARY) | set(SIDE):
+            raise QueueStoreError("event state is unsupported")
+        if _DIGEST.fullmatch(self.blueprint_digest or "") is None or (
+            _DIGEST.fullmatch(self.dependency_digest or "") is None
+        ):
+            raise QueueStoreError("event digest metadata is malformed")
+        if self.attempt_id is not None and (
+            not isinstance(self.attempt_id, str) or not self.attempt_id
+            or len(self.attempt_id.encode("utf-8")) > 256
+        ):
+            raise QueueStoreError("attempt identity is malformed")
+        try:
+            timestamp = datetime.fromisoformat(self.created_at)
+        except (TypeError, ValueError) as error:
+            raise QueueStoreError("event timestamp is malformed") from error
+        if timestamp.tzinfo is None:
+            raise QueueStoreError("event timestamp requires a timezone")
+        if type(self.actor_authenticated) is not bool:
+            raise QueueStoreError("authentication flag must be boolean")
 
 
 def _digest(values):
@@ -101,8 +135,6 @@ def append_event(
 ):
     if not isinstance(event, QueueEventInput):
         raise QueueStoreError("event input is invalid")
-    if type(event.actor_authenticated) is not bool:
-        raise QueueStoreError("authentication flag must be boolean")
     connection = connect(database_path)
     try:
         connection.execute("BEGIN IMMEDIATE")
