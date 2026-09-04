@@ -239,6 +239,8 @@ def reconcile_expired_lease(
 
 
 def release_lease(database_path, lease_id, owner_id, released_at):
+    _identity(lease_id, "lease ID")
+    _identity(owner_id, "owner ID")
     _timestamp(released_at, "released_at")
     connection = connect(database_path)
     try:

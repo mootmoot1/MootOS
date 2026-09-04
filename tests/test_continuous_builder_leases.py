@@ -94,6 +94,17 @@ def test_ownership_and_timestamp_mismatches_fail_closed(tmp_path):
         )
 
 
+def test_release_rejects_malformed_lease_or_owner_identity(tmp_path):
+    path = tmp_path / "mootos.db"
+    from backend.migrations import run_migrations
+    from backend.continuous_builder.leases import release_lease
+    run_migrations(path)
+    with pytest.raises(LeaseError, match="malformed"):
+        release_lease(path, "", "owner-1", T1)
+    with pytest.raises(LeaseError, match="malformed"):
+        release_lease(path, "lease-1", None, T1)
+
+
 def test_active_lease_rejects_transition_from_another_attempt(tmp_path):
     path, event = prepared(tmp_path)
     _, digest = append_event(path, event, 0, None)
