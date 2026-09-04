@@ -66,7 +66,14 @@ def _foundation(resources=None):
     plan = create_disposable_repository_plan(
         request, source, "disposable-attempt-1"
     )
-    policy = _policy(plan, **({"resources": resources} if resources else {}))
+    policy_arguments = {
+        "environment_allowlist": (
+            "LANG", "LC_ALL", "PATH", "PYTHONHASHSEED",
+        ),
+    }
+    if resources:
+        policy_arguments["resources"] = resources
+    policy = _policy(plan, **policy_arguments)
     provider = _provider()
     preflight = evaluate_containment_preflight(provider, plan, policy)
     materialization = create_planned_materialization_receipt(
@@ -138,10 +145,16 @@ class FakeDocker:
             if not self.image_present:
                 return _CommandResult(1, b"", b"image absent")
             return _CommandResult(0, json.dumps([{
-                "Id": "sha256:" + CONFIG_DIGEST,
+                "Id": IMAGE_DIGEST,
                 "RepoDigests": [
                     "mootos/offline-fixture-worker@" + IMAGE_DIGEST
                 ],
+                "Descriptor": {
+                    "digest": IMAGE_DIGEST,
+                    "annotations": {
+                        "config.digest": "sha256:" + CONFIG_DIGEST,
+                    },
+                },
                 "Os": "linux",
                 "Architecture": "amd64",
                 "Config": {
@@ -226,10 +239,18 @@ class FakeDocker:
             }
         value = {
             "Id": CONTAINER_ID,
-            "Image": "sha256:" + CONFIG_DIGEST,
+            "Image": IMAGE_DIGEST,
             "State": state,
             "Config": {
-                "Env": ["LANG=C.UTF-8", "LC_ALL=C.UTF-8", "PYTHONHASHSEED=0"],
+                "Env": [
+                    "LANG=C.UTF-8",
+                    "LC_ALL=C.UTF-8",
+                    (
+                        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:"
+                        "/usr/bin:/sbin:/bin"
+                    ),
+                    "PYTHONHASHSEED=0",
+                ],
                 "User": "65532:65532",
                 "Entrypoint": [
                     "/opt/mootos/bin/offline-fixture-worker"
@@ -245,6 +266,14 @@ class FakeDocker:
                 "Memory": memory,
                 "NanoCpus": int(cpus * 1000000000),
                 "PidsLimit": pids,
+                "LogConfig": {
+                    "Type": "local",
+                    "Config": {
+                        "compress": "false",
+                        "max-file": "1",
+                        "max-size": "65536b",
+                    },
+                },
                 "CapDrop": ["ALL"],
                 "SecurityOpt": ["no-new-privileges:true"],
                 "Tmpfs": tmpfs,
@@ -331,6 +360,25 @@ def test_successful_offline_worker_is_contained_and_untrusted(
     assert "--memory" in create
     assert "--cpus" in create
     assert "--tmpfs" in create
+    log_options = [
+        create[index + 1]
+        for index, value in enumerate(create)
+        if value == "--log-opt"
+    ]
+    assert set(log_options) == {
+        "compress=false", "max-file=1", "max-size=65536b",
+    }
+    environment = [
+        create[index + 1]
+        for index, value in enumerate(create)
+        if value == "--env"
+    ]
+    assert set(environment) == {
+        "LANG=C.UTF-8",
+        "LC_ALL=C.UTF-8",
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "PYTHONHASHSEED=0",
+    }
     with pytest.raises(FrozenInstanceError):
         receipt.final_state = "failed"
 
@@ -407,6 +455,7 @@ def test_runtime_identity_mismatch_fails_before_image_or_launch(
         {"HostConfig.Memory": 0},
         {"HostConfig.NanoCpus": 0},
         {"HostConfig.PidsLimit": 0},
+        {"HostConfig.LogConfig.Config.compress": "true"},
         {"HostConfig.ReadonlyRootfs": False},
         {"Mounts": []},
         {"Config.Env": ["GITHUB_TOKEN=bad"]},
