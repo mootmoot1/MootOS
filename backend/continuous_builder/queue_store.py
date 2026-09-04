@@ -181,6 +181,17 @@ def append_event(
                     raise QueueStoreError(
                         "ready dependencies are not complete"
                     )
+        active_lease = connection.execute(
+            "SELECT l.attempt_id FROM builder_leases l "
+            "JOIN builder_attempts a ON a.attempt_id=l.attempt_id "
+            "WHERE a.blueprint_id=? AND a.blueprint_version=? "
+            "AND a.slice_id=? AND l.released_at IS NULL",
+            (event.blueprint_id, event.blueprint_version, event.slice_id),
+        ).fetchone()
+        if active_lease is not None and (
+            event.attempt_id != active_lease["attempt_id"]
+        ):
+            raise QueueStoreError("active lease conflicts with transition")
         prior = connection.execute(
             "SELECT sequence, event_digest, next_state FROM builder_events "
             "WHERE blueprint_id=? AND blueprint_version=? AND slice_id=? "

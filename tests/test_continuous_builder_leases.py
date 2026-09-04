@@ -1,5 +1,7 @@
 """Tests for durable attempts, leases, and idempotency."""
 
+from dataclasses import replace
+
 import pytest
 
 from backend.continuous_builder.leases import (
@@ -10,6 +12,7 @@ from backend.continuous_builder.leases import (
     release_lease,
     reserve_idempotency,
 )
+from backend.continuous_builder.queue_store import QueueStoreError, append_event
 from test_continuous_builder_queue_store import prepared
 
 
@@ -80,3 +83,18 @@ def test_ownership_and_timestamp_mismatches_fail_closed(tmp_path):
         acquire_lease(
             path, "lease-1", "attempt-1", "CB-001", "owner-1", T1, T0,
         )
+
+
+def test_active_lease_rejects_transition_from_another_attempt(tmp_path):
+    path, event = prepared(tmp_path)
+    _, digest = append_event(path, event, 0, None)
+    create(path)
+    acquire_lease(
+        path, "lease-1", "attempt-1", "CB-001", "owner-1", T0, T1,
+    )
+    other = replace(
+        event, event_id="event-2", next_state="researching",
+        attempt_id="other-attempt",
+    )
+    with pytest.raises(QueueStoreError, match="active lease"):
+        append_event(path, other, 1, digest)
