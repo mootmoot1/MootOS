@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. This ADR specifies future persistence; it does not add tables, migrations, or a running queue.
+Implemented (migrations 006/007, `backend/migrations.py`; `backend/continuous_builder/{queue_store,queue_projection,leases,audit}.py`). Originally "Proposed... does not add tables, migrations, or a running queue" -- that persistence layer has since been built and merged. The event-sourcing/digest-chaining/fail-closed-transition *model* described below is implemented exactly; see "Queue states" for a vocabulary correction.
 
 ## Blueprint contract
 
@@ -26,7 +26,9 @@ Audit records are sanitized metadata, not raw logs. Large logs/artifacts live in
 
 ## Queue states
 
-The minimum future vocabulary is `proposed`, `approved`, `eligible`, `leased`, `running`, `artifact_returned`, `verifying`, `needs_correction`, `ready_for_human`, `blocked`, `failed`, `cancelled`, and `complete`. External publication/deployment states belong to their own action/receipt models. “Complete” means the approved build slice exhausted its local state machine, not merged or deployed.
+**Implemented vocabulary (authoritative, supersedes the illustrative list below):** `backend/continuous_builder/queue_store.py` implements primary states `idea, researching, designing, ready, scheduled, building, reviewing, staging, testing, ready_for_main, done` and side-states `blocked, changes_requested, paused, superseded, retired, cancelled`, with a closed `TRANSITIONS` table. This differs from the illustrative vocabulary this ADR originally sketched; the implemented names track a slice through design/build/review rather than a worker-dispatch lifecycle, since no worker dispatch exists yet (ADR-042 is still unimplemented). Re-deriving `proposed`/`leased`/`running`/`artifact_returned` for an eventual worker-dispatch phase remains open, not abandoned -- Phase 2.5 deliberately did not rename the merged, event-sourced, test-covered vocabulary below to match this ADR, since doing so would rewrite already-persisted event semantics for no safety benefit.
+
+The minimum future vocabulary originally sketched here was `proposed`, `approved`, `eligible`, `leased`, `running`, `artifact_returned`, `verifying`, `needs_correction`, `ready_for_human`, `blocked`, `failed`, `cancelled`, and `complete`. External publication/deployment states belong to their own action/receipt models. “Complete” means the approved build slice exhausted its local state machine, not merged or deployed.
 
 ## Persistence rollout
 

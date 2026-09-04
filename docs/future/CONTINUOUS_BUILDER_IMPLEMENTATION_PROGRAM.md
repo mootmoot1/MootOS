@@ -24,6 +24,8 @@ All filenames below are proposed. Each slice gets a separate commit and focused 
 
 ## Phase 2 — Durable queue and audit
 
+**Status (Phase 2.5, 2026-09-04):** implemented and merged (`backend/migrations.py` migrations 006/007; `backend/continuous_builder/{blueprint_store,queue_store,queue_projection,leases,audit}.py`). Still true as of Phase 2.5: no production DB migration has been applied to the default MootOS/Railway database (`backend.migrations.run_migrations` now refuses to apply a new migration on Railway without `MOOTOS_MIGRATION_BACKUP_CONFIRMED=true`, mechanically enforcing that rather than only documenting it -- see `docs/future/CONTINUOUS_BUILDER_PHASE_2_SCHEMA.md`). CB-012's "single active lease" invariant is now scoped by full blueprint/slice identity, not slice ID alone, and gained an explicit audited reconciliation path (`leases.reconcile_expired_lease`) rather than only the "expiry means uncertain" read-side signal.
+
 | Slice | Objective / contract | Likely files | Invariants, authority, tests, rollback |
 | --- | --- | --- | --- |
 | CB-008 | Exact schema/migration and backup/restore design | migration ADR/addendum, migration tests | No migration until reviewed; downgrade/disable path proven. |
@@ -34,6 +36,12 @@ All filenames below are proposed. Each slice gets a separate commit and focused 
 | CB-013 | Durable idempotency and bounded audit/artifact references | `audit.py`, `artifact_refs.py` | Unique transaction proves replay control; no raw logs/secrets. Duplicate/crash tests. |
 
 **Hard stop before CB-009:** production DB migration and persistence approval. CB-009–013 can batch only in isolated temporary databases after the migration stop. Rollback disables writers, restores backup if migrated, and preserves audit evidence.
+
+## Phase 2.5 — Hardening (implemented, 2026-09-04)
+
+An audit found several Phase 2 defects that had to close before worker handoff contracts (Phase 3) could be defined: a hard-dependency eligibility check that only fired on the literal `ready` transition, letting a `paused -> scheduled -> building` route reach an execution-capable state without proving hard dependencies complete; active-lease uniqueness scoped by `slice_id` alone instead of full blueprint/slice identity; `builder_events.attempt_id` with no foreign key and no application-level check that it named a real, correctly-bound attempt; idempotency reservation that could not distinguish a safe replay from a genuine conflict; and blueprint path validation with gaps (backslashes, `~`, repeated `./`) that never mattered operationally (nothing in this codebase resolves these paths against a filesystem yet) but would have been a live trap for a future worker/executor. All were fixed via migration 007 (additive; migration 006 was never edited) plus application-level changes in `queue_store.py`, `leases.py`, `blueprint.py`, and a new `paths.py`/`readiness_bridge.py`/`text_safety.py`/`timestamps.py`. See `docs/future/CONTINUOUS_BUILDER_PHASE_2_SCHEMA.md` for the schema-level detail and the ADR amendments in `docs/future/adrs/ADR-037/041/043-*.md` for the vocabulary/policy drift this pass reconciled.
+
+The authoritative durable-readiness bridge (`backend/continuous_builder/readiness_bridge.py`) was added so that Phase 3 never has to accept a caller's bare `DependencyReceipt(authoritative=True)` claim: it derives every receipt from the stored immutable blueprint/slice version plus replayed, integrity-checked event history, failing closed on any staleness or corruption. This is pure and read-only -- no dispatch or worker execution was added.
 
 ## Phase 3 — Inert worker and dispatch contracts
 
