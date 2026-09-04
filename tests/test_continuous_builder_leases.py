@@ -12,7 +12,10 @@ from backend.continuous_builder.leases import (
     release_lease,
     reserve_idempotency,
 )
-from backend.continuous_builder.queue_store import QueueStoreError, append_event
+from backend.continuous_builder.queue_store import (
+    QueueStoreError,
+    append_event,
+)
 from test_continuous_builder_queue_store import prepared
 
 
