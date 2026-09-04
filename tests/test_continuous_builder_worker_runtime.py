@@ -1,6 +1,8 @@
 import ast
 import hashlib
 import json
+import os
+import stat
 from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
 
@@ -264,6 +266,9 @@ class FakeDocker:
 
 def _execute(tmp_path, monkeypatch, fake=None, foundation=None, **changes):
     monkeypatch.setattr(worker_runtime, "RUNTIME_ROOT", tmp_path / "runtime")
+    monkeypatch.setattr(
+        worker_runtime, "DOCKER_HOME_ROOT", tmp_path / "docker-home",
+    )
     runtime = DockerWorkerRuntime(poll_interval=0)
     fake = fake or FakeDocker()
     runtime._docker = fake
@@ -644,3 +649,116 @@ def test_runtime_module_uses_only_narrow_subprocess_boundary():
     assert "system" not in calls
     assert "Popen" not in calls
     assert "shell=True" not in source.replace(" ", "")
+
+
+def _isolated_docker_cli(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        worker_runtime, "DOCKER_HOME_ROOT", tmp_path / "docker-home",
+    )
+    return worker_runtime._DockerCli()
+
+
+def test_docker_cli_does_not_use_real_host_home(tmp_path, monkeypatch):
+    real_home = str(Path.home())
+    monkeypatch.setenv("HOME", real_home)
+    cli = _isolated_docker_cli(tmp_path, monkeypatch)
+    assert cli._environment["HOME"] != real_home
+    assert cli._environment["HOME"] == str(tmp_path / "docker-home")
+
+
+def test_docker_cli_does_not_inherit_host_docker_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOCKER_CONFIG", "/Users/attacker/.docker")
+    cli = _isolated_docker_cli(tmp_path, monkeypatch)
+    assert cli._environment["DOCKER_CONFIG"] != "/Users/attacker/.docker"
+    assert cli._environment["DOCKER_CONFIG"] == str(
+        tmp_path / "docker-home" / ".docker"
+    )
+
+
+def test_docker_cli_subprocess_env_excludes_host_credentials(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("DOCKER_AUTH_CONFIG", '{"auths":{"registry":{}}}')
+    monkeypatch.setenv("DOCKER_CONFIG", "/Users/attacker/.docker")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "leaked-credential")
+    monkeypatch.setenv("GITHUB_TOKEN", "leaked-credential")
+    cli = _isolated_docker_cli(tmp_path, monkeypatch)
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return worker_runtime.subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(worker_runtime.subprocess, "run", fake_run)
+    cli.run(("version",), 5)
+    env = captured["kwargs"]["env"]
+    assert set(env) == {"HOME", "DOCKER_CONFIG", "LANG", "LC_ALL", "PATH"}
+    assert env["HOME"] == str(tmp_path / "docker-home")
+    assert env["DOCKER_CONFIG"] == str(tmp_path / "docker-home" / ".docker")
+
+
+def test_docker_home_is_supervisor_owned_and_permission_bounded(
+    tmp_path, monkeypatch,
+):
+    cli = _isolated_docker_cli(tmp_path, monkeypatch)
+    for raw in (cli._environment["HOME"], cli._environment["DOCKER_CONFIG"]):
+        metadata = Path(raw).stat()
+        assert metadata.st_uid == os.geteuid()
+        assert stat.S_IMODE(metadata.st_mode) == 0o700
+
+
+def test_symlinked_docker_home_fails_closed(tmp_path, monkeypatch):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    link = tmp_path / "docker-home"
+    link.symlink_to(elsewhere)
+    monkeypatch.setattr(worker_runtime, "DOCKER_HOME_ROOT", link)
+    with pytest.raises(WorkerRuntimeError, match="cannot be a symlink"):
+        worker_runtime._DockerCli()
+
+
+def test_symlinked_docker_config_subdirectory_fails_closed(
+    tmp_path, monkeypatch,
+):
+    home = tmp_path / "docker-home"
+    home.mkdir()
+    home.chmod(0o700)
+    elsewhere = tmp_path / "elsewhere-config"
+    elsewhere.mkdir()
+    (home / ".docker").symlink_to(elsewhere)
+    monkeypatch.setattr(worker_runtime, "DOCKER_HOME_ROOT", home)
+    with pytest.raises(WorkerRuntimeError, match="cannot be a symlink"):
+        worker_runtime._DockerCli()
+
+
+def test_docker_home_with_unsafe_permissions_fails_closed(
+    tmp_path, monkeypatch,
+):
+    home = tmp_path / "docker-home"
+    home.mkdir()
+    home.chmod(0o777)
+    monkeypatch.setattr(worker_runtime, "DOCKER_HOME_ROOT", home)
+    with pytest.raises(WorkerRuntimeError, match="ownership is unsafe"):
+        worker_runtime._DockerCli()
+
+
+def test_docker_cli_argv_and_shell_behavior_unchanged(tmp_path, monkeypatch):
+    cli = _isolated_docker_cli(tmp_path, monkeypatch)
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return worker_runtime.subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(worker_runtime.subprocess, "run", fake_run)
+    result = cli.run(("image", "inspect", "sha256:" + "a" * 64), 5)
+    assert captured["argv"] == (
+        str(cli._executable), "image", "inspect", "sha256:" + "a" * 64,
+    )
+    assert captured["kwargs"]["shell"] is False
+    assert captured["kwargs"]["check"] is False
+    assert captured["kwargs"]["capture_output"] is True
+    assert captured["kwargs"]["timeout"] == 5
+    assert result.returncode == 0

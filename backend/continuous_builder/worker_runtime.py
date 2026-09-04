@@ -36,6 +36,7 @@ DOCKER_EXECUTABLES = (
     Path("/usr/bin/docker"),
 )
 RUNTIME_ROOT = Path("/var/tmp/mootos-continuous-builder")
+DOCKER_HOME_ROOT = Path("/var/tmp/mootos-continuous-builder-docker-home")
 CONTAINER_SOURCE = "/source"
 CONTAINER_WORKSPACE = "/workspace"
 CONTAINER_USER = "65532:65532"
@@ -112,6 +113,14 @@ class _DockerCli:
                 "trusted Docker executable is unavailable"
             )
         self._executable = paths[0]
+        docker_home, docker_config = _safe_docker_home()
+        self._environment = {
+            "HOME": str(docker_home),
+            "DOCKER_CONFIG": str(docker_config),
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+        }
 
     def run(self, arguments, timeout):
         if type(arguments) is not tuple or any(
@@ -123,18 +132,12 @@ class _DockerCli:
         if type(timeout) not in (int, float) or timeout <= 0:
             raise WorkerRuntimeError("Docker timeout is invalid")
         argv = (str(self._executable),) + arguments
-        environment = {
-            "HOME": str(Path.home()),
-            "LANG": "C.UTF-8",
-            "LC_ALL": "C.UTF-8",
-            "PATH": "/usr/local/bin:/usr/bin:/bin",
-        }
         try:
             completed = subprocess.run(
                 argv,
                 capture_output=True,
                 check=False,
-                env=environment,
+                env=self._environment,
                 shell=False,
                 timeout=timeout,
             )
@@ -263,20 +266,31 @@ class _MaterializedWorkspace:
     receipt: VerifiedMaterializationReceipt
 
 
-def _safe_runtime_root():
-    root = RUNTIME_ROOT
-    if not root.is_absolute() or ".." in root.parts:
-        raise WorkerRuntimeError("runtime workspace root is unsafe")
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if root.is_symlink():
-        raise WorkerRuntimeError("runtime workspace root cannot be a symlink")
-    resolved = root.resolve(strict=True)
+def _safe_bounded_directory(path, error_label):
+    if not path.is_absolute() or ".." in path.parts:
+        raise WorkerRuntimeError(f"{error_label} is unsafe")
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.is_symlink():
+        raise WorkerRuntimeError(f"{error_label} cannot be a symlink")
+    resolved = path.resolve(strict=True)
     metadata = resolved.stat()
     if metadata.st_uid != os.geteuid() or stat.S_IMODE(
         metadata.st_mode
     ) & 0o077:
-        raise WorkerRuntimeError("runtime workspace root ownership is unsafe")
+        raise WorkerRuntimeError(f"{error_label} ownership is unsafe")
     return resolved
+
+
+def _safe_runtime_root():
+    return _safe_bounded_directory(RUNTIME_ROOT, "runtime workspace root")
+
+
+def _safe_docker_home():
+    home = _safe_bounded_directory(DOCKER_HOME_ROOT, "docker supervisor home")
+    docker_config = _safe_bounded_directory(
+        home / ".docker", "docker supervisor config directory"
+    )
+    return home, docker_config
 
 
 def _write_exact_source(contract, source_files):
