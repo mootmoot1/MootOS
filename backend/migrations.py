@@ -167,7 +167,7 @@ def _migration_005_tool_system(connection: sqlite3.Connection) -> None:
 def _migration_006_continuous_builder_state(
     connection: sqlite3.Connection,
 ) -> None:
-    connection.executescript("""
+    statements = """
         CREATE TABLE IF NOT EXISTS builder_blueprints (
             blueprint_id TEXT NOT NULL, blueprint_version TEXT NOT NULL,
             content_digest TEXT NOT NULL UNIQUE, canonical_json TEXT NOT NULL,
@@ -227,7 +227,10 @@ def _migration_006_continuous_builder_state(
             created_at TEXT NOT NULL,
             FOREIGN KEY (attempt_id) REFERENCES builder_attempts (attempt_id)
         );
-    """)
+    """
+    for statement in statements.split(";"):
+        if statement.strip():
+            connection.execute(statement)
 
 
 MIGRATIONS = (
