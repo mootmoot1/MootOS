@@ -15,6 +15,7 @@ from .blueprint import (
     SliceBlueprint,
     SystemBlueprint,
 )
+from .text_safety import utf8_length
 
 
 class BlueprintParseError(BlueprintError):
@@ -109,7 +110,7 @@ def parse_blueprint(payload, expected_digest=None):
             ) from error
     if not isinstance(payload, str):
         raise BlueprintParseError("blueprint payload must be text or bytes")
-    if len(payload.encode("utf-8")) > MAX_SERIALIZED_BYTES:
+    if utf8_length(payload) > MAX_SERIALIZED_BYTES:
         raise BlueprintParseError("blueprint payload exceeds byte bound")
     try:
         raw = json.loads(payload, object_pairs_hook=_object_pairs)

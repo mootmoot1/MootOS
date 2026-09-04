@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from .blueprint import BlueprintError, ContinuousBuilderBlueprint
 from .blueprint_parser import ParsedBlueprint
+from .text_safety import utf8_length
 
 
 class QueueProposalError(BlueprintError):
@@ -22,12 +23,12 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _string_tuple(values, name, limit=MAX_REASONS):
-    if isinstance(values, (str, bytes)):
+    if not isinstance(values, (list, tuple)):
         raise QueueProposalError(f"{name} must be a collection")
     values = tuple(values)
     if len(values) > limit or any(
         not isinstance(value, str) or not value.strip()
-        or len(value.encode("utf-8")) > MAX_METADATA_BYTES
+        or utf8_length(value) > MAX_METADATA_BYTES
         for value in values
     ):
         raise QueueProposalError(f"{name} is malformed or excessive")
@@ -100,7 +101,7 @@ class CandidateSliceProposal:
         ):
             if (
                 not isinstance(value, str) or not value
-                or len(value.encode("utf-8")) > MAX_METADATA_BYTES
+                or utf8_length(value) > MAX_METADATA_BYTES
             ):
                 raise QueueProposalError(f"{name} is invalid")
         if _SHA256.fullmatch(self.blueprint_digest) is None:
@@ -161,7 +162,10 @@ def propose_candidates(parsed, readiness_by_slice=None):
     blueprint = parsed.blueprint
     if not isinstance(blueprint, ContinuousBuilderBlueprint):
         raise QueueProposalError("parsed blueprint binding is invalid")
-    readiness_by_slice = readiness_by_slice or {}
+    if readiness_by_slice is None:
+        readiness_by_slice = {}
+    if not isinstance(readiness_by_slice, dict):
+        raise QueueProposalError("readiness input must be a mapping")
     known_slice_ids = {item.slice_id for item in blueprint.slices}
     if set(readiness_by_slice) - known_slice_ids:
         raise QueueProposalError("readiness references an unknown slice")
