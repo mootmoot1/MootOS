@@ -1,6 +1,7 @@
 """Versioned SQLite schema migrations for MootOS."""
 
 import sqlite3
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -399,7 +400,41 @@ def _verify_schema(connection: sqlite3.Connection) -> None:
         raise RuntimeError("Database schema is incompatible: tasks contains unsupported task metadata")
 
 
+LOCK_RETRY_ATTEMPTS = 5
+LOCK_RETRY_BASE_DELAY_SECONDS = 0.01
+
+
 def run_migrations(database_path: Optional[DatabasePath] = None) -> int:
+    """Apply pending migrations, retrying a bounded number of times on a
+    transient "database is locked" error.
+
+    SQLite's ``PRAGMA journal_mode=WAL`` (run inside ``connect()``) can
+    raise ``sqlite3.OperationalError("database is locked")`` immediately
+    -- not after the configured busy_timeout -- when multiple connections
+    race to convert a brand-new database file to WAL mode at the same
+    moment; the busy-timeout retry loop does not reliably cover this
+    specific PRAGMA. This is expected under concurrent first-boot (e.g.
+    multiple app workers starting against a fresh database
+    simultaneously): the required invariant is that migrations never
+    corrupt or partially apply the schema, not that every caller
+    succeeds on its very first attempt. A short, bounded retry lets a
+    losing caller serialize behind the winner instead of failing
+    outright; any other error, or exhausting the retry budget, still
+    propagates immediately.
+    """
+    for attempt in range(LOCK_RETRY_ATTEMPTS):
+        try:
+            return _run_migrations_once(database_path)
+        except sqlite3.OperationalError as error:
+            if (
+                "locked" not in str(error)
+                or attempt == LOCK_RETRY_ATTEMPTS - 1
+            ):
+                raise
+            time.sleep(LOCK_RETRY_BASE_DELAY_SECONDS * (2 ** attempt))
+
+
+def _run_migrations_once(database_path: Optional[DatabasePath] = None) -> int:
     connection = connect(database_path)
     try:
         connection.execute("BEGIN IMMEDIATE")

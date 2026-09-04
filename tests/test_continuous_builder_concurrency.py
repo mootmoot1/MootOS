@@ -76,16 +76,28 @@ def test_concurrent_lease_acquisition_serializes_to_exactly_one_winner(tmp_path)
 
 
 def test_migration_run_concurrently_reaches_one_consistent_final_version(tmp_path):
-    path = tmp_path / "mootos.db"
+    """A losing caller must serialize behind the winner, never fail.
 
-    def apply():
-        return run_migrations(path)
+    SQLite's PRAGMA journal_mode=WAL (inside connect()) can raise
+    "database is locked" immediately -- not after busy_timeout -- when
+    multiple connections race to convert a brand-new file to WAL mode at
+    the same instant; this does not reproduce on every SQLite build
+    (observed: consistently on SQLite 3.50.4/Python 3.11, not on SQLite
+    3.39.5/Python 3.9), so several independent trials with fresh
+    databases guard against a build-specific race window closing by
+    chance on any one attempt.
+    """
+    for trial in range(5):
+        path = tmp_path / f"mootos-{trial}.db"
 
-    results, errors = _run_concurrently([apply for _ in range(4)])
-    real_errors = [error for error in errors if error is not None]
-    assert not real_errors
-    assert all(result == results[0] for result in results)
-    assert results[0] > 0
+        def apply(path=path):
+            return run_migrations(path)
+
+        results, errors = _run_concurrently([apply for _ in range(4)])
+        real_errors = [error for error in errors if error is not None]
+        assert not real_errors
+        assert all(result == results[0] for result in results)
+        assert results[0] > 0
 
 
 def test_conflicting_writers_actually_roll_back_not_partially_commit(tmp_path):
