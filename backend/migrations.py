@@ -29,6 +29,13 @@ REQUIRED_COLUMNS = {
     "runs": {"id", "run_type", "status", "conversation_id", "user_message_id", "assistant_message_id", "provider", "model", "tool_name", "tool_version", "started_at", "finished_at", "duration_ms", "error_class", "input_tokens", "output_tokens", "cost_usd", "data_exposure"},
     "tasks": {"id", "title", "project", "status", "due_at", "created_at", "updated_at", "completed_at", "cancelled_at"},
     "tool_operations": {"id", "tool_name", "tool_version", "status", "arguments_json", "conversation_id", "project", "created_at", "updated_at", "expires_at", "decided_at", "result_run_id", "result_reference", "error_class"},
+    "builder_blueprints": {"blueprint_id", "blueprint_version", "content_digest", "canonical_json", "approval_id", "approver_id", "approver_authenticated", "created_at"},
+    "builder_slices": {"blueprint_id", "blueprint_version", "slice_id", "slice_version", "canonical_json"},
+    "builder_events": {"event_id", "blueprint_id", "blueprint_version", "blueprint_digest", "slice_id", "slice_version", "sequence", "previous_digest", "previous_state", "next_state", "reason", "actor_id", "actor_authenticated", "attempt_id", "dependency_digest", "policy_version", "created_at", "event_digest"},
+    "builder_attempts": {"attempt_id", "blueprint_id", "blueprint_version", "slice_id", "slice_version", "owner_id", "created_at"},
+    "builder_leases": {"lease_id", "attempt_id", "slice_id", "owner_id", "acquired_at", "expires_at", "released_at"},
+    "builder_idempotency": {"idempotency_key", "operation", "content_digest", "created_at"},
+    "builder_artifacts": {"artifact_id", "slice_id", "attempt_id", "kind", "content_digest", "size_bytes", "created_at"},
     "schema_migrations": {"version", "name", "applied_at"},
 }
 
@@ -157,12 +164,82 @@ def _migration_005_tool_system(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migration_006_continuous_builder_state(
+    connection: sqlite3.Connection,
+) -> None:
+    statements = """
+        CREATE TABLE IF NOT EXISTS builder_blueprints (
+            blueprint_id TEXT NOT NULL, blueprint_version TEXT NOT NULL,
+            content_digest TEXT NOT NULL UNIQUE, canonical_json TEXT NOT NULL,
+            approval_id TEXT NOT NULL, approver_id TEXT NOT NULL,
+            approver_authenticated INTEGER NOT NULL CHECK (approver_authenticated IN (0, 1)),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (blueprint_id, blueprint_version)
+        );
+        CREATE TABLE IF NOT EXISTS builder_slices (
+            blueprint_id TEXT NOT NULL, blueprint_version TEXT NOT NULL,
+            slice_id TEXT NOT NULL, slice_version TEXT NOT NULL,
+            canonical_json TEXT NOT NULL,
+            PRIMARY KEY (blueprint_id, blueprint_version, slice_id),
+            FOREIGN KEY (blueprint_id, blueprint_version)
+              REFERENCES builder_blueprints (blueprint_id, blueprint_version)
+        );
+        CREATE TABLE IF NOT EXISTS builder_events (
+            event_id TEXT PRIMARY KEY,
+            blueprint_id TEXT NOT NULL, blueprint_version TEXT NOT NULL,
+            blueprint_digest TEXT NOT NULL, slice_id TEXT NOT NULL,
+            slice_version TEXT NOT NULL, sequence INTEGER NOT NULL CHECK (sequence >= 1),
+            previous_digest TEXT, previous_state TEXT, next_state TEXT NOT NULL,
+            reason TEXT NOT NULL, actor_id TEXT NOT NULL,
+            actor_authenticated INTEGER NOT NULL CHECK (actor_authenticated IN (0, 1)),
+            attempt_id TEXT, dependency_digest TEXT NOT NULL,
+            policy_version TEXT NOT NULL, created_at TEXT NOT NULL,
+            event_digest TEXT NOT NULL UNIQUE,
+            UNIQUE (blueprint_id, blueprint_version, slice_id, sequence),
+            FOREIGN KEY (blueprint_id, blueprint_version, slice_id)
+              REFERENCES builder_slices (blueprint_id, blueprint_version, slice_id)
+        );
+        CREATE TABLE IF NOT EXISTS builder_attempts (
+            attempt_id TEXT PRIMARY KEY, blueprint_id TEXT NOT NULL,
+            blueprint_version TEXT NOT NULL, slice_id TEXT NOT NULL,
+            slice_version TEXT NOT NULL, owner_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (blueprint_id, blueprint_version, slice_id)
+              REFERENCES builder_slices (blueprint_id, blueprint_version, slice_id)
+        );
+        CREATE TABLE IF NOT EXISTS builder_leases (
+            lease_id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL UNIQUE,
+            slice_id TEXT NOT NULL, owner_id TEXT NOT NULL,
+            acquired_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+            released_at TEXT,
+            FOREIGN KEY (attempt_id) REFERENCES builder_attempts (attempt_id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_builder_active_lease
+          ON builder_leases (slice_id) WHERE released_at IS NULL;
+        CREATE TABLE IF NOT EXISTS builder_idempotency (
+            idempotency_key TEXT PRIMARY KEY, operation TEXT NOT NULL,
+            content_digest TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS builder_artifacts (
+            artifact_id TEXT PRIMARY KEY, slice_id TEXT NOT NULL,
+            attempt_id TEXT, kind TEXT NOT NULL, content_digest TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (attempt_id) REFERENCES builder_attempts (attempt_id)
+        );
+    """
+    for statement in statements.split(";"):
+        if statement.strip():
+            connection.execute(statement)
+
+
 MIGRATIONS = (
     Migration(1, "initial_schema", _migration_001_initial_schema),
     Migration(2, "memory_lifecycle", _migration_002_memory_lifecycle),
     Migration(3, "model_runs", _migration_003_model_runs),
     Migration(4, "tasks", _migration_004_tasks),
     Migration(5, "tool_system", _migration_005_tool_system),
+    Migration(6, "continuous_builder_state", _migration_006_continuous_builder_state),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
 

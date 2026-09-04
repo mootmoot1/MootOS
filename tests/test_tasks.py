@@ -31,7 +31,7 @@ def clean_db():
 
 
 def test_schema_migrates_to_tasks(clean_db):
-    assert get_schema_version() == LATEST_SCHEMA_VERSION == 5
+    assert get_schema_version() == LATEST_SCHEMA_VERSION == 6
     with database_connection() as connection:
         columns = {
             row["name"]
@@ -52,7 +52,7 @@ def test_schema_migrates_to_tasks(clean_db):
 
 def test_schema_three_file_upgrades_to_tasks_without_losing_runs(tmp_path: Path):
     database_path = tmp_path / "schema-three.db"
-    assert run_migrations(database_path) == 5
+    assert run_migrations(database_path) == 6
     connection = sqlite3.connect(database_path)
     try:
         connection.execute("DELETE FROM schema_migrations WHERE version >= 4")
@@ -69,7 +69,7 @@ def test_schema_three_file_upgrades_to_tasks_without_losing_runs(tmp_path: Path)
     finally:
         connection.close()
 
-    assert run_migrations(database_path) == 5
+    assert run_migrations(database_path) == 6
     connection = sqlite3.connect(database_path)
     try:
         run = connection.execute(
