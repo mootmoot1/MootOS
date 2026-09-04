@@ -61,6 +61,40 @@ def _digest(values):
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def dependency_snapshot_digest(
+    connection, blueprint_id, blueprint_version, slice_id,
+):
+    row = connection.execute(
+        "SELECT canonical_json FROM builder_slices WHERE blueprint_id=? "
+        "AND blueprint_version=? AND slice_id=?",
+        (blueprint_id, blueprint_version, slice_id),
+    ).fetchone()
+    if row is None:
+        raise QueueStoreError("slice definition is missing")
+    definition = json.loads(row["canonical_json"])
+    snapshot = []
+    for dependency_id in sorted(definition["hard_dependencies"]):
+        dependency = connection.execute(
+            "SELECT s.slice_version, e.next_state, e.event_digest "
+            "FROM builder_slices s LEFT JOIN builder_events e "
+            "ON e.blueprint_id=s.blueprint_id "
+            "AND e.blueprint_version=s.blueprint_version "
+            "AND e.slice_id=s.slice_id "
+            "WHERE s.blueprint_id=? AND s.blueprint_version=? "
+            "AND s.slice_id=? ORDER BY e.sequence DESC LIMIT 1",
+            (blueprint_id, blueprint_version, dependency_id),
+        ).fetchone()
+        if dependency is None:
+            raise QueueStoreError("dependency definition is missing")
+        snapshot.append({
+            "event_digest": dependency["event_digest"],
+            "slice_id": dependency_id,
+            "slice_version": dependency["slice_version"],
+            "state": dependency["next_state"],
+        })
+    return _digest(snapshot)
+
+
 def append_event(
     database_path, event, expected_sequence, expected_digest,
     expected_dependency_digest=None,
@@ -69,10 +103,6 @@ def append_event(
         raise QueueStoreError("event input is invalid")
     if type(event.actor_authenticated) is not bool:
         raise QueueStoreError("authentication flag must be boolean")
-    if expected_dependency_digest is not None and (
-        event.dependency_digest != expected_dependency_digest
-    ):
-        raise QueueStoreError("dependency snapshot drift")
     connection = connect(database_path)
     try:
         connection.execute("BEGIN IMMEDIATE")
@@ -91,6 +121,34 @@ def append_event(
             raise QueueStoreError("blueprint binding mismatch")
         if source["slice_version"] != event.slice_version:
             raise QueueStoreError("slice version drift")
+        durable_dependency_digest = dependency_snapshot_digest(
+            connection, event.blueprint_id, event.blueprint_version,
+            event.slice_id,
+        )
+        if event.dependency_digest != durable_dependency_digest or (
+            expected_dependency_digest is not None
+            and expected_dependency_digest != durable_dependency_digest
+        ):
+            raise QueueStoreError("dependency snapshot drift")
+        if event.next_state == "ready":
+            definition = json.loads(connection.execute(
+                "SELECT canonical_json FROM builder_slices "
+                "WHERE blueprint_id=? AND blueprint_version=? AND slice_id=?",
+                (event.blueprint_id, event.blueprint_version, event.slice_id),
+            ).fetchone()["canonical_json"])
+            for dependency_id in definition["hard_dependencies"]:
+                state = connection.execute(
+                    "SELECT next_state FROM builder_events "
+                    "WHERE blueprint_id=? "
+                    "AND blueprint_version=? AND slice_id=? "
+                    "ORDER BY sequence DESC LIMIT 1",
+                    (event.blueprint_id, event.blueprint_version,
+                     dependency_id),
+                ).fetchone()
+                if state is None or state["next_state"] != "done":
+                    raise QueueStoreError(
+                        "ready dependencies are not complete"
+                    )
         prior = connection.execute(
             "SELECT sequence, event_digest, next_state FROM builder_events "
             "WHERE blueprint_id=? AND blueprint_version=? AND slice_id=? "

@@ -28,13 +28,14 @@ T1 = "2026-01-01T00:01:00+00:00"
 def test_complete_durable_chain_has_bounded_integrity_audit(tmp_path):
     path, event = prepared(tmp_path)
     _, digest = append_event(
-        path, event, 0, None, expected_dependency_digest="d" * 64,
+        path, event, 0, None,
+        expected_dependency_digest=event.dependency_digest,
     )
     researching = replace(
         event, event_id="event-2", next_state="researching",
         attempt_id="attempt-1",
     )
-    append_event(path, researching, 1, digest, "d" * 64)
+    append_event(path, researching, 1, digest, event.dependency_digest)
     create_attempt(
         path, "attempt-1", event.blueprint_id, event.blueprint_version,
         event.slice_id, event.slice_version, "owner", T0,

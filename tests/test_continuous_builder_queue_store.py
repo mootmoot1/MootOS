@@ -10,6 +10,7 @@ from backend.continuous_builder.queue_store import (
     QueueEventInput,
     QueueStoreError,
     append_event,
+    dependency_snapshot_digest,
 )
 from backend.continuous_builder.blueprint_parser import parse_blueprint
 from backend.migrations import run_migrations
@@ -24,11 +25,19 @@ def prepared(tmp_path):
         "a", parsed.content_sha256, "human", True
     )
     store_blueprint(path, parsed, approval, "2026-01-01T00:00:00+00:00")
+    import sqlite3
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    dependency_digest = dependency_snapshot_digest(
+        connection, parsed.blueprint.blueprint_id,
+        parsed.blueprint.blueprint_version, "CB-001",
+    )
+    connection.close()
     event = QueueEventInput(
         "event-1", parsed.blueprint.blueprint_id,
         parsed.blueprint.blueprint_version, parsed.content_sha256,
         "CB-001", "1", "idea", "approved_blueprint", "human", False,
-        "d" * 64, "adr-043-v1", "2026-01-01T00:00:01+00:00",
+        dependency_digest, "adr-043-v1", "2026-01-01T00:00:01+00:00",
     )
     return path, event
 
