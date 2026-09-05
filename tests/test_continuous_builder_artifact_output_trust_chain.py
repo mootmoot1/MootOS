@@ -94,17 +94,21 @@ def test_exact_stdout_provenance_unlocks_contained_verified_candidate(
 
     assert receipt.final_state == "succeeded"
     assert bridge.intake_result.receipt.status == "quarantined_untrusted"
+    assert bridge.intake_result.receipt.\
+        artifact_intake_completed_before_destructive_teardown is False
     assert bridge.provenance_receipt.artifact_content_provenance_proven is True
     assert blast.status == "within_blast_radius_unverified"
     assert verification.status == "verification_passed"
     assert proof.final_classification == "contained_verified_candidate"
     assert proof.reason_code == "contained_trust_chain_survived"
-    assert proof.artifact_intake_ordering_proven is True
+    # Stdout provenance proves the bytes came from this execution without
+    # pretending CB-023 intake itself happened before container teardown.
+    assert proof.artifact_intake_ordering_proven is False
     assert proof.artifact_content_provenance_proven is True
     assert proof.artifact_provenance_receipt_digest == (
         bridge.provenance_receipt.receipt_sha256
     )
-    assert "artifact_intake_ordering_unproven" not in proof.known_limitations
+    assert "artifact_intake_ordering_unproven" in proof.known_limitations
     assert proof.human_review_required is True
     assert proof.result_trusted is False
     assert proof.worker_output_trusted is False
