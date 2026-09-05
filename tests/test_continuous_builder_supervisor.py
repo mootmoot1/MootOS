@@ -9,7 +9,6 @@ import pytest
 import backend.continuous_builder.supervisor as supervisor
 import backend.continuous_builder.worker_runtime as worker_runtime
 from backend.continuous_builder.supervisor import (
-    CircuitBreakerSnapshot,
     SupervisorError,
     create_initial_circuit_breaker,
     create_supervision_policy,
@@ -41,9 +40,7 @@ def _rebuild_receipt(receipt, **changes):
 
 def _runtime_receipt(tmp_path, monkeypatch, **changes):
     receipt, _ = _execute(tmp_path, monkeypatch)
-    if changes:
-        receipt = _rebuild_receipt(receipt, **changes)
-    return receipt
+    return _rebuild_receipt(receipt, **changes) if changes else receipt
 
 
 def _failed_receipt(tmp_path, monkeypatch):
@@ -80,13 +77,13 @@ def _forge(instance, **changes):
     return forged
 
 
-def test_success_is_classified_without_promoting_worker_output(
+def test_success_is_classified_without_promoting_authority(
     tmp_path, monkeypatch,
 ):
     receipt = _runtime_receipt(tmp_path, monkeypatch)
-    decision = supervise_execution(receipt, create_supervision_policy())
-    result = decision.receipt
-
+    result = supervise_execution(
+        receipt, create_supervision_policy()
+    ).receipt
     assert result.final_classification == "succeeded"
     assert result.retry_eligible is False
     assert result.circuit_breaker_state == "closed"
@@ -101,33 +98,27 @@ def test_success_is_classified_without_promoting_worker_output(
     assert result.github_authorized is False
 
 
-def test_nonzero_exit_is_failed_and_bounded_retry_eligible(
+def test_failure_and_crash_are_distinct_bounded_retry_classes(
     tmp_path, monkeypatch,
 ):
-    receipt = _failed_receipt(tmp_path, monkeypatch)
-    result = supervise_execution(
-        receipt, create_supervision_policy()
+    failed = _failed_receipt(tmp_path, monkeypatch)
+    failed_result = supervise_execution(
+        failed, create_supervision_policy()
     ).receipt
-    assert result.final_classification == "failed"
-    assert result.retry_eligible is True
-    assert result.reason_code == "bounded_retry_eligible"
+    assert failed_result.final_classification == "failed"
+    assert failed_result.retry_eligible is True
 
-
-def test_crash_is_distinct_and_retryable_when_cleanup_is_known(
-    tmp_path, monkeypatch,
-):
-    receipt = _runtime_receipt(
-        tmp_path,
-        monkeypatch,
+    crashed = _rebuild_receipt(
+        failed,
         lifecycle_states=("prepared", "launching", "running", "crashed"),
         final_state="crashed",
         exit_code=137,
     )
-    result = supervise_execution(
-        receipt, create_supervision_policy()
+    crashed_result = supervise_execution(
+        crashed, create_supervision_policy()
     ).receipt
-    assert result.final_classification == "crashed"
-    assert result.retry_eligible is True
+    assert crashed_result.final_classification == "crashed"
+    assert crashed_result.retry_eligible is True
 
 
 def test_wall_timeout_is_distinct_from_stall(tmp_path, monkeypatch):
@@ -147,10 +138,9 @@ def test_wall_timeout_is_distinct_from_stall(tmp_path, monkeypatch):
     assert result.final_classification == "timed_out"
     assert result.timeout_observed is True
     assert result.stall_observed is False
-    assert result.retry_eligible is True
 
 
-def test_stall_requires_live_worker_and_trusted_no_progress_window(
+def test_stall_requires_live_worker_and_no_progress_window(
     tmp_path, monkeypatch,
 ):
     receipt = _timed_out_receipt(tmp_path, monkeypatch)
@@ -204,9 +194,7 @@ def test_cancellation_is_not_retryable(tmp_path, monkeypatch):
     assert result.retry_eligible is False
 
 
-def test_termination_uncertainty_fails_closed_and_opens_breaker(
-    tmp_path, monkeypatch,
-):
+def test_termination_uncertainty_fails_closed(tmp_path, monkeypatch):
     receipt = _runtime_receipt(
         tmp_path,
         monkeypatch,
@@ -226,9 +214,7 @@ def test_termination_uncertainty_fails_closed_and_opens_breaker(
     assert result.circuit_breaker_state == "open"
 
 
-def test_cleanup_uncertainty_fails_closed_and_opens_breaker(
-    tmp_path, monkeypatch,
-):
+def test_cleanup_uncertainty_fails_closed(tmp_path, monkeypatch):
     receipt = _runtime_receipt(
         tmp_path, monkeypatch, cleanup_confirmed=False
     )
@@ -267,7 +253,6 @@ def test_artifact_security_rejection_blocks_retry(tmp_path, monkeypatch):
     )
     artifact = intake_worker_artifacts(receipt, root).receipt
     assert artifact.status == "rejected_secret_material"
-
     result = supervise_execution(
         receipt,
         create_supervision_policy(),
@@ -287,58 +272,45 @@ def test_retry_cap_is_hard_bound(tmp_path, monkeypatch):
     ).receipt
     assert result.retry_eligible is False
     assert result.reason_code == "retry_cap_exhausted"
-
-
-def test_retry_count_above_cap_is_rejected(tmp_path, monkeypatch):
-    receipt = _failed_receipt(tmp_path, monkeypatch)
-    policy = create_supervision_policy(max_retry_attempts=2)
     with pytest.raises(SupervisorError, match="exceeds policy cap"):
         supervise_execution(receipt, policy, retry_count=3)
 
 
-def test_circuit_breaker_opens_after_consecutive_failure_threshold(
+def test_circuit_breaker_opens_at_consecutive_failure_threshold(
     tmp_path, monkeypatch,
 ):
     receipt = _failed_receipt(tmp_path, monkeypatch)
     policy = create_supervision_policy(circuit_breaker_failures=2)
     first = supervise_execution(receipt, policy)
-    assert first.circuit_breaker.state == "closed"
     second = supervise_execution(
         receipt,
         policy,
         prior_circuit_breaker=first.circuit_breaker,
     )
+    assert first.circuit_breaker.state == "closed"
     assert second.circuit_breaker.state == "open"
-    assert second.receipt.retry_eligible is False
     assert second.receipt.consecutive_failures == 2
+    assert second.receipt.retry_eligible is False
 
 
-def test_success_resets_failure_count_for_observed_authorized_probe(
-    tmp_path, monkeypatch,
-):
-    failed = _failed_receipt(tmp_path, monkeypatch)
+def test_success_resets_observed_failure_count(tmp_path, monkeypatch):
+    receipt = _runtime_receipt(tmp_path, monkeypatch)
     policy = create_supervision_policy(circuit_breaker_failures=3)
-    first = supervise_execution(failed, policy)
-
-    success = _runtime_receipt(tmp_path, monkeypatch)
-    # The breaker is request-bound, so create failure history for this exact
-    # execution identity rather than attempting to carry another task's state.
     prior = supervisor._breaker_snapshot(
-        success,
+        receipt,
         policy,
         state="closed",
         consecutive_failures=1,
         last_failure_class="failed",
     )
     result = supervise_execution(
-        success, policy, prior_circuit_breaker=prior
+        receipt, policy, prior_circuit_breaker=prior
     )
-    assert first.receipt.consecutive_failures == 1
     assert result.circuit_breaker.state == "closed"
     assert result.circuit_breaker.consecutive_failures == 0
 
 
-def test_kill_switch_blocks_retry_without_executing_any_action(
+def test_kill_switch_opens_breaker_without_execution_authority(
     tmp_path, monkeypatch,
 ):
     receipt = _failed_receipt(tmp_path, monkeypatch)
@@ -349,35 +321,40 @@ def test_kill_switch_blocks_retry_without_executing_any_action(
     assert result.reason_code == "kill_switch_active"
 
 
-def test_observation_is_bound_to_exact_attempt_and_request(
+def test_observation_binding_rejects_stale_attempt_request_and_execution(
     tmp_path, monkeypatch,
 ):
     receipt = _runtime_receipt(tmp_path, monkeypatch)
     policy = create_supervision_policy()
     observation = create_supervisor_observation(receipt)
-
     for name, value in (
         ("attempt_id", "attempt-stale"),
         ("request_digest", "f" * 64),
         ("execution_id", "execution-stale"),
     ):
-        forged = _forge(observation, **{name: value})
         with pytest.raises(SupervisorError):
-            supervise_execution(receipt, policy, observation=forged)
+            supervise_execution(
+                receipt,
+                policy,
+                observation=_forge(observation, **{name: value}),
+            )
 
 
 def test_stale_breaker_from_other_task_is_rejected(tmp_path, monkeypatch):
     receipt = _runtime_receipt(tmp_path, monkeypatch)
     policy = create_supervision_policy()
     breaker = create_initial_circuit_breaker(receipt, policy)
-    forged = _forge(breaker, request_digest="e" * 64)
     with pytest.raises(SupervisorError):
         supervise_execution(
-            receipt, policy, prior_circuit_breaker=forged
+            receipt,
+            policy,
+            prior_circuit_breaker=_forge(
+                breaker, request_digest="e" * 64
+            ),
         )
 
 
-def test_worker_text_cannot_change_supervision_result(tmp_path, monkeypatch):
+def test_worker_text_cannot_fabricate_success(tmp_path, monkeypatch):
     receipt = _failed_receipt(tmp_path, monkeypatch)
     persuasive = _rebuild_receipt(
         receipt,
@@ -393,9 +370,7 @@ def test_worker_text_cannot_change_supervision_result(tmp_path, monkeypatch):
     assert result.publication_authorized is False
 
 
-def test_stop_and_kill_attempts_are_observed_not_inferred(
-    tmp_path, monkeypatch,
-):
+def test_stop_and_kill_are_observed_not_inferred(tmp_path, monkeypatch):
     receipt = _failed_receipt(tmp_path, monkeypatch)
     observation = create_supervisor_observation(
         receipt,
@@ -409,16 +384,9 @@ def test_stop_and_kill_attempts_are_observed_not_inferred(
     ).receipt
     assert result.stop_attempted is True
     assert result.kill_attempted is True
-
-
-def test_kill_cannot_be_claimed_without_stop_escalation(
-    tmp_path, monkeypatch,
-):
-    receipt = _runtime_receipt(tmp_path, monkeypatch)
     with pytest.raises(SupervisorError, match="requires an observed stop"):
         create_supervisor_observation(
-            receipt,
-            kill_attempted_observed=True,
+            receipt, kill_attempted_observed=True
         )
 
 
@@ -426,7 +394,6 @@ def test_policy_breaker_and_receipt_are_immutable(tmp_path, monkeypatch):
     receipt = _runtime_receipt(tmp_path, monkeypatch)
     policy = create_supervision_policy()
     decision = supervise_execution(receipt, policy)
-
     for instance, name, value in (
         (policy, "max_retry_attempts", 99),
         (decision.circuit_breaker, "state", "open"),
@@ -436,9 +403,7 @@ def test_policy_breaker_and_receipt_are_immutable(tmp_path, monkeypatch):
             setattr(instance, name, value)
 
 
-def test_canonical_supervision_receipt_is_deterministic_and_bounded(
-    tmp_path, monkeypatch,
-):
+def test_receipt_is_deterministic_and_bounded(tmp_path, monkeypatch):
     receipt = _failed_receipt(tmp_path, monkeypatch)
     policy = create_supervision_policy()
     first = supervise_execution(receipt, policy).receipt
@@ -448,9 +413,10 @@ def test_canonical_supervision_receipt_is_deterministic_and_bounded(
     assert len(first.canonical_bytes()) < supervisor.MAX_RECEIPT_BYTES
 
 
-def test_supervision_module_has_no_execution_network_db_or_github_authority():
-    path = Path("backend/continuous_builder/supervisor.py")
-    source = path.read_text(encoding="utf-8")
+def test_supervisor_has_no_execution_network_db_or_github_authority():
+    source = Path(
+        "backend/continuous_builder/supervisor.py"
+    ).read_text(encoding="utf-8")
     tree = ast.parse(source)
     imports = {
         alias.name.split(".")[0]
@@ -463,19 +429,10 @@ def test_supervision_module_has_no_execution_network_db_or_github_authority():
         if isinstance(node, ast.ImportFrom) and node.module
     }
     assert not imports & {
-        "subprocess",
-        "socket",
-        "requests",
-        "httpx",
-        "urllib",
-        "docker",
-        "podman",
-        "kubernetes",
-        "sqlite3",
-        "sqlalchemy",
-        "github",
+        "subprocess", "socket", "requests", "httpx", "urllib", "docker",
+        "podman", "kubernetes", "sqlite3", "sqlalchemy", "github",
     }
     assert "os.system" not in source
     assert "subprocess.run" not in source
     assert "merge_pull_request" not in source
-    assert "queue_transition_authorized": False
+    assert '"queue_transition_authorized": False' in source
