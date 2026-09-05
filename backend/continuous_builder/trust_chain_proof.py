@@ -6,43 +6,41 @@ every piece of trusted, system-side evidence produced about it:
     CB-022 contained execution receipt
       -> CB-024 supervision receipt and circuit-breaker snapshot
       -> CB-023 artifact intake receipt and quarantine package
+      -> CB-025A optional stdout artifact-provenance receipt
       -> CB-025 blast-radius receipt
       -> CB-025 independent verification receipt
       -> this proof
       -> human review
 
 Nothing here executes, publishes, merges, advances a queue, touches GitHub,
-opens a network socket, or reads a database.  It does not read worker-authored
-text: every input is a receipt some trusted component already produced, and
-every binding is checked by exact digest before a classification is derived.
+opens a network socket, or reads a database. It does not trust worker-authored
+text: every worker-proposed byte must first be bound to trusted supervisor
+capture evidence, then pass the existing artifact intake and verification
+boundaries.
 
 The best possible outcome is ``contained_verified_candidate``, which means
-only: *this candidate survived this bounded trust chain*.  Even that carries
+only: *this candidate survived this bounded trust chain*. Even that carries
 ``human_review_required=True`` and ``result_trusted=False``, and it never
 authorizes merge, publication, queue transition, GitHub action, or Main
 advancement.
 
 Artifact provenance is a precondition of that outcome, not a footnote on it.
-CB-022 gives a worker no artifact egress channel at all (``/workspace`` is a
-container-local tmpfs on a read-only rootfs, with exactly one read-only bind
-mount enforced), so CB-023 can only ever observe a staging root some other
-party populated, and reports
-``artifact_intake_completed_before_destructive_teardown=False`` permanently.
-This proof reads that flag into ``artifact_intake_ordering_proven`` and
-``artifact_content_provenance_proven``, and fails closed on it: a chain in
-which supervision, quarantine, blast radius and verification all pass, but
-whose artifact bytes cannot be traced to this exact execution, classifies as
-``rejected_uncertain_state`` with reason ``artifact_provenance_unproven``.
+The legacy CB-023 path reports
+``artifact_intake_completed_before_destructive_teardown=False`` because it can
+only observe a supervisor staging root after execution. CB-025A adds a second,
+explicit route: a strict bounded stdout envelope whose complete bytes are
+already captured and hashed inside the trusted CB-022 execution receipt. The
+artifact-output bridge proves that the exact bytes staged into CB-023 came from
+that exact execution stdout. In that route, content provenance can be proven
+even though legacy CB-023 intake still happens after container teardown. The
+two facts are therefore recorded separately rather than pretending the old
+ordering flag became true.
 
-That rule is enforced twice.  The classifier returns the rejection, and
-``TrustChainProofReceipt.__post_init__`` independently refuses to construct
-``contained_verified_candidate`` unless both provenance booleans are ``True``
--- so the accepted state cannot be minted by a caller, a forged receipt, or a
-future classifier change.  On the current CB-022/CB-023 architecture the
-accepted state is therefore unreachable, which is the honest answer rather
-than a gap: it becomes reachable only when a reviewed artifact-egress design
-lets CB-023 prove intake precedes destructive teardown.  Nothing here asserts
-an ordering the code does not prove.
+The accepted-state provenance rule is enforced twice. The classifier fails
+closed when content provenance is absent, and
+``TrustChainProofReceipt.__post_init__`` independently refuses to construct an
+accepted candidate without proven content provenance and the evidence required
+for the route that established it.
 """
 
 import hashlib
@@ -50,6 +48,10 @@ import json
 import re
 from dataclasses import dataclass, field, replace
 
+from .artifact_output import (
+    ArtifactOutputError,
+    ArtifactOutputProvenanceReceipt,
+)
 from .blast_radius import (
     STATUS_WITHIN,
     BlastRadiusError,
@@ -172,6 +174,7 @@ class TrustChainProofReceipt:
     reason_code: str
     known_limitations: tuple
     proof_sha256: str
+    artifact_provenance_receipt_digest: str = ""
     policy_version: str = POLICY_VERSION
     artifact_intake_ordering_proven: bool = False
     artifact_content_provenance_proven: bool = False
@@ -205,10 +208,16 @@ class TrustChainProofReceipt:
             "materialization_receipt_digest", "workspace_identity",
             "execution_receipt_digest", "supervision_receipt_digest",
             "circuit_breaker_snapshot_digest",
-            "artifact_intake_receipt_digest", "blast_radius_receipt_digest",
-            "verification_receipt_digest", "proof_sha256",
+            "artifact_intake_receipt_digest",
+            "blast_radius_receipt_digest", "verification_receipt_digest",
+            "proof_sha256",
         ):
             _sha256(getattr(self, name), name)
+        if self.artifact_provenance_receipt_digest:
+            _sha256(
+                self.artifact_provenance_receipt_digest,
+                "artifact provenance receipt digest",
+            )
         if not isinstance(self.pinned_base_sha, str) or _GIT_SHA.fullmatch(
             self.pinned_base_sha or ""
         ) is None:
@@ -231,15 +240,17 @@ class TrustChainProofReceipt:
             sorted(set(self.known_limitations))
         ):
             raise TrustChainProofError("proof limitations are not canonical")
-        if self.artifact_intake_ordering_proven is not (
-            self.artifact_content_provenance_proven
-        ):
-            raise TrustChainProofError("provenance evidence is contradictory")
         if self.artifact_intake_ordering_proven is False and (
             "artifact_intake_ordering_unproven" not in self.known_limitations
         ):
             raise TrustChainProofError(
-                "unproven artifact ordering must be recorded as a limitation"
+                "unproven artifact intake ordering must be recorded"
+            )
+        if self.artifact_intake_ordering_proven is True and (
+            "artifact_intake_ordering_unproven" in self.known_limitations
+        ):
+            raise TrustChainProofError(
+                "proven artifact intake ordering contradicts limitation"
             )
         if self.human_review_required is not True or any(
             value is not False
@@ -264,18 +275,18 @@ class TrustChainProofReceipt:
             raise TrustChainProofError(
                 "accepted proof contradicts its own stage evidence"
             )
-        # Enforced here, in the receipt invariant, and not only in the
-        # classifier: an accepted candidate asserts that these bytes came from
-        # this execution.  Without proven provenance every upstream stage is
-        # reasoning about an artifact set whose origin the system cannot
-        # establish, so the accepted classification is structurally
-        # unavailable -- no caller, and no future classifier, can mint one.
         if self.final_classification == CLASSIFICATION_ACCEPTED and (
-            self.artifact_intake_ordering_proven is not True
-            or self.artifact_content_provenance_proven is not True
+            self.artifact_content_provenance_proven is not True
         ):
             raise TrustChainProofError(
                 "accepted proof requires proven artifact content provenance"
+            )
+        if self.final_classification == CLASSIFICATION_ACCEPTED and (
+            self.artifact_intake_ordering_proven is False
+            and not self.artifact_provenance_receipt_digest
+        ):
+            raise TrustChainProofError(
+                "accepted stdout route requires provenance receipt evidence"
             )
         if self.proof_sha256 != _digest(self._payload()):
             raise TrustChainProofError("trust-chain proof digest mismatch")
@@ -295,6 +306,9 @@ class TrustChainProofReceipt:
                 self.artifact_intake_receipt_digest
             ),
             "artifact_intake_status": self.artifact_intake_status,
+            "artifact_provenance_receipt_digest": (
+                self.artifact_provenance_receipt_digest
+            ),
             "attempt_id": self.attempt_id,
             "blast_radius_receipt_digest": self.blast_radius_receipt_digest,
             "blast_radius_status": self.blast_radius_status,
@@ -348,6 +362,7 @@ def _validate_inputs(
     intake_result,
     blast_radius_receipt,
     verification_receipt,
+    artifact_provenance_receipt,
 ):
     if not isinstance(task, FixtureTaskContract):
         raise TrustChainProofError("fixture task contract is invalid")
@@ -420,8 +435,7 @@ def _validate_inputs(
         ),
         (
             intake.workspace_identity,
-            execution_receipt.materialization_receipt
-            .workspace_instance_digest,
+            execution_receipt.materialization_receipt.workspace_instance_digest,
         ),
     )
     if any(actual != wanted for actual, wanted in identity):
@@ -435,10 +449,71 @@ def _validate_inputs(
     ):
         raise TrustChainProofError("quarantine package binding mismatch")
 
-    if package is None:
-        if blast_radius_receipt is not None or (
-            verification_receipt is not None
+    if artifact_provenance_receipt is not None:
+        if not isinstance(
+            artifact_provenance_receipt, ArtifactOutputProvenanceReceipt
         ):
+            raise TrustChainProofError("artifact provenance receipt is invalid")
+        _revalidate(
+            artifact_provenance_receipt,
+            ArtifactOutputError,
+            "artifact provenance receipt",
+        )
+        provenance_bindings = (
+            (
+                artifact_provenance_receipt.execution_receipt_digest,
+                execution_receipt.receipt_sha256,
+            ),
+            (
+                artifact_provenance_receipt.execution_id,
+                execution_receipt.execution_id,
+            ),
+            (
+                artifact_provenance_receipt.container_id,
+                execution_receipt.container_id,
+            ),
+            (
+                artifact_provenance_receipt.attempt_id,
+                execution_receipt.attempt_id,
+            ),
+            (
+                artifact_provenance_receipt.request_digest,
+                execution_receipt.request_digest,
+            ),
+            (
+                artifact_provenance_receipt.policy_digest,
+                execution_receipt.policy_digest,
+            ),
+            (
+                artifact_provenance_receipt.stdout_sha256,
+                execution_receipt.stdout_sha256,
+            ),
+            (
+                artifact_provenance_receipt.stdout_size,
+                execution_receipt.stdout_size,
+            ),
+            (
+                artifact_provenance_receipt.intake_receipt_digest,
+                intake.receipt_sha256,
+            ),
+            (
+                artifact_provenance_receipt.quarantine_package_digest,
+                package.package_sha256 if package is not None else "",
+            ),
+        )
+        if any(actual != wanted for actual, wanted in provenance_bindings):
+            raise TrustChainProofError("artifact provenance binding mismatch")
+        if (
+            artifact_provenance_receipt.artifact_content_provenance_proven
+            is not True
+            or artifact_provenance_receipt.worker_output_trusted is not False
+            or artifact_provenance_receipt.result_verified is not False
+            or artifact_provenance_receipt.merge_authorized is not False
+        ):
+            raise TrustChainProofError("artifact provenance overstates authority")
+
+    if package is None:
+        if blast_radius_receipt is not None or verification_receipt is not None:
             raise TrustChainProofError(
                 "rejected artifacts must not carry downstream evidence"
             )
@@ -500,12 +575,6 @@ def _validate_inputs(
     if any(actual != wanted for actual, wanted in downstream):
         raise TrustChainProofError("downstream evidence binding mismatch")
 
-    # Both gates are pure, deterministic and cheap, so the proof re-derives
-    # them from the quarantine package rather than believing what it was
-    # handed.  A receipt whose stored digest does not match the one this
-    # process just recomputed is rejected, which makes a hand-built
-    # "passing" blast-radius or verification receipt useless here even if
-    # its own internal digest is self-consistent.
     try:
         recomputed_blast = evaluate_blast_radius(
             task, execution_receipt, intake_result
@@ -522,9 +591,7 @@ def _validate_inputs(
         raise TrustChainProofError(
             "verification evidence could not be independently re-derived"
         ) from error
-    if blast_radius_receipt.receipt_sha256 != (
-        recomputed_blast.receipt_sha256
-    ):
+    if blast_radius_receipt.receipt_sha256 != recomputed_blast.receipt_sha256:
         raise TrustChainProofError(
             "blast-radius receipt does not match independent re-derivation"
         )
@@ -552,9 +619,7 @@ def _classify(
         or not supervision.cleanup_confirmed
     ):
         return "rejected_supervision", "supervision_uncertainty"
-    if supervision.circuit_breaker_state != "closed" or (
-        breaker.state != "closed"
-    ):
+    if supervision.circuit_breaker_state != "closed" or breaker.state != "closed":
         return "rejected_supervision", "circuit_breaker_open"
     if intake.status != "quarantined_untrusted" or not intake.scan_passed:
         return "rejected_artifact_security", "artifact_security_rejected"
@@ -564,9 +629,6 @@ def _classify(
         return "rejected_blast_radius", "blast_radius_rejected"
     if verification.status != STATUS_PASSED:
         return "rejected_verification", "verification_failed"
-    # Every stage held, but a passing chain over artifacts whose origin is
-    # unproven is not an accepted candidate.  Checked last so each earlier
-    # stage still reports its own, more specific rejection.
     if not provenance_proven:
         return "rejected_uncertain_state", "artifact_provenance_unproven"
     return CLASSIFICATION_ACCEPTED, "contained_trust_chain_survived"
@@ -579,6 +641,7 @@ def build_trust_chain_proof(
     intake_result,
     blast_radius_receipt=None,
     verification_receipt=None,
+    artifact_provenance_receipt=None,
 ):
     """Bind one candidate's whole evidence chain into an immutable proof."""
     supervision, breaker, intake, package = _validate_inputs(
@@ -588,17 +651,23 @@ def build_trust_chain_proof(
         intake_result,
         blast_radius_receipt,
         verification_receipt,
+        artifact_provenance_receipt,
     )
     ordering_proven = bool(
         intake.artifact_intake_completed_before_destructive_teardown
     )
+    stdout_provenance = bool(
+        artifact_provenance_receipt is not None
+        and artifact_provenance_receipt.artifact_content_provenance_proven
+    )
+    content_provenance_proven = ordering_proven or stdout_provenance
     classification, reason = _classify(
         supervision,
         breaker,
         intake,
         blast_radius_receipt,
         verification_receipt,
-        ordering_proven,
+        content_provenance_proven,
     )
     limitations = {"fixture_scoped_acceptance_rule"}
     if not ordering_proven:
@@ -607,9 +676,7 @@ def build_trust_chain_proof(
         "task_id": task.task_id,
         "task_sha256": task.task_sha256,
         "acceptance_rule_sha256": task.acceptance_rule_sha256,
-        "pinned_base_sha": (
-            execution_receipt.materialization_receipt.pinned_base_sha
-        ),
+        "pinned_base_sha": execution_receipt.materialization_receipt.pinned_base_sha,
         "attempt_id": execution_receipt.attempt_id,
         "execution_id": execution_receipt.execution_id,
         "request_digest": execution_receipt.request_digest,
@@ -618,8 +685,7 @@ def build_trust_chain_proof(
             execution_receipt.materialization_receipt_digest
         ),
         "workspace_identity": (
-            execution_receipt.materialization_receipt
-            .workspace_instance_digest
+            execution_receipt.materialization_receipt.workspace_instance_digest
         ),
         "execution_receipt_digest": execution_receipt.receipt_sha256,
         "supervision_receipt_digest": supervision.receipt_sha256,
@@ -627,6 +693,11 @@ def build_trust_chain_proof(
         "artifact_intake_receipt_digest": intake.receipt_sha256,
         "quarantine_package_digest": (
             package.package_sha256 if package is not None else ""
+        ),
+        "artifact_provenance_receipt_digest": (
+            artifact_provenance_receipt.receipt_sha256
+            if artifact_provenance_receipt is not None
+            else ""
         ),
         "blast_radius_receipt_digest": (
             blast_radius_receipt.receipt_sha256
@@ -654,7 +725,7 @@ def build_trust_chain_proof(
         "reason_code": reason,
         "known_limitations": tuple(sorted(limitations)),
         "artifact_intake_ordering_proven": ordering_proven,
-        "artifact_content_provenance_proven": ordering_proven,
+        "artifact_content_provenance_proven": content_provenance_proven,
     }
     provisional = object.__new__(TrustChainProofReceipt)
     for name, value in values.items():
