@@ -66,7 +66,7 @@ The authoritative durable-readiness bridge (`backend/continuous_builder/readines
 | CB-022 | One-worker launch/poll/cancel/collect adapter | `worker_runtime.py`, tests | Exact authorized action only; bounded process authority inside sandbox. No GitHub. |
 | CB-023 | Artifact intake, secret scan, quarantine, teardown receipt | `worker_artifact.py`, tests | Artifact untrusted; cleanup failure blocks. |
 | CB-024 | Supervisor stall/crash/uncertain/circuit-breaker policy | `supervisor.py`, tests | Receipt-driven, no endless retry; kill switch. |
-| CB-025 | Single-slice contained integration proof | dedicated integration tests/docs | Real disposable worker fixture, no production data/network/write. |
+| CB-025 | Single-slice contained integration proof | `proof_fixture.py`, `blast_radius.py`, `candidate_verifier.py`, `trust_chain_proof.py`, tests/docs | Real disposable worker fixture, no production data/network/write. Implemented; see `docs/future/CONTINUOUS_BUILDER_CB025_TRUST_CHAIN_PROOF.md`. Artifact content provenance remains unproven -- CB-022 has no artifact egress channel -- and the proof records that as an immutable limitation rather than asserting it. |
 
 CB-019–021 can batch as containment plumbing; **hard human stop before CB-022** (first automated worker execution), and again after CB-025 security evidence. CB-022–025 must not share a batch with authorization changes.
 
