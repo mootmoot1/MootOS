@@ -42,9 +42,8 @@ def _envelope(receipt_values=None, artifacts=None, *, result_verified=False):
 
 
 def _execution(tmp_path, monkeypatch, *, artifacts=None, mutate=None):
-    foundation = None
-    # Get the request digest from the same foundation helper the runtime uses.
     from tests.test_continuous_builder_worker_runtime import _foundation
+
     foundation = _foundation()
     values = {
         "attempt_id": foundation.attempt_id,
@@ -120,6 +119,7 @@ def test_provenance_does_not_promote_worker_output_or_merge_authority(
 
 def test_worker_cannot_claim_result_verified(tmp_path, monkeypatch):
     from tests.test_continuous_builder_worker_runtime import _foundation
+
     foundation = _foundation()
     raw = _envelope(
         {
@@ -177,6 +177,19 @@ def test_payload_digest_mismatch_is_rejected(tmp_path, monkeypatch):
         bridge_execution_stdout_to_artifact_intake(receipt)
 
 
+def test_non_hex_payload_digest_is_rejected(tmp_path, monkeypatch):
+    def mutate(raw, values):
+        body = json.loads(raw)
+        body["artifacts"][0]["content_sha256"] = "z" * 64
+        return json.dumps(
+            body, sort_keys=True, separators=(",", ":")
+        ).encode() + b"\n"
+
+    receipt, _, _ = _execution(tmp_path, monkeypatch, mutate=mutate)
+    with pytest.raises(ArtifactOutputError, match="malformed"):
+        bridge_execution_stdout_to_artifact_intake(receipt)
+
+
 @pytest.mark.parametrize("path", ("../escape", "/absolute", "C:/drive"))
 def test_unsafe_artifact_path_is_rejected(tmp_path, monkeypatch, path):
     receipt, _, _ = _execution(
@@ -222,6 +235,22 @@ def test_existing_staging_identity_fails_closed(tmp_path, monkeypatch):
     with pytest.raises(ArtifactOutputError, match="already exists"):
         bridge_execution_stdout_to_artifact_intake(receipt)
     assert (root / "do-not-overwrite").read_bytes() == b"x"
+
+
+def test_staging_cleanup_uncertainty_fails_closed(tmp_path, monkeypatch):
+    receipt, _, _ = _execution(tmp_path, monkeypatch)
+    real_cleanup = artifact_output._cleanup
+    calls = {"count": 0}
+
+    def uncertain_cleanup(root):
+        calls["count"] += 1
+        real_cleanup(root)
+        return False
+
+    monkeypatch.setattr(artifact_output, "_cleanup", uncertain_cleanup)
+    with pytest.raises(ArtifactOutputError, match="cleanup is uncertain"):
+        bridge_execution_stdout_to_artifact_intake(receipt)
+    assert calls["count"] == 1
 
 
 def test_provenance_receipt_digest_detects_forgery(tmp_path, monkeypatch):
