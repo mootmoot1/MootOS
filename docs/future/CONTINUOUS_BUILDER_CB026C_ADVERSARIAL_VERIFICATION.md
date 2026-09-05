@@ -137,6 +137,19 @@ receipt `b427466f20494c375698ef9e0957ac2c5acd94dadb3de16aacf79af722fdab47`.
 No verifier execution was confirmed in that receipt. Workspace cleanup was true;
 the check, worker and artifact staging roots were subsequently observed empty.
 
+A later Docker listing nevertheless found an unstarted container from that
+timed-out create: `a9e82eef656b70526b2449683fcec9354df8f38ddce78ed6b0a57964c42fb2e7`.
+Its mount's parent-path hash exactly matched the failed check receipt's workspace
+identity. State was `created`, not running, with no start time. Thus the earlier
+cleanup observation did not establish durable absence after a delayed Docker
+create. This is an additional containment-lifecycle HOLD, not a passing proof.
+The new layer already refuses further held-out execution after an uncertain
+public result. CB-026B's delayed-create cleanup behavior needs separate review;
+its implementation and limits were not changed in this slice.
+After identifying it as this proof's container, it was explicitly removed and
+a successful exact-ID Docker listing confirmed absence. No unrelated container,
+image or volume was removed.
+
 Positive public/private success, the gamed-public real rejection, and the real
 repeat control have **not** been established. The local proof harness is ready
 to run them once Docker responds within existing bounds. Its repeat negative
