@@ -1,5 +1,7 @@
 """Deterministic offline proof worker intended for the pinned CB-022 image."""
 
+import base64
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -8,6 +10,7 @@ from pathlib import Path
 SOURCE_ROOT = Path("/source")
 WORKSPACE_ROOT = Path("/workspace")
 OUTPUT_NAME = "cb022-fixture-output.json"
+PROTOCOL_VERSION = "mootos-artifact-output-v1"
 
 
 def main(argv=None):
@@ -20,15 +23,26 @@ def main(argv=None):
     workspace = WORKSPACE_ROOT
     if not SOURCE_ROOT.is_dir() or not workspace.is_dir():
         raise SystemExit("fixed source and workspace roots are required")
+
+    candidate = b"2\n"
+    artifact = {
+        "content_base64": base64.b64encode(candidate).decode("ascii"),
+        "content_sha256": hashlib.sha256(candidate).hexdigest(),
+        "path": "value.txt",
+    }
     result = {
+        "artifacts": [artifact],
         "attempt_id": attempt_id,
-        "operation": "offline_fixture_write",
+        "protocol": PROTOCOL_VERSION,
         "request_digest": request_digest,
         "result_verified": False,
     }
     content = json.dumps(
         result, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8") + b"\n"
+
+    # Workspace output remains disposable and is not used as provenance.
+    # The trusted supervisor receipt captures this exact stdout transport.
     output = workspace / OUTPUT_NAME
     output.write_bytes(content)
     sys.stdout.buffer.write(content)
