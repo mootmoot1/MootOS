@@ -140,14 +140,14 @@ def test_provenance_receipt_for_other_intake_cannot_unlock_candidate(
         create_supervision_policy(),
         artifact_intake_receipt=bridge.intake_result.receipt,
     )
-    forged = dataclasses.replace(
-        bridge.provenance_receipt,
-        intake_receipt_digest="0" * 64,
-        receipt_sha256="0" * 64,
-    )
-    # The receipt's own invariant catches this before the trust chain can use it.
+
+    # The receipt's own invariant catches a self-inconsistent mutation.
     with pytest.raises(ArtifactOutputError):
-        dataclasses.replace(forged)
+        dataclasses.replace(
+            bridge.provenance_receipt,
+            intake_receipt_digest="0" * 64,
+            receipt_sha256="0" * 64,
+        )
 
     # A raw object that bypasses construction still fails exact trust-chain binding.
     forged = object.__new__(type(bridge.provenance_receipt))
