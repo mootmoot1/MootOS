@@ -164,7 +164,6 @@ class TrustChainProofReceipt:
     circuit_breaker_snapshot_digest: str
     artifact_intake_receipt_digest: str
     quarantine_package_digest: str
-    artifact_provenance_receipt_digest: str
     blast_radius_receipt_digest: str
     verification_receipt_digest: str
     supervision_classification: str
@@ -175,6 +174,7 @@ class TrustChainProofReceipt:
     reason_code: str
     known_limitations: tuple
     proof_sha256: str
+    artifact_provenance_receipt_digest: str = ""
     policy_version: str = POLICY_VERSION
     artifact_intake_ordering_proven: bool = False
     artifact_content_provenance_proven: bool = False
@@ -209,11 +209,15 @@ class TrustChainProofReceipt:
             "execution_receipt_digest", "supervision_receipt_digest",
             "circuit_breaker_snapshot_digest",
             "artifact_intake_receipt_digest",
-            "artifact_provenance_receipt_digest",
             "blast_radius_receipt_digest", "verification_receipt_digest",
             "proof_sha256",
         ):
             _sha256(getattr(self, name), name)
+        if self.artifact_provenance_receipt_digest:
+            _sha256(
+                self.artifact_provenance_receipt_digest,
+                "artifact provenance receipt digest",
+            )
         if not isinstance(self.pinned_base_sha, str) or _GIT_SHA.fullmatch(
             self.pinned_base_sha or ""
         ) is None:
@@ -278,6 +282,7 @@ class TrustChainProofReceipt:
         if self.final_classification == CLASSIFICATION_ACCEPTED and (
             self.artifact_intake_ordering_proven is not True
             or self.artifact_content_provenance_proven is not True
+            or not self.artifact_provenance_receipt_digest
         ):
             raise TrustChainProofError(
                 "accepted proof requires proven artifact content provenance"
