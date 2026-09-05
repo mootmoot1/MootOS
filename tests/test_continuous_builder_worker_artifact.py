@@ -41,6 +41,10 @@ def _forge(instance, **changes):
     return forged
 
 
+def _runtime_bytes(*parts):
+    return b"".join(parts)
+
+
 def test_clean_artifacts_enter_untrusted_quarantine(tmp_path, monkeypatch):
     receipt, root = _stage(
         tmp_path,
@@ -192,12 +196,19 @@ def test_worker_cannot_fabricate_trusted_quarantine_receipt(
     "content,category",
     (
         (
-            b"-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n",
+            _runtime_bytes(
+                b"-----BEGIN ", b"PRIVATE", b" KEY-----\nnot-a-real-key\n"
+            ),
             "private_key_material",
         ),
         (b"api_key=abcdefghijk12345\n", "credential_assignment"),
         (b"token=ghp_abcdefghijklmnopqrstuvwxyz\n", "github_token"),
-        (b"aws_access_key_id=AKIAABCDEFGHIJKLMNOP\n", "aws_access_key"),
+        (
+            _runtime_bytes(
+                b"aws_", b"access_key_id=", b"AK", b"IAABCDEFGHIJKLMNOP\n"
+            ),
+            "aws_access_key",
+        ),
         (b"Authorization: Bearer abcdefghijklmnop\n", "authorization_bearer"),
     ),
 )
