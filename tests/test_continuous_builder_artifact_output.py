@@ -229,8 +229,9 @@ def test_forged_stdout_digest_is_rejected(tmp_path, monkeypatch):
 
 def test_existing_staging_identity_fails_closed(tmp_path, monkeypatch):
     receipt, _, intake_root = _execution(tmp_path, monkeypatch)
+    intake_root.mkdir(mode=0o700, parents=True)
     root = intake_root / receipt.execution_id
-    root.mkdir(parents=True)
+    root.mkdir(mode=0o700)
     (root / "do-not-overwrite").write_bytes(b"x")
     with pytest.raises(ArtifactOutputError, match="already exists"):
         bridge_execution_stdout_to_artifact_intake(receipt)
