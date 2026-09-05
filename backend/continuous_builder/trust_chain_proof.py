@@ -17,21 +17,32 @@ text: every input is a receipt some trusted component already produced, and
 every binding is checked by exact digest before a classification is derived.
 
 The best possible outcome is ``contained_verified_candidate``, which means
-only: *this candidate survived this bounded trust chain*.  It still carries
+only: *this candidate survived this bounded trust chain*.  Even that carries
 ``human_review_required=True`` and ``result_trusted=False``, and it never
 authorizes merge, publication, queue transition, GitHub action, or Main
 advancement.
 
-Known limitation, carried in the receipt itself rather than in prose:
+Artifact provenance is a precondition of that outcome, not a footnote on it.
 CB-022 gives a worker no artifact egress channel at all (``/workspace`` is a
 container-local tmpfs on a read-only rootfs, with exactly one read-only bind
 mount enforced), so CB-023 can only ever observe a staging root some other
-party populated.  CB-023 therefore reports
+party populated, and reports
 ``artifact_intake_completed_before_destructive_teardown=False`` permanently.
-This proof reads that flag and records
-``artifact_intake_ordering_proven=False`` plus the
-``artifact_intake_ordering_unproven`` limitation code.  It never asserts an
-ordering the code does not prove.
+This proof reads that flag into ``artifact_intake_ordering_proven`` and
+``artifact_content_provenance_proven``, and fails closed on it: a chain in
+which supervision, quarantine, blast radius and verification all pass, but
+whose artifact bytes cannot be traced to this exact execution, classifies as
+``rejected_uncertain_state`` with reason ``artifact_provenance_unproven``.
+
+That rule is enforced twice.  The classifier returns the rejection, and
+``TrustChainProofReceipt.__post_init__`` independently refuses to construct
+``contained_verified_candidate`` unless both provenance booleans are ``True``
+-- so the accepted state cannot be minted by a caller, a forged receipt, or a
+future classifier change.  On the current CB-022/CB-023 architecture the
+accepted state is therefore unreachable, which is the honest answer rather
+than a gap: it becomes reachable only when a reviewed artifact-egress design
+lets CB-023 prove intake precedes destructive teardown.  Nothing here asserts
+an ordering the code does not prove.
 """
 
 import hashlib
@@ -252,6 +263,19 @@ class TrustChainProofReceipt:
         ):
             raise TrustChainProofError(
                 "accepted proof contradicts its own stage evidence"
+            )
+        # Enforced here, in the receipt invariant, and not only in the
+        # classifier: an accepted candidate asserts that these bytes came from
+        # this execution.  Without proven provenance every upstream stage is
+        # reasoning about an artifact set whose origin the system cannot
+        # establish, so the accepted classification is structurally
+        # unavailable -- no caller, and no future classifier, can mint one.
+        if self.final_classification == CLASSIFICATION_ACCEPTED and (
+            self.artifact_intake_ordering_proven is not True
+            or self.artifact_content_provenance_proven is not True
+        ):
+            raise TrustChainProofError(
+                "accepted proof requires proven artifact content provenance"
             )
         if self.proof_sha256 != _digest(self._payload()):
             raise TrustChainProofError("trust-chain proof digest mismatch")
@@ -513,7 +537,9 @@ def _validate_inputs(
     return supervision, breaker, intake, package
 
 
-def _classify(supervision, breaker, intake, blast, verification):
+def _classify(
+    supervision, breaker, intake, blast, verification, provenance_proven,
+):
     classification = supervision.final_classification
     if classification != "succeeded":
         return _SUPERVISION_REJECTION.get(
@@ -538,6 +564,11 @@ def _classify(supervision, breaker, intake, blast, verification):
         return "rejected_blast_radius", "blast_radius_rejected"
     if verification.status != STATUS_PASSED:
         return "rejected_verification", "verification_failed"
+    # Every stage held, but a passing chain over artifacts whose origin is
+    # unproven is not an accepted candidate.  Checked last so each earlier
+    # stage still reports its own, more specific rejection.
+    if not provenance_proven:
+        return "rejected_uncertain_state", "artifact_provenance_unproven"
     return CLASSIFICATION_ACCEPTED, "contained_trust_chain_survived"
 
 
@@ -558,15 +589,16 @@ def build_trust_chain_proof(
         blast_radius_receipt,
         verification_receipt,
     )
+    ordering_proven = bool(
+        intake.artifact_intake_completed_before_destructive_teardown
+    )
     classification, reason = _classify(
         supervision,
         breaker,
         intake,
         blast_radius_receipt,
         verification_receipt,
-    )
-    ordering_proven = bool(
-        intake.artifact_intake_completed_before_destructive_teardown
+        ordering_proven,
     )
     limitations = {"fixture_scoped_acceptance_rule"}
     if not ordering_proven:

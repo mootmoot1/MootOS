@@ -87,15 +87,16 @@ def _forge(instance, **changes):
     return forged
 
 
-# 1. Successful tiny contained trust-chain proof.
+# 1. The tiny chain runs every stage and then fails closed on provenance.
 
-def test_tiny_candidate_survives_the_whole_contained_chain(
+def test_tiny_candidate_clears_every_stage_then_stops_at_provenance(
     tmp_path, monkeypatch,
 ):
     task, receipt, decision, intake, blast, verification, proof = _chain(
         tmp_path, monkeypatch,
     )
 
+    # Every stage the system can actually evaluate does pass.
     assert receipt.final_state == "succeeded"
     assert decision.receipt.final_classification == "succeeded"
     assert intake.receipt.status == "quarantined_untrusted"
@@ -103,9 +104,20 @@ def test_tiny_candidate_survives_the_whole_contained_chain(
     assert blast.violations == ()
     assert verification.status == "verification_passed"
     assert verification.failure_codes == ()
-    assert proof.final_classification == "contained_verified_candidate"
-    assert proof.reason_code == "contained_trust_chain_survived"
     assert proof.task_id == "cb025-increment-value"
+
+    # And the chain still stops, specifically because CB-022 gives the system
+    # no way to prove these bytes came from this execution.
+    assert proof.artifact_intake_ordering_proven is False
+    assert proof.artifact_content_provenance_proven is False
+    assert proof.final_classification == "rejected_uncertain_state"
+    assert proof.reason_code == "artifact_provenance_unproven"
+    assert proof.final_classification != "contained_verified_candidate"
+
+    # Fail-closed does not mean authority leaks out some other way.
+    assert proof.human_review_required is True
+    assert proof.result_trusted is False
+    assert proof.merge_authorized is False
 
 
 # 2. Exact binding across every stage of the chain.
@@ -584,14 +596,13 @@ def test_every_evidence_object_is_immutable_and_bounded(
     )
 
 
-# 12. A successful candidate still holds no authority whatsoever.
+# 12. No proof of any classification holds authority whatsoever.
 
-def test_successful_candidate_holds_no_merge_or_publication_authority(
+def test_no_proof_holds_merge_or_publication_authority(
     tmp_path, monkeypatch,
 ):
     _, _, _, _, blast, verification, proof = _chain(tmp_path, monkeypatch)
 
-    assert proof.final_classification == "contained_verified_candidate"
     assert proof.human_review_required is True
     assert proof.result_trusted is False
     assert proof.worker_output_trusted is False
@@ -744,3 +755,81 @@ def test_proof_independently_rederives_downstream_evidence(
         build_trust_chain_proof(
             task, receipt, decision, intake, blast, passing,
         )
+
+
+def _reseal(proof, **changes):
+    """Rebuild a proof receipt bypassing the factory, with a valid digest."""
+    forged = _forge(proof, **changes)
+    object.__setattr__(
+        forged, "proof_sha256", hashlib.sha256(forged._payload()).hexdigest()
+    )
+    return forged
+
+
+def test_accepted_classification_is_invalid_without_proven_provenance(
+    tmp_path, monkeypatch,
+):
+    _, _, _, _, blast, verification, proof = _chain(tmp_path, monkeypatch)
+
+    # Every stage status on this receipt already says "pass", so the only
+    # thing standing between it and the accepted classification is provenance.
+    assert proof.supervision_classification == "succeeded"
+    assert proof.artifact_intake_status == "quarantined_untrusted"
+    assert proof.blast_radius_status == blast.status == (
+        "within_blast_radius_unverified"
+    )
+    assert proof.verification_status == verification.status == (
+        "verification_passed"
+    )
+    assert proof.artifact_content_provenance_proven is False
+
+    # Relabelling it accepted -- with a recomputed, self-consistent digest, so
+    # no digest check can catch it -- is rejected by the receipt invariant
+    # itself, not merely by the classifier that would never have emitted it.
+    accepted = _reseal(
+        proof, final_classification="contained_verified_candidate",
+    )
+    with pytest.raises(TrustChainProofError):
+        dataclasses.replace(accepted)
+
+    # Positive control: the same relabelling validates once provenance is
+    # proven, which shows the invariant above turns on provenance and not on
+    # some unrelated field. Nothing in the shipped pipeline can reach here --
+    # CB-023 hard-codes the ordering flag false -- so this state is
+    # constructed only to pin down what the invariant is testing.
+    provable = _reseal(
+        proof,
+        final_classification="contained_verified_candidate",
+        artifact_intake_ordering_proven=True,
+        artifact_content_provenance_proven=True,
+        known_limitations=("fixture_scoped_acceptance_rule",),
+    )
+    assert dataclasses.replace(provable).final_classification == (
+        "contained_verified_candidate"
+    )
+
+    # And one flag alone is never enough.
+    for changes in (
+        {"artifact_intake_ordering_proven": True},
+        {"artifact_content_provenance_proven": True},
+    ):
+        half = _reseal(
+            proof,
+            final_classification="contained_verified_candidate",
+            **changes,
+        )
+        with pytest.raises(TrustChainProofError):
+            dataclasses.replace(half)
+
+
+def test_build_refuses_to_emit_accepted_while_provenance_is_unproven(
+    tmp_path, monkeypatch,
+):
+    # The classifier and the invariant agree: across the whole fixture chain
+    # the accepted state is simply not reachable on this architecture.
+    for index, files in enumerate((CORRECT, WRONG, CHEATING)):
+        root = tmp_path / f"case-{index}"
+        root.mkdir(parents=True)
+        proof = _chain(root, monkeypatch, files)[-1]
+        assert proof.final_classification != "contained_verified_candidate"
+        assert proof.artifact_content_provenance_proven is False

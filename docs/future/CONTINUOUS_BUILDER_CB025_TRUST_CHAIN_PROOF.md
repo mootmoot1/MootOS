@@ -129,17 +129,38 @@ Fail-closed classifications, evaluated in chain order:
 
 | Classification | Cause |
 | --- | --- |
-| `contained_verified_candidate` | every stage held |
+| `contained_verified_candidate` | every stage held **and** artifact provenance is proven |
 | `rejected_runtime` | supervision classified failed / crashed / timed out / stalled / cancelled |
 | `rejected_supervision` | termination or cleanup uncertain, containment violation, open breaker |
 | `rejected_artifact_security` | CB-023 rejected the artifacts |
 | `rejected_blast_radius` | artifacts crossed the declared fence |
 | `rejected_verification` | the candidate is not what the task requires |
-| `rejected_uncertain_state` | anything the chain cannot classify |
+| `rejected_uncertain_state` | artifact provenance unproven (`artifact_provenance_unproven`), or anything the chain cannot classify |
 
-`contained_verified_candidate` means exactly one thing: *this candidate
-survived this bounded trust chain*. It still carries, and structurally cannot
-carry anything else:
+**Artifact provenance is a precondition of acceptance, not a footnote on it.**
+A chain in which supervision, quarantine, blast radius and verification all
+pass, but whose artifact bytes cannot be traced to this exact execution, is
+`rejected_uncertain_state` with reason `artifact_provenance_unproven`. The
+check runs last, so each earlier stage still reports its own more specific
+rejection first.
+
+That rule is enforced twice. The classifier returns the rejection, **and**
+`TrustChainProofReceipt.__post_init__` independently refuses to construct
+`contained_verified_candidate` unless both `artifact_intake_ordering_proven`
+and `artifact_content_provenance_proven` are `True` — so the accepted state
+cannot be minted by a caller, by a forged receipt with a recomputed digest, or
+by a future classifier change.
+
+**On the current CB-022/CB-023 architecture the accepted state is therefore
+unreachable.** That is the honest answer rather than a gap: it becomes
+reachable only when a reviewed artifact-egress design lets CB-023 prove intake
+precedes destructive teardown. What the fixture chain proves today is the
+identity/authority chain plus the blast-radius and verifier stages — and then
+a correct, explicit stop at provenance.
+
+If it were reachable, `contained_verified_candidate` would mean exactly one
+thing: *this candidate survived this bounded trust chain*. It would still
+carry, and structurally cannot carry anything else:
 
 ```
 human_review_required          = True
@@ -200,18 +221,26 @@ What CB-025 does prove is therefore precise:
 * the **content** of the quarantine package is not provably the container's
   output, because CB-022 never extracted it.
 
-The proof records this as machine-readable, immutable state:
+The proof records this as machine-readable, immutable state, **and fails
+closed on it** rather than accepting the candidate anyway:
 
 ```
 artifact_intake_ordering_proven      = False
 artifact_content_provenance_proven   = False
 known_limitations                    = ("artifact_intake_ordering_unproven",
                                         "fixture_scoped_acceptance_rule")
+final_classification                 = "rejected_uncertain_state"
+reason_code                          = "artifact_provenance_unproven"
 ```
 
+So the fixture chain today clears supervision, quarantine, blast radius and
+the verifier, and then stops — explicitly, at provenance. It does not produce
+a genuinely contained verified candidate, and it no longer claims to.
+
 Construction of a proof receipt that reports `artifact_intake_ordering_proven
-= False` *without* the matching limitation code raises. The two provenance
-booleans must agree. Nothing marks
+= False` *without* the matching limitation code raises, as does any receipt
+classified `contained_verified_candidate` while either provenance boolean is
+`False`. The two provenance booleans must agree. Nothing marks
 `artifact_intake_completed_before_destructive_teardown = True`.
 
 **Closing this gap is the next slice's work**, not this one's: it needs a
@@ -254,11 +283,12 @@ success.
 
 ## Tests
 
-`tests/test_continuous_builder_trust_chain_proof.py` — 31 tests, all driving
+`tests/test_continuous_builder_trust_chain_proof.py` — 33 tests, all driving
 the real merged CB-022/023/024 code paths (CB-022 against the existing fake
 Docker CLI used by its own suite). Coverage:
 
-* successful tiny contained trust-chain proof
+* the tiny chain clears every evaluable stage, then fails closed on
+  artifact provenance
 * exact binding across execution, supervision, breaker, quarantine, blast
   radius, verifier and proof
 * unauthorized extra artifact -> blast-radius rejection (negative control)
@@ -279,7 +309,11 @@ Docker CLI used by its own suite). Coverage:
 * every evidence object immutable and byte-bounded
 * a successful candidate holds zero merge / publication / GitHub / queue /
   Main authority
-* the unproven artifact ordering is recorded honestly
+* the unproven artifact ordering is recorded honestly, and the chain fails
+  closed on it as `rejected_uncertain_state` / `artifact_provenance_unproven`
+* `contained_verified_candidate` is structurally unconstructible while either
+  provenance boolean is false, even with every stage status saying pass and a
+  recomputed, self-consistent digest — and one flag alone is never enough
 * proofs are deterministic and content-addressed over their evidence
 * the four new modules import no subprocess, socket, HTTP, Docker, database,
   or GitHub facility, contain no file I/O, and the verifier references no
