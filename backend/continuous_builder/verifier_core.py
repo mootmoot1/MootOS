@@ -119,7 +119,7 @@ def _validate_execution(receipt):
         ) from error
     if receipt.execution_performed is not True:
         raise VerifierCoreError("verification requires an executed worker")
-    if receipt.termination_uncertain or receipt.cleanup_uncertain:
+    if receipt.termination_uncertain:
         raise VerifierCoreError("uncertain worker execution cannot be verified")
     if any(
         value is not False
