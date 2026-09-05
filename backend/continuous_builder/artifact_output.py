@@ -1,12 +1,12 @@
 """Bounded stdout artifact transport for one contained worker execution.
 
 The worker may propose artifact bytes through one strict JSON envelope on stdout.
-This module never trusts those bytes.  It proves only that the exact staged bytes
+This module never trusts those bytes. It proves only that the exact staged bytes
 came from the exact stdout captured by a trusted WorkerExecutionReceipt, then
 hands the staged files to the existing CB-023 quarantine scanner.
 
 The current bridge is intentionally tiny: the complete stdout must fit inside the
-trusted receipt sample.  Larger artifact transport belongs in a later runtime
+trusted receipt sample. Larger artifact transport belongs in a later runtime
 contract rather than silently weakening the receipt boundary.
 """
 
@@ -15,6 +15,7 @@ import binascii
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 from dataclasses import dataclass, field, replace
@@ -40,6 +41,7 @@ class ArtifactOutputError(ValueError):
 PROTOCOL_VERSION = "mootos-artifact-output-v1"
 MAX_ENVELOPE_BYTES = 4096
 MAX_RECEIPT_BYTES = 64 * 1024
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _PROVENANCE_TOKEN = object()
 
 
@@ -51,6 +53,11 @@ def _canonical(value):
 
 def _digest(value):
     return hashlib.sha256(value).hexdigest()
+
+
+def _sha256(value, label):
+    if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+        raise ArtifactOutputError(f"{label} is malformed")
 
 
 def _validate_execution(receipt):
@@ -132,8 +139,9 @@ def _decode_envelope(raw, receipt):
         seen_folded.add(folded)
         encoded = item["content_base64"]
         expected_digest = item["content_sha256"]
-        if not isinstance(encoded, str) or not isinstance(expected_digest, str):
+        if not isinstance(encoded, str):
             raise ArtifactOutputError("artifact payload metadata is malformed")
+        _sha256(expected_digest, "artifact payload digest")
         try:
             content = base64.b64decode(encoded.encode("ascii"), validate=True)
         except (UnicodeEncodeError, binascii.Error) as error:
@@ -152,11 +160,14 @@ def _decode_envelope(raw, receipt):
 
 def _safe_root(root):
     allowed = ARTIFACT_INTAKE_ROOT
-    if not allowed.is_absolute() or allowed.is_symlink():
+    if not allowed.is_absolute() or ".." in allowed.parts or allowed.is_symlink():
         raise ArtifactOutputError("artifact intake authority is unsafe")
     allowed.mkdir(mode=0o700, parents=True, exist_ok=True)
     if allowed.is_symlink():
         raise ArtifactOutputError("artifact intake authority is a symlink")
+    metadata = allowed.stat()
+    if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) & 0o077:
+        raise ArtifactOutputError("artifact intake authority ownership is unsafe")
     root = Path(root)
     if not root.is_absolute() or root.parent != allowed:
         raise ArtifactOutputError("artifact staging root is outside authority")
@@ -196,16 +207,22 @@ def _stage(root, artifacts):
             if destination.read_bytes() != content:
                 raise ArtifactOutputError("staged artifact bytes changed")
     except Exception:
-        _cleanup(root)
+        if not _cleanup(root):
+            raise ArtifactOutputError(
+                "artifact staging cleanup failed after staging error"
+            )
         raise
 
 
 def _cleanup(root):
     try:
-        if root.exists() and not root.is_symlink():
+        if root.is_symlink():
+            return False
+        if root.exists():
             shutil.rmtree(root)
+        return not root.exists() and not root.is_symlink()
     except OSError:
-        pass
+        return False
 
 
 @dataclass(frozen=True)
@@ -241,19 +258,20 @@ class ArtifactOutputProvenanceReceipt:
             raise ArtifactOutputError("provenance receipt requires trusted evidence")
         if self.protocol_version != PROTOCOL_VERSION:
             raise ArtifactOutputError("provenance protocol version mismatch")
-        for value in (
-            self.execution_receipt_digest,
-            self.request_digest,
-            self.policy_digest,
-            self.stdout_sha256,
-            self.artifact_manifest_sha256,
-            self.intake_receipt_digest,
+        for label, value in (
+            ("execution receipt digest", self.execution_receipt_digest),
+            ("request digest", self.request_digest),
+            ("policy digest", self.policy_digest),
+            ("stdout digest", self.stdout_sha256),
+            ("artifact manifest digest", self.artifact_manifest_sha256),
+            ("intake receipt digest", self.intake_receipt_digest),
         ):
-            if not isinstance(value, str) or len(value) != 64:
-                raise ArtifactOutputError("provenance digest is malformed")
-        if self.quarantine_package_digest and len(self.quarantine_package_digest) != 64:
-            raise ArtifactOutputError("quarantine digest is malformed")
-        if type(self.stdout_size) is not int or not (0 < self.stdout_size <= MAX_ENVELOPE_BYTES):
+            _sha256(value, label)
+        if self.quarantine_package_digest:
+            _sha256(self.quarantine_package_digest, "quarantine digest")
+        if type(self.stdout_size) is not int or not (
+            0 < self.stdout_size <= MAX_ENVELOPE_BYTES
+        ):
             raise ArtifactOutputError("provenance stdout size is invalid")
         if type(self.artifact_manifest) is not tuple or not self.artifact_manifest:
             raise ArtifactOutputError("provenance manifest is malformed")
@@ -330,6 +348,7 @@ def bridge_execution_stdout_to_artifact_intake(execution_receipt):
     artifacts = _decode_envelope(raw, execution_receipt)
     root = ARTIFACT_INTAKE_ROOT / execution_receipt.execution_id
     root = _safe_root(root)
+    result = None
     try:
         _stage(root, artifacts)
         intake = intake_worker_artifacts(execution_receipt, root)
@@ -383,6 +402,8 @@ def bridge_execution_stdout_to_artifact_intake(execution_receipt):
             receipt_sha256=_digest(provisional._payload()),
             _token=_PROVENANCE_TOKEN,
         )
-        return ArtifactOutputProvenanceResult(receipt, intake)
+        result = ArtifactOutputProvenanceResult(receipt, intake)
     finally:
-        _cleanup(root)
+        if not _cleanup(root):
+            raise ArtifactOutputError("artifact staging cleanup is uncertain")
+    return result
