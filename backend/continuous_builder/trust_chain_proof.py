@@ -31,16 +31,16 @@ only observe a supervisor staging root after execution. CB-025A adds a second,
 explicit route: a strict bounded stdout envelope whose complete bytes are
 already captured and hashed inside the trusted CB-022 execution receipt. The
 artifact-output bridge proves that the exact bytes staged into CB-023 came from
-that exact execution stdout. In that route, provenance is established without
-pretending the worker workspace survived teardown or adding a writable host
-mount.
+that exact execution stdout. In that route, content provenance can be proven
+even though legacy CB-023 intake still happens after container teardown. The
+two facts are therefore recorded separately rather than pretending the old
+ordering flag became true.
 
 The accepted-state provenance rule is enforced twice. The classifier fails
-closed when provenance is absent, and ``TrustChainProofReceipt.__post_init__``
-independently refuses to construct ``contained_verified_candidate`` unless
-both provenance booleans are ``True``. A caller, forged receipt, or future
-classifier therefore cannot mint an accepted state without explicit trusted
-provenance evidence.
+closed when content provenance is absent, and
+``TrustChainProofReceipt.__post_init__`` independently refuses to construct an
+accepted candidate without proven content provenance and the evidence required
+for the route that established it.
 """
 
 import hashlib
@@ -240,21 +240,17 @@ class TrustChainProofReceipt:
             sorted(set(self.known_limitations))
         ):
             raise TrustChainProofError("proof limitations are not canonical")
-        if self.artifact_intake_ordering_proven is not (
-            self.artifact_content_provenance_proven
-        ):
-            raise TrustChainProofError("provenance evidence is contradictory")
-        if self.artifact_content_provenance_proven is False and (
+        if self.artifact_intake_ordering_proven is False and (
             "artifact_intake_ordering_unproven" not in self.known_limitations
         ):
             raise TrustChainProofError(
-                "unproven artifact provenance must be recorded as a limitation"
+                "unproven artifact intake ordering must be recorded"
             )
-        if self.artifact_content_provenance_proven is True and (
+        if self.artifact_intake_ordering_proven is True and (
             "artifact_intake_ordering_unproven" in self.known_limitations
         ):
             raise TrustChainProofError(
-                "proven artifact provenance contradicts ordering limitation"
+                "proven artifact intake ordering contradicts limitation"
             )
         if self.human_review_required is not True or any(
             value is not False
@@ -280,12 +276,17 @@ class TrustChainProofReceipt:
                 "accepted proof contradicts its own stage evidence"
             )
         if self.final_classification == CLASSIFICATION_ACCEPTED and (
-            self.artifact_intake_ordering_proven is not True
-            or self.artifact_content_provenance_proven is not True
-            or not self.artifact_provenance_receipt_digest
+            self.artifact_content_provenance_proven is not True
         ):
             raise TrustChainProofError(
                 "accepted proof requires proven artifact content provenance"
+            )
+        if self.final_classification == CLASSIFICATION_ACCEPTED and (
+            self.artifact_intake_ordering_proven is False
+            and not self.artifact_provenance_receipt_digest
+        ):
+            raise TrustChainProofError(
+                "accepted stdout route requires provenance receipt evidence"
             )
         if self.proof_sha256 != _digest(self._payload()):
             raise TrustChainProofError("trust-chain proof digest mismatch")
@@ -652,24 +653,24 @@ def build_trust_chain_proof(
         verification_receipt,
         artifact_provenance_receipt,
     )
-    legacy_ordering_proven = bool(
+    ordering_proven = bool(
         intake.artifact_intake_completed_before_destructive_teardown
     )
     stdout_provenance = bool(
         artifact_provenance_receipt is not None
         and artifact_provenance_receipt.artifact_content_provenance_proven
     )
-    provenance_proven = legacy_ordering_proven or stdout_provenance
+    content_provenance_proven = ordering_proven or stdout_provenance
     classification, reason = _classify(
         supervision,
         breaker,
         intake,
         blast_radius_receipt,
         verification_receipt,
-        provenance_proven,
+        content_provenance_proven,
     )
     limitations = {"fixture_scoped_acceptance_rule"}
-    if not provenance_proven:
+    if not ordering_proven:
         limitations.add("artifact_intake_ordering_unproven")
     values = {
         "task_id": task.task_id,
@@ -696,7 +697,7 @@ def build_trust_chain_proof(
         "artifact_provenance_receipt_digest": (
             artifact_provenance_receipt.receipt_sha256
             if artifact_provenance_receipt is not None
-            else _digest(b"cb025a-artifact-provenance-not-provided")
+            else ""
         ),
         "blast_radius_receipt_digest": (
             blast_radius_receipt.receipt_sha256
@@ -723,8 +724,8 @@ def build_trust_chain_proof(
         "final_classification": classification,
         "reason_code": reason,
         "known_limitations": tuple(sorted(limitations)),
-        "artifact_intake_ordering_proven": provenance_proven,
-        "artifact_content_provenance_proven": provenance_proven,
+        "artifact_intake_ordering_proven": ordering_proven,
+        "artifact_content_provenance_proven": content_provenance_proven,
     }
     provisional = object.__new__(TrustChainProofReceipt)
     for name, value in values.items():
