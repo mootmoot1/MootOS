@@ -346,11 +346,17 @@ def create_eval_case(
     ground_truth_notes="",
     known_uncertainties=(),
 ):
-    """Seal one frozen eval case from plain worker/evaluator inputs."""
+    """Seal one frozen eval case from plain worker/evaluator inputs.
+
+    ``allowed_scope``/``forbidden_scope`` are path *sets*: callers may pass
+    them in any order and this sorts and deduplicates before sealing, the
+    same convention ``trusted_policy._seal_component`` uses for its own
+    path sets.
+    """
     worker_view = _seal_worker_view(
         goal=goal,
-        allowed_scope=tuple(allowed_scope),
-        forbidden_scope=tuple(forbidden_scope),
+        allowed_scope=tuple(sorted(set(allowed_scope))),
+        forbidden_scope=tuple(sorted(set(forbidden_scope))),
         context_inputs=tuple(context_inputs),
         required_artifacts=tuple(required_artifacts),
         max_wall_clock_seconds=max_wall_clock_seconds,
