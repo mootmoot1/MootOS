@@ -28,6 +28,19 @@ from .gpa_eval_schema import (
     require_text,
     sha256_hex,
 )
+from .gpc_trusted_admission_core import (
+    ADMISSION_OUTCOMES,
+    CAPABILITY_IDS,
+    HUMAN_GATED_CAPABILITY_IDS,
+    OUTCOME_ALLOW_WITHIN_BOUND,
+    OUTCOME_DENY,
+    OUTCOME_ESCALATE,
+    OUTCOME_INSUFFICIENT_EVIDENCE,
+    OUTCOME_REQUIRE_HUMAN_APPROVAL,
+    default_outcome_for_capability,
+    is_human_gated_capability,
+    is_known_capability_id,
+)
 
 VOCABULARY_VERSION = "gpc-capability-vocabulary-v1"
 REQUEST_SCHEMA_VERSION = "gpc-capability-request-v1"
@@ -41,23 +54,7 @@ MAX_BUDGET_VALUE = 10**9
 MAX_REQUEST_BYTES = 16 * 1024
 MAX_VOCAB_BYTES = 32 * 1024
 
-# Decision / admission outcomes used by the policy matrix (GP-C3).
-OUTCOME_ALLOW_WITHIN_BOUND = "allow_within_bound"
-OUTCOME_REQUIRE_HUMAN_APPROVAL = "require_human_approval"
-OUTCOME_DENY = "deny"
-OUTCOME_ESCALATE = "escalate"
-OUTCOME_INSUFFICIENT_EVIDENCE = "insufficient_evidence"
-
-ADMISSION_OUTCOMES = frozenset(
-    {
-        OUTCOME_ALLOW_WITHIN_BOUND,
-        OUTCOME_REQUIRE_HUMAN_APPROVAL,
-        OUTCOME_DENY,
-        OUTCOME_ESCALATE,
-        OUTCOME_INSUFFICIENT_EVIDENCE,
-    }
-)
-
+# Outcome / capability tables: authoritative copies live in trusted core.
 # Resource classes for requests -- descriptive grouping, not authority.
 RESOURCE_CLASSES = frozenset(
     {
@@ -100,77 +97,6 @@ OPERATIONS = frozenset(
         "unknown",
     }
 )
-
-# Canonical CB capability ids. Map mission classes onto existing authority /
-# authorization vocabulary where possible; never invent a parallel system.
-CAPABILITY_IDS = frozenset(
-    {
-        "cb.repo.read",
-        "cb.file.read_bounded",
-        "cb.file.write_bounded",
-        "cb.test.exec",
-        "cb.verifier.exec",
-        "cb.subprocess",
-        "cb.sandbox.container",
-        "cb.git.branch_worktree",
-        "cb.pr.create",
-        "cb.github.metadata",
-        "cb.network",
-        "cb.credentials",
-        "cb.db.schema",
-        "cb.production.data",
-        "cb.deploy.staging",
-        "cb.trusted_policy.change",
-        "cb.tcb.change",
-        "cb.approval_rules.change",
-        "cb.main.merge",
-        "cb.main.advance",
-    }
-)
-
-# Human-gated classes may be packaged for review but never auto-approved.
-HUMAN_GATED_CAPABILITY_IDS = frozenset(
-    {
-        "cb.pr.create",
-        "cb.network",
-        "cb.credentials",
-        "cb.db.schema",
-        "cb.production.data",
-        "cb.deploy.staging",
-        "cb.trusted_policy.change",
-        "cb.tcb.change",
-        "cb.approval_rules.change",
-        "cb.main.merge",
-        "cb.main.advance",
-        "cb.subprocess",
-        "cb.sandbox.container",
-        "cb.verifier.exec",
-    }
-)
-
-# Default matrix hint per capability (overridden by scope/risk/TCB rules).
-_DEFAULT_OUTCOMES = {
-    "cb.repo.read": OUTCOME_ALLOW_WITHIN_BOUND,
-    "cb.file.read_bounded": OUTCOME_ALLOW_WITHIN_BOUND,
-    "cb.file.write_bounded": OUTCOME_ALLOW_WITHIN_BOUND,
-    "cb.test.exec": OUTCOME_ALLOW_WITHIN_BOUND,
-    "cb.verifier.exec": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-    "cb.subprocess": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-    "cb.sandbox.container": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-    "cb.git.branch_worktree": OUTCOME_ALLOW_WITHIN_BOUND,
-    "cb.pr.create": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-    "cb.github.metadata": OUTCOME_ALLOW_WITHIN_BOUND,
-    "cb.network": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-    "cb.credentials": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-    "cb.db.schema": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-    "cb.production.data": OUTCOME_DENY,
-    "cb.deploy.staging": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-    "cb.trusted_policy.change": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-    "cb.tcb.change": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-    "cb.approval_rules.change": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-    "cb.main.merge": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-    "cb.main.advance": OUTCOME_REQUIRE_HUMAN_APPROVAL,
-}
 
 _RESOURCE_FOR_CAPABILITY = {
     "cb.repo.read": "repo",
@@ -224,22 +150,6 @@ _VOCAB_TOKEN = object()
 
 class CapabilityVocabularyError(GPAEvalSchemaError):
     """Raised when capability vocabulary / request evidence is unsafe."""
-
-
-def is_known_capability_id(capability_id):
-    return (
-        isinstance(capability_id, str) and capability_id in CAPABILITY_IDS
-    )
-
-
-def is_human_gated_capability(capability_id):
-    return capability_id in HUMAN_GATED_CAPABILITY_IDS
-
-
-def default_outcome_for_capability(capability_id):
-    if not is_known_capability_id(capability_id):
-        return OUTCOME_INSUFFICIENT_EVIDENCE
-    return _DEFAULT_OUTCOMES[capability_id]
 
 
 def resource_class_for_capability(capability_id):
