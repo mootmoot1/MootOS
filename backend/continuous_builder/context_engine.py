@@ -190,15 +190,16 @@ _SECRET_PATH_SEGMENTS = frozenset({
     "private_keys",
     "private-keys",
 })
+# Built from fragments so this policy module does not self-match as secret.
 _SECRET_CONTENT_MARKERS = (
-    "-----BEGIN RSA PRIVATE KEY-----",
-    "-----BEGIN OPENSSH PRIVATE KEY-----",
-    "-----BEGIN EC PRIVATE KEY-----",
-    "-----BEGIN PRIVATE KEY-----",
-    "-----BEGIN CERTIFICATE-----",
-    "AWS_SECRET_ACCESS_KEY",
-    "Authorization: Bearer ",
-    "AUTHORIZATION: Bearer ",
+    "-----BEGIN " + "RSA PRIVATE KEY-----",
+    "-----BEGIN " + "OPENSSH PRIVATE KEY-----",
+    "-----BEGIN " + "EC PRIVATE KEY-----",
+    "-----BEGIN " + "PRIVATE KEY-----",
+    "-----BEGIN " + "CERTIFICATE-----",
+    "AWS_SECRET_" + "ACCESS_KEY",
+    "Authorization: " + "Bearer ",
+    "AUTHORIZATION: " + "Bearer ",
 )
 
 _REQUEST_TOKEN = object()
@@ -3387,13 +3388,9 @@ def fulfill_supplement(
     if subject.startswith("shell:") or subject.startswith("exec:"):
         return _deny_supplement(supp_req, "shell_denied")
 
+    # Supplement has its own budget; package is already sealed.
+    # Do not require leftover package headroom — cap by supplement budget only.
     budget = min(supp_req.budget_bytes, MAX_SUPPLEMENT_BUDGET_BYTES)
-    remaining_package = (
-        original_request.budget.package_budget_bytes - package.bytes_used
-    )
-    if remaining_package < 256:
-        return _deny_supplement(supp_req, "package_budget_exhausted")
-    budget = min(budget, remaining_package)
 
     category = supp_req.category
     excerpt = None
