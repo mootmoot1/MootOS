@@ -410,3 +410,80 @@ def test_real_container_check(tmp_path, monkeypatch, case):
         assert result.results[0].exit_code == 0
     if case in ("fail", "flake8"):
         assert result.results[0].exit_code != 0
+
+
+def test_cleanup_unverified_create_never_confirms_on_empty_ps(monkeypatch):
+    """Single empty name listing after unverified create must not confirm."""
+    from backend.continuous_builder.worker_runtime import _CommandResult
+
+    calls = []
+
+    class Cli:
+        def run(self, arguments, timeout):
+            calls.append(arguments[0])
+            if arguments[0] == "rm":
+                return _CommandResult(0, b"", b"")
+            if arguments[0] == "ps":
+                # Empty listing — the pre-fix false-positive case.
+                return _CommandResult(0, b"", b"")
+            raise AssertionError(arguments)
+
+    monkeypatch.setattr(runtime, "_UNVERIFIED_CREATE_CLEANUP_GRACE_SECONDS", 0)
+    monkeypatch.setattr(runtime.time, "sleep", lambda *_: None)
+    assert runtime._cleanup_container(Cli(), "cb026b-orphan", create_verified=False) is False
+    assert "rm" in calls and "ps" in calls
+
+
+def test_cleanup_verified_create_confirms_on_empty_ps():
+    from backend.continuous_builder.worker_runtime import _CommandResult
+
+    class Cli:
+        def run(self, arguments, timeout):
+            if arguments[0] == "rm":
+                return _CommandResult(0, b"", b"")
+            if arguments[0] == "ps":
+                return _CommandResult(0, b"", b"")
+            raise AssertionError(arguments)
+
+    assert runtime._cleanup_container(Cli(), "cb026b-ok", create_verified=True) is True
+
+
+def test_timed_out_create_cannot_yield_cleanup_confirmed(tmp_path, monkeypatch):
+    """Create CLI timeout without container id must leave cleanup unconfirmed.
+
+    Regression for delayed Docker create completing after an empty name listing
+    was treated as durable cleanup confirmation.
+    """
+    from backend.continuous_builder.worker_runtime import WorkerRuntimeError, _CommandResult
+
+    monkeypatch.setattr(runtime, "_UNVERIFIED_CREATE_CLEANUP_GRACE_SECONDS", 0)
+    monkeypatch.setattr(runtime.time, "sleep", lambda *_: None)
+
+    class Cli:
+        def run(self, arguments, timeout):
+            op = arguments[0]
+            if op == "create":
+                raise WorkerRuntimeError("Docker supervisor command timed out")
+            if op in ("rm", "stop", "kill"):
+                return _CommandResult(1, b"", b"No such container")
+            if op == "ps":
+                return _CommandResult(0, b"", b"")
+            if op == "inspect":
+                raise WorkerRuntimeError("No such object")
+            raise AssertionError(arguments)
+
+    check = runner.create_trusted_check(
+        check_id="pytest", tool="pytest", targets=("tests/test_app.py",))
+    plan = SimpleNamespace(
+        image=SimpleNamespace(reference="sha256:" + "a" * 64),
+        candidate_tree_sha256="e" * 64,
+        checks=(check,),
+    )
+    root = tmp_path / "candidate"
+    root.mkdir()
+    result = runtime._execute_one(
+        Cli(), {"Id": "img"}, plan, check, root, 0, time.monotonic() + 30)
+    assert result["container_id"] == ""
+    assert result["cleanup_confirmed"] is False
+    assert "cleanup_uncertain" in result["failure_codes"]
+    assert "execution_uncertain" in result["failure_codes"]
