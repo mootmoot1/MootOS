@@ -6,8 +6,8 @@ bounded worker-proposed changed-path sets. Classification always derives from
 registry. Decisions are evidence only: every authority flag is structurally
 false. Workers propose paths; the system owns truth.
 
-CB-027C adds immutable decision receipts: evidence that trusted policy
-observed a decision. Receipts never authorize action.
+CB-027C adds immutable decision receipts. CB-027D adds narrow admission
+binding for authoritative changed-path inventories. Zero authority.
 """
 
 import hashlib
@@ -791,3 +791,369 @@ def create_trusted_policy_decision_receipt(
         receipt_sha256=_digest(provisional._payload()),
         _token=_RECEIPT_TOKEN,
     )
+
+
+# --- CB-027D: narrow admission integration ---------------------------------
+
+ADMISSION_VERSION = "cb-trusted-policy-admission-v1"
+
+ADMISSION_ORDINARY = "admission_ordinary_continue"
+ADMISSION_REVIEW = "admission_protected_review_required"
+ADMISSION_FORBIDDEN = "admission_protected_forbidden"
+ADMISSION_MALFORMED = "admission_malformed_stop"
+ADMISSION_UNCERTAIN = "admission_policy_uncertain_stop"
+ADMISSION_IDENTITY_MISMATCH = "admission_identity_mismatch_stop"
+ADMISSION_STALE_RECEIPT = "admission_stale_receipt_stop"
+ADMISSION_INVENTORY_INCOMPLETE = "admission_inventory_incomplete_stop"
+
+ADMISSION_STATUSES = frozenset({
+    ADMISSION_ORDINARY,
+    ADMISSION_REVIEW,
+    ADMISSION_FORBIDDEN,
+    ADMISSION_MALFORMED,
+    ADMISSION_UNCERTAIN,
+    ADMISSION_IDENTITY_MISMATCH,
+    ADMISSION_STALE_RECEIPT,
+    ADMISSION_INVENTORY_INCOMPLETE,
+})
+
+_OUTCOME_TO_ADMISSION = {
+    OUTCOME_ORDINARY: ADMISSION_ORDINARY,
+    OUTCOME_REVIEW: ADMISSION_REVIEW,
+    OUTCOME_FORBIDDEN: ADMISSION_FORBIDDEN,
+    OUTCOME_MALFORMED: ADMISSION_MALFORMED,
+    OUTCOME_UNCERTAIN: ADMISSION_UNCERTAIN,
+}
+
+_ADMISSION_TOKEN = object()
+
+
+@dataclass(frozen=True)
+class TrustedPolicyAdmission:
+    """Narrow TCB admission result bound to candidate / request identities.
+
+    Ordinary continuation is allowed only for admission_ordinary_continue.
+    Review-required is an explicit non-authorized review state. All other
+    statuses stop advancement. Zero authority; authorized is always false.
+    """
+
+    status: str
+    decision_sha256: str
+    receipt_sha256: str
+    registry_sha256: str
+    outcome: str
+    candidate_digest: str
+    worker_request_digest: str
+    inventory_sha256: str
+    changed_paths_sha256: str
+    admission_sha256: str
+    policy_version: str = ADMISSION_VERSION
+    authorized: bool = False
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _ADMISSION_TOKEN:
+            raise TrustedPolicyEnforcementError(
+                "trusted policy admission requires trusted system construction"
+            )
+        if self.status not in ADMISSION_STATUSES:
+            raise TrustedPolicyEnforcementError(
+                "admission status is unsupported"
+            )
+        if self.policy_version != ADMISSION_VERSION:
+            raise TrustedPolicyEnforcementError(
+                "admission policy version is unsupported"
+            )
+        if self.outcome not in OUTCOMES:
+            raise TrustedPolicyEnforcementError(
+                "admission outcome is unsupported"
+            )
+        for value, label in (
+            (self.decision_sha256, "decision digest"),
+            (self.receipt_sha256, "receipt digest"),
+            (self.registry_sha256, "registry digest"),
+            (self.admission_sha256, "admission digest"),
+            (self.changed_paths_sha256, "changed paths digest"),
+        ):
+            _sha256(value, label)
+        for value, label in (
+            (self.candidate_digest, "candidate digest"),
+            (self.worker_request_digest, "worker request digest"),
+            (self.inventory_sha256, "inventory digest"),
+        ):
+            _optional_digest(value, label)
+        if self.authorized is not False:
+            raise TrustedPolicyEnforcementError(
+                "admission cannot self-authorize"
+            )
+        if any(getattr(self, name) is not False for name in AUTHORITY_FLAGS):
+            raise TrustedPolicyEnforcementError(
+                "admission cannot claim authority"
+            )
+        if (
+            self.status == ADMISSION_ORDINARY
+            and self.outcome != OUTCOME_ORDINARY
+        ):
+            raise TrustedPolicyEnforcementError(
+                "ordinary admission outcome mismatch"
+            )
+        if (
+            self.status == ADMISSION_REVIEW
+            and self.outcome != OUTCOME_REVIEW
+        ):
+            raise TrustedPolicyEnforcementError(
+                "review admission outcome mismatch"
+            )
+        if self.admission_sha256 != _digest(self._payload()):
+            raise TrustedPolicyEnforcementError("admission digest mismatch")
+
+    @property
+    def allows_continuation(self):
+        return self.status == ADMISSION_ORDINARY
+
+    @property
+    def requires_review(self):
+        return self.status == ADMISSION_REVIEW
+
+    def _body(self):
+        return {
+            "authorized": False,
+            "candidate_digest": self.candidate_digest,
+            "changed_paths_sha256": self.changed_paths_sha256,
+            "decision_sha256": self.decision_sha256,
+            "github_authorized": False,
+            "inventory_sha256": self.inventory_sha256,
+            "main_advancement_authorized": False,
+            "merge_authorized": False,
+            "outcome": self.outcome,
+            "policy_version": ADMISSION_VERSION,
+            "publication_authorized": False,
+            "queue_transition_authorized": False,
+            "receipt_sha256": self.receipt_sha256,
+            "registry_sha256": self.registry_sha256,
+            "status": self.status,
+            "worker_output_trusted": False,
+            "worker_request_digest": self.worker_request_digest,
+        }
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def canonical_bytes(self):
+        body = self._body()
+        body["admission_sha256"] = self.admission_sha256
+        return _canonical(body)
+
+    def to_dict(self):
+        body = self._body()
+        body["admission_sha256"] = self.admission_sha256
+        return body
+
+
+def _seal_admission(
+    *,
+    status,
+    decision,
+    receipt,
+    candidate_digest,
+    worker_request_digest,
+    inventory_sha256,
+    changed_paths_sha256,
+    outcome=None,
+):
+    values = {
+        "status": status,
+        "decision_sha256": decision.decision_sha256,
+        "receipt_sha256": receipt.receipt_sha256,
+        "registry_sha256": decision.registry_sha256,
+        "outcome": decision.outcome if outcome is None else outcome,
+        "candidate_digest": candidate_digest,
+        "worker_request_digest": worker_request_digest,
+        "inventory_sha256": inventory_sha256,
+        "changed_paths_sha256": changed_paths_sha256,
+        "policy_version": ADMISSION_VERSION,
+        "authorized": False,
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(TrustedPolicyAdmission)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return TrustedPolicyAdmission(
+        **values,
+        admission_sha256=_digest(provisional._payload()),
+        _token=_ADMISSION_TOKEN,
+    )
+
+
+def admit_changed_paths_against_tcb(
+    authoritative_changed_paths,
+    *,
+    candidate_digest=None,
+    worker_request_digest=None,
+    inventory_sha256=None,
+    worker_declared_paths=None,
+    prior_receipt=None,
+):
+    """Admit one authoritative changed-path inventory against the TCB.
+
+    ``authoritative_changed_paths`` must be the system-owned inventory.
+    Worker-declared paths cannot override it. A prior receipt must bind the
+    same candidate / request / path-set identities or admission stops.
+    """
+    candidate_digest = _optional_digest(candidate_digest, "candidate digest")
+    worker_request_digest = _optional_digest(
+        worker_request_digest, "worker request digest"
+    )
+    inventory_sha256 = _optional_digest(inventory_sha256, "inventory digest")
+
+    if authoritative_changed_paths is None:
+        decision = evaluate_changed_paths_against_tcb(())
+        receipt = create_trusted_policy_decision_receipt(
+            decision,
+            candidate_digest=candidate_digest,
+            worker_request_digest=worker_request_digest,
+            input_identity="inventory_missing",
+        )
+        return _seal_admission(
+            status=ADMISSION_INVENTORY_INCOMPLETE,
+            decision=decision,
+            receipt=receipt,
+            candidate_digest=candidate_digest,
+            worker_request_digest=worker_request_digest,
+            inventory_sha256=inventory_sha256,
+            changed_paths_sha256=_digest(_canonical([])),
+            outcome=OUTCOME_MALFORMED,
+        )
+
+    decision = evaluate_changed_paths_against_tcb(authoritative_changed_paths)
+    changed_paths_sha256 = decision.canonical_paths_sha256
+
+    if worker_declared_paths is not None:
+        declared = evaluate_changed_paths_against_tcb(worker_declared_paths)
+        if (
+            declared.canonical_paths_sha256 != decision.canonical_paths_sha256
+            or declared.outcome != decision.outcome
+        ):
+            receipt = create_trusted_policy_decision_receipt(
+                decision,
+                candidate_digest=candidate_digest,
+                worker_request_digest=worker_request_digest,
+                input_identity="worker_path_disagreement",
+            )
+            return _seal_admission(
+                status=ADMISSION_IDENTITY_MISMATCH,
+                decision=decision,
+                receipt=receipt,
+                candidate_digest=candidate_digest,
+                worker_request_digest=worker_request_digest,
+                inventory_sha256=inventory_sha256,
+                changed_paths_sha256=changed_paths_sha256,
+                outcome=OUTCOME_MALFORMED,
+            )
+
+    receipt = create_trusted_policy_decision_receipt(
+        decision,
+        candidate_digest=candidate_digest,
+        worker_request_digest=worker_request_digest,
+        input_identity="authoritative_inventory",
+    )
+
+    if prior_receipt is not None:
+        if not isinstance(prior_receipt, TrustedPolicyDecisionReceipt):
+            raise TrustedPolicyEnforcementError("prior receipt is invalid")
+        try:
+            TrustedPolicyDecisionReceipt(
+                receipt_version=prior_receipt.receipt_version,
+                policy_version=prior_receipt.policy_version,
+                registry_version=prior_receipt.registry_version,
+                registry_sha256=prior_receipt.registry_sha256,
+                decision_sha256=prior_receipt.decision_sha256,
+                outcome=prior_receipt.outcome,
+                canonical_paths_sha256=prior_receipt.canonical_paths_sha256,
+                tcb_match_count=prior_receipt.tcb_match_count,
+                tcb_matches_sha256=prior_receipt.tcb_matches_sha256,
+                reason_codes=prior_receipt.reason_codes,
+                reason_codes_sha256=prior_receipt.reason_codes_sha256,
+                candidate_digest=prior_receipt.candidate_digest,
+                worker_request_digest=prior_receipt.worker_request_digest,
+                input_identity=prior_receipt.input_identity,
+                receipt_sha256=prior_receipt.receipt_sha256,
+                publication_authorized=prior_receipt.publication_authorized,
+                queue_transition_authorized=(
+                    prior_receipt.queue_transition_authorized
+                ),
+                github_authorized=prior_receipt.github_authorized,
+                merge_authorized=prior_receipt.merge_authorized,
+                main_advancement_authorized=(
+                    prior_receipt.main_advancement_authorized
+                ),
+                worker_output_trusted=prior_receipt.worker_output_trusted,
+                _token=getattr(prior_receipt, "_token"),
+            )
+        except TrustedPolicyEnforcementError as error:
+            raise TrustedPolicyEnforcementError(
+                "prior receipt failed authoritative validation"
+            ) from error
+        stale = False
+        if prior_receipt.decision_sha256 != decision.decision_sha256:
+            stale = True
+        if prior_receipt.canonical_paths_sha256 != changed_paths_sha256:
+            stale = True
+        if prior_receipt.registry_sha256 != decision.registry_sha256:
+            stale = True
+        if (
+            candidate_digest is not None
+            and prior_receipt.candidate_digest is not None
+            and prior_receipt.candidate_digest != candidate_digest
+        ):
+            stale = True
+        if (
+            worker_request_digest is not None
+            and prior_receipt.worker_request_digest is not None
+            and prior_receipt.worker_request_digest != worker_request_digest
+        ):
+            stale = True
+        if stale:
+            return _seal_admission(
+                status=ADMISSION_STALE_RECEIPT,
+                decision=decision,
+                receipt=receipt,
+                candidate_digest=candidate_digest,
+                worker_request_digest=worker_request_digest,
+                inventory_sha256=inventory_sha256,
+                changed_paths_sha256=changed_paths_sha256,
+            )
+
+    return _seal_admission(
+        status=_OUTCOME_TO_ADMISSION[decision.outcome],
+        decision=decision,
+        receipt=receipt,
+        candidate_digest=candidate_digest,
+        worker_request_digest=worker_request_digest,
+        inventory_sha256=inventory_sha256,
+        changed_paths_sha256=changed_paths_sha256,
+    )
+
+
+def tcb_failure_codes_for_admission(admission):
+    """Map an admission status to verifier-core failure codes."""
+    if not isinstance(admission, TrustedPolicyAdmission):
+        raise TrustedPolicyEnforcementError("admission is invalid")
+    mapping = {
+        ADMISSION_ORDINARY: (),
+        ADMISSION_REVIEW: ("tcb_protected_change_requires_review",),
+        ADMISSION_FORBIDDEN: ("tcb_protected_change_forbidden",),
+        ADMISSION_MALFORMED: ("tcb_malformed_change",),
+        ADMISSION_UNCERTAIN: ("tcb_policy_uncertain",),
+        ADMISSION_IDENTITY_MISMATCH: ("tcb_identity_mismatch",),
+        ADMISSION_STALE_RECEIPT: ("tcb_stale_receipt",),
+        ADMISSION_INVENTORY_INCOMPLETE: ("tcb_inventory_incomplete",),
+    }
+    return mapping[admission.status]

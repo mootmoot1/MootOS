@@ -1,4 +1,4 @@
-"""Focused tests for CB-027B/C TCB enforcement and decision receipts."""
+"""Focused tests for CB-027B/C/D TCB enforcement, receipts, admission."""
 
 import dataclasses
 
@@ -8,17 +8,27 @@ from backend.continuous_builder.trusted_policy import (
     create_mootos_tcb_registry_v1,
 )
 from backend.continuous_builder.trusted_policy_enforcement import (
+    ADMISSION_FORBIDDEN,
+    ADMISSION_IDENTITY_MISMATCH,
+    ADMISSION_INVENTORY_INCOMPLETE,
+    ADMISSION_MALFORMED,
+    ADMISSION_ORDINARY,
+    ADMISSION_REVIEW,
+    ADMISSION_STALE_RECEIPT,
     AUTHORITY_FLAGS,
     OUTCOME_FORBIDDEN,
     OUTCOME_MALFORMED,
     OUTCOME_ORDINARY,
     OUTCOME_REVIEW,
     TCBMatchRecord,
+    TrustedPolicyAdmission,
     TrustedPolicyDecision,
     TrustedPolicyDecisionReceipt,
     TrustedPolicyEnforcementError,
+    admit_changed_paths_against_tcb,
     create_trusted_policy_decision_receipt,
     evaluate_changed_paths_against_tcb,
+    tcb_failure_codes_for_admission,
 )
 
 
@@ -550,3 +560,153 @@ def test_receipt_binds_candidate_and_request_digests():
     assert receipt.outcome == OUTCOME_FORBIDDEN
     for flag in AUTHORITY_FLAGS:
         assert getattr(receipt, flag) is False
+
+
+# --- CB-027D admission ------------------------------------------------------
+
+
+def test_admission_ordinary_continues():
+    admission = admit_changed_paths_against_tcb(
+        ("backend/memory.py",),
+        candidate_digest="aa" * 32,
+        worker_request_digest="bb" * 32,
+        inventory_sha256="cc" * 32,
+    )
+    assert admission.status == ADMISSION_ORDINARY
+    assert admission.allows_continuation is True
+    assert admission.authorized is False
+    assert tcb_failure_codes_for_admission(admission) == ()
+    for flag in AUTHORITY_FLAGS:
+        assert getattr(admission, flag) is False
+
+
+def test_admission_verifier_core_requires_review():
+    admission = admit_changed_paths_against_tcb(
+        ("backend/continuous_builder/verifier_core.py",),
+        candidate_digest="aa" * 32,
+        worker_request_digest="bb" * 32,
+    )
+    assert admission.status == ADMISSION_REVIEW
+    assert admission.allows_continuation is False
+    assert admission.requires_review is True
+    assert admission.authorized is False
+    assert "tcb_protected_change_requires_review" in (
+        tcb_failure_codes_for_admission(admission)
+    )
+
+
+def test_admission_adversarial_verifier_requires_review():
+    admission = admit_changed_paths_against_tcb(
+        ("backend/continuous_builder/adversarial_verifier.py",)
+    )
+    assert admission.status == ADMISSION_REVIEW
+
+
+def test_admission_trusted_policy_forbidden():
+    admission = admit_changed_paths_against_tcb(
+        ("backend/continuous_builder/trusted_policy.py",)
+    )
+    assert admission.status == ADMISSION_FORBIDDEN
+    assert admission.outcome == OUTCOME_FORBIDDEN
+
+
+def test_admission_mixed_protected_wins():
+    admission = admit_changed_paths_against_tcb(
+        (
+            "backend/memory.py",
+            "backend/continuous_builder/verifier_core.py",
+        )
+    )
+    assert admission.status == ADMISSION_REVIEW
+    assert admission.allows_continuation is False
+
+
+def test_admission_rejects_worker_declared_override():
+    admission = admit_changed_paths_against_tcb(
+        ("backend/continuous_builder/verifier_core.py",),
+        worker_declared_paths=("backend/memory.py",),
+        candidate_digest="aa" * 32,
+    )
+    assert admission.status == ADMISSION_IDENTITY_MISMATCH
+    assert admission.allows_continuation is False
+
+
+def test_admission_rejects_stale_receipt_cross_candidate():
+    first = admit_changed_paths_against_tcb(
+        ("backend/memory.py",),
+        candidate_digest="aa" * 32,
+        worker_request_digest="bb" * 32,
+    )
+    prior = create_trusted_policy_decision_receipt(
+        evaluate_changed_paths_against_tcb(("backend/memory.py",)),
+        candidate_digest="aa" * 32,
+        worker_request_digest="bb" * 32,
+    )
+    # Replay prior receipt against a different candidate identity.
+    second = admit_changed_paths_against_tcb(
+        ("backend/memory.py",),
+        candidate_digest="ff" * 32,
+        worker_request_digest="bb" * 32,
+        prior_receipt=prior,
+    )
+    assert second.status == ADMISSION_STALE_RECEIPT
+    assert first.status == ADMISSION_ORDINARY
+
+
+def test_admission_rejects_stale_receipt_different_paths():
+    prior = create_trusted_policy_decision_receipt(
+        evaluate_changed_paths_against_tcb(("backend/memory.py",)),
+        candidate_digest="aa" * 32,
+    )
+    admission = admit_changed_paths_against_tcb(
+        ("frontend/app.js",),
+        candidate_digest="aa" * 32,
+        prior_receipt=prior,
+    )
+    assert admission.status == ADMISSION_STALE_RECEIPT
+
+
+def test_admission_incomplete_inventory_fail_closed():
+    admission = admit_changed_paths_against_tcb(None)
+    assert admission.status == ADMISSION_INVENTORY_INCOMPLETE
+    assert admission.allows_continuation is False
+
+
+def test_admission_malformed_paths_stop():
+    admission = admit_changed_paths_against_tcb(("../etc/passwd",))
+    assert admission.status == ADMISSION_MALFORMED
+
+
+def test_admission_cannot_self_authorize():
+    admission = admit_changed_paths_against_tcb(("backend/memory.py",))
+    with pytest.raises(TrustedPolicyEnforcementError, match="self-authorize"):
+        TrustedPolicyAdmission(
+            status=admission.status,
+            decision_sha256=admission.decision_sha256,
+            receipt_sha256=admission.receipt_sha256,
+            registry_sha256=admission.registry_sha256,
+            outcome=admission.outcome,
+            candidate_digest=admission.candidate_digest,
+            worker_request_digest=admission.worker_request_digest,
+            inventory_sha256=admission.inventory_sha256,
+            changed_paths_sha256=admission.changed_paths_sha256,
+            admission_sha256=admission.admission_sha256,
+            authorized=True,
+            _token=getattr(admission, "_token"),
+        )
+
+
+def test_admission_direct_construction_without_token_rejected():
+    with pytest.raises(TrustedPolicyEnforcementError, match="trusted system"):
+        TrustedPolicyAdmission(
+            status=ADMISSION_ORDINARY,
+            decision_sha256="0" * 64,
+            receipt_sha256="0" * 64,
+            registry_sha256="0" * 64,
+            outcome=OUTCOME_ORDINARY,
+            candidate_digest=None,
+            worker_request_digest=None,
+            inventory_sha256=None,
+            changed_paths_sha256="0" * 64,
+            admission_sha256="0" * 64,
+        )

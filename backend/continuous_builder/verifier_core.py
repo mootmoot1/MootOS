@@ -12,7 +12,9 @@ contract's path boundary, and emits an immutable content-addressed receipt.
 Worker-authored claims are never inputs to the decision.
 
 Behavioral checks such as pytest/flake8 belong to CB-026B.  This module proves
-only deterministic candidate identity and structural compliance.
+only deterministic candidate identity and structural compliance.  CB-027D
+additionally admits reconstructed changed paths against the canonical TCB
+registry before a structural pass can complete.
 """
 
 import hashlib
@@ -21,6 +23,10 @@ import re
 from dataclasses import dataclass, field, replace
 
 from .paths import PathCanonicalizationError, canonicalize_repo_path
+from .trusted_policy_enforcement import (
+    admit_changed_paths_against_tcb,
+    tcb_failure_codes_for_admission,
+)
 from .worker_artifact import ArtifactIntakeResult, WorkerArtifactError
 from .worker_runtime import WorkerExecutionReceipt, WorkerRuntimeError
 
@@ -50,6 +56,13 @@ FAILURE_CODES = frozenset({
     "protected_path_modified",
     "quarantine_payload_digest_mismatch",
     "required_change_missing",
+    "tcb_protected_change_requires_review",
+    "tcb_protected_change_forbidden",
+    "tcb_malformed_change",
+    "tcb_policy_uncertain",
+    "tcb_identity_mismatch",
+    "tcb_stale_receipt",
+    "tcb_inventory_incomplete",
 })
 
 
@@ -541,6 +554,13 @@ def verify_candidate_structure(contract, execution_receipt, intake_result):
         failures.add("required_change_missing")
 
     changed_paths = tuple(sorted(changed))
+    admission = admit_changed_paths_against_tcb(
+        changed_paths,
+        candidate_digest=contract.contract_sha256,
+        worker_request_digest=execution_receipt.request_digest,
+        inventory_sha256=package.inventory_sha256,
+    )
+    failures.update(tcb_failure_codes_for_admission(admission))
     ordered_failures = tuple(sorted(failures))
     values = {
         "contract_sha256": contract.contract_sha256,
