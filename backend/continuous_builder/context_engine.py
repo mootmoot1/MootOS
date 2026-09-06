@@ -1,0 +1,829 @@
+"""Continuous Builder Context Engine v1 (CB-029A–H).
+
+THE SYSTEM OWNS TRUTH. THE WORKER ONLY PROPOSES CHANGES.
+
+Context Engine is a read-only evidence librarian over the System Model map.
+It reconstructs the smallest sufficient context package for a frozen task.
+It is NOT authority, permission, worker, executor, queue, GitHub, router,
+or Task Decomposer.
+
+TRUST REVIEW: descriptive only. Retrieval cannot grant authority or enlarge
+scope/permissions/risk/budget/allowed paths/acceptance/checkpoints.
+Visibility ≠ write permission. Outside TCB while policy independently checks
+permissions. If this module alone would authorize execution/scope/TCB/policy,
+HOLD and expand TCB only via create_mootos_tcb_registry_v1().
+"""
+
+from __future__ import annotations
+
+import ast
+import hashlib
+import json
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .paths import PathCanonicalizationError, canonicalize_repo_path
+from .system_model import (
+    SystemModel,
+    SystemModelError,
+    component_for_path,
+    dependencies_of,
+    dependents_of,
+    files_for_component,
+    impacted_components,
+    model_tcb_classification,
+)
+from .trusted_policy import (
+    AUTHORITY_FLAGS as TCB_AUTHORITY_FLAGS,
+    create_mootos_tcb_registry_v1,
+    is_tcb_path,
+)
+
+
+class ContextEngineError(ValueError):
+    """Raised when Context Engine evidence cannot be produced safely."""
+
+
+ENGINE_VERSION = "cb-context-engine-v1"
+AUTHORITY_FLAGS = TCB_AUTHORITY_FLAGS
+
+# Hard budgets (bytes). Default soft target ~256KiB; hard max documented.
+DEFAULT_PACKAGE_BUDGET_BYTES = 256 * 1024
+HARD_MAX_PACKAGE_BUDGET_BYTES = 1024 * 1024
+DEFAULT_EXCERPT_BUDGET_BYTES = 16 * 1024
+HARD_MAX_EXCERPT_BUDGET_BYTES = 64 * 1024
+MAX_SEED_PATHS = 64
+MAX_ALLOWED_PATHS = 256
+MAX_FORBIDDEN_PATHS = 256
+MAX_COMPONENTS = 64
+MAX_EXCERPTS = 128
+MAX_UNCERTAINTIES = 256
+MAX_OBJECTIVE_BYTES = 4096
+MAX_ACCEPTANCE_BYTES = 8192
+MAX_TEXT_FIELD_BYTES = 2048
+DEFAULT_DEP_DEPTH = 1
+MAX_DEP_DEPTH = 2
+MAX_SUPPLEMENTS_PER_PACKAGE = 8
+MAX_SUPPLEMENT_BUDGET_BYTES = 64 * 1024
+MAX_INTERFACE_SYMBOLS = 64
+MAX_IMPORTS = 128
+MAX_RELATED_TESTS = 32
+MAX_ARCH_DOCS = 16
+AVG_CHARS_PER_TOKEN = 4  # conservative rough estimate only
+
+SELECTION_TAGS = frozenset({
+    "REQUIRED",
+    "SUPPORTING",
+    "POSSIBLE",
+    "OMITTED",
+    "UNKNOWN",
+})
+
+COMPLETENESS_STATES = frozenset({
+    "sufficient",
+    "sufficient_with_uncertainty",
+    "incomplete",
+    "restricted",
+    "conflicting",
+    "unknown",
+})
+
+UNCERTAINTY_KINDS = frozenset({
+    "missing_source",
+    "restricted_secret",
+    "restricted_path",
+    "parse_failure",
+    "non_text",
+    "truncated",
+    "unknown_ownership",
+    "ambiguous_ownership",
+    "budget_exhausted",
+    "critical_missing",
+    "model_uncertainty",
+    "path_rejected",
+    "supplement_denied",
+    "unknown",
+})
+
+SUPPLEMENT_CATEGORIES = frozenset({
+    "file_excerpt",
+    "interface_summary",
+    "component_dependencies",
+    "component_dependents",
+    "related_tests",
+    "architecture_evidence",
+    "tcb_classification",
+})
+
+SOURCE_KINDS = frozenset({
+    "file_excerpt",
+    "interface_summary",
+    "dependency_summary",
+    "test_ref",
+    "architecture_evidence",
+    "tcb_warning",
+    "task_contract",
+    "authority_non_goals",
+    "acceptance",
+    "editable_path",
+})
+
+TEST_RELATION_KINDS = frozenset({
+    "related",
+    "required",
+    "probable",
+    "unknown",
+})
+
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+_TASK_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
+_COMPONENT_ID = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
+
+# Fail-closed secret / credential path policy (names + suffixes).
+_SECRET_FILE_NAMES = frozenset({
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".env.development",
+    ".env.staging",
+    ".env.test",
+    "credentials.json",
+    "credentials.yml",
+    "credentials.yaml",
+    "secrets.json",
+    "secrets.yml",
+    "secrets.yaml",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "authorized_keys",
+    "known_hosts",
+    "cookies",
+    "cookies.txt",
+    "cookie.jar",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    "aws_credentials",
+    "gcloud_credentials.json",
+    "service_account.json",
+})
+_SECRET_NAME_PREFIXES = (".env",)
+_SECRET_NAME_SUFFIXES = (
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".jks",
+    ".kdbx",
+)
+_SECRET_PATH_SEGMENTS = frozenset({
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".azure",
+    ".kube",
+    "credentials",
+    "private_keys",
+    "private-keys",
+})
+_SECRET_CONTENT_MARKERS = (
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "-----BEGIN OPENSSH PRIVATE KEY-----",
+    "-----BEGIN EC PRIVATE KEY-----",
+    "-----BEGIN PRIVATE KEY-----",
+    "-----BEGIN CERTIFICATE-----",
+    "AWS_SECRET_ACCESS_KEY",
+    "Authorization: Bearer ",
+    "AUTHORIZATION: Bearer ",
+)
+
+_REQUEST_TOKEN = object()
+_SCOPE_TOKEN = object()
+_BUDGET_TOKEN = object()
+_SOURCE_TOKEN = object()
+_EXCERPT_TOKEN = object()
+_DEP_TOKEN = object()
+_INTERFACE_TOKEN = object()
+_SELECTION_TOKEN = object()
+_UNCERTAINTY_TOKEN = object()
+_PACKAGE_TOKEN = object()
+_RECEIPT_TOKEN = object()
+_SUPP_REQ_TOKEN = object()
+_SUPP_TOKEN = object()
+
+
+def _canonical(value):
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _digest(value):
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    return hashlib.sha256(value).hexdigest()
+
+
+def _require_sha256(value, label):
+    if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+        raise ContextEngineError(f"{label} is malformed")
+
+
+def _require_base_sha(value, label="base_sha"):
+    if not isinstance(value, str) or not (
+        _SHA256.fullmatch(value) or _GIT_SHA.fullmatch(value)
+    ):
+        raise ContextEngineError(f"{label} is malformed")
+
+
+def _require_no_authority(obj):
+    for name in AUTHORITY_FLAGS:
+        if getattr(obj, name, False) is not False:
+            raise ContextEngineError("context engine cannot claim authority")
+
+
+def _utf8_len(value):
+    if not isinstance(value, str):
+        raise ContextEngineError("text field malformed")
+    try:
+        return len(value.encode("utf-8"))
+    except UnicodeEncodeError as error:
+        raise ContextEngineError("text field is not utf-8 safe") from error
+
+
+def _require_text(value, label, max_bytes):
+    if not isinstance(value, str) or not value:
+        raise ContextEngineError(f"{label} is malformed")
+    if _utf8_len(value) > max_bytes:
+        raise ContextEngineError(f"{label} exceeds byte bound")
+    return value
+
+
+def _canonical_repo_path(value, label="path"):
+    try:
+        return canonicalize_repo_path(value)
+    except PathCanonicalizationError as error:
+        raise ContextEngineError(f"{label} is unsafe: {error}") from error
+
+
+def _sorted_unique_paths(values, label, max_count):
+    if type(values) not in (list, tuple):
+        raise ContextEngineError(f"{label} malformed")
+    if len(values) > max_count:
+        raise ContextEngineError(f"{label} exceeds bound")
+    out = []
+    seen = set()
+    for item in values:
+        path = _canonical_repo_path(item, label)
+        if path not in seen:
+            seen.add(path)
+            out.append(path)
+    return tuple(sorted(out))
+
+
+def _sorted_unique_components(values, label, max_count):
+    if type(values) not in (list, tuple):
+        raise ContextEngineError(f"{label} malformed")
+    if len(values) > max_count:
+        raise ContextEngineError(f"{label} exceeds bound")
+    out = []
+    seen = set()
+    for item in values:
+        if not isinstance(item, str) or _COMPONENT_ID.fullmatch(item) is None:
+            raise ContextEngineError(f"{label} component id malformed")
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return tuple(sorted(out))
+
+
+def _zero_authority_dict():
+    return {name: False for name in AUTHORITY_FLAGS}
+
+
+def _authority_body():
+    body = {}
+    for name in AUTHORITY_FLAGS:
+        body[name] = False
+    return body
+
+
+# ---------------------------------------------------------------------------
+# CB-029A — frozen contracts
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ContextBudget:
+    """Bounded budgets for package / excerpt / depth / counts."""
+
+    package_budget_bytes: int
+    excerpt_budget_bytes: int
+    max_excerpts: int
+    max_components: int
+    max_seed_paths: int
+    dep_depth: int
+    budget_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _BUDGET_TOKEN:
+            raise ContextEngineError(
+                "context budget requires trusted system construction"
+            )
+        for name, value, lo, hi in (
+            ("package_budget_bytes", self.package_budget_bytes, 1024,
+             HARD_MAX_PACKAGE_BUDGET_BYTES),
+            ("excerpt_budget_bytes", self.excerpt_budget_bytes, 256,
+             HARD_MAX_EXCERPT_BUDGET_BYTES),
+            ("max_excerpts", self.max_excerpts, 1, MAX_EXCERPTS),
+            ("max_components", self.max_components, 1, MAX_COMPONENTS),
+            ("max_seed_paths", self.max_seed_paths, 1, MAX_SEED_PATHS),
+            ("dep_depth", self.dep_depth, 0, MAX_DEP_DEPTH),
+        ):
+            if type(value) is not int or value < lo or value > hi:
+                raise ContextEngineError(f"{name} out of bounds")
+        _require_no_authority(self)
+        _require_sha256(self.budget_sha256, "budget digest")
+        if self.budget_sha256 != _digest(self._payload()):
+            raise ContextEngineError("budget digest mismatch")
+
+    def _body(self):
+        body = {
+            "dep_depth": self.dep_depth,
+            "excerpt_budget_bytes": self.excerpt_budget_bytes,
+            "max_components": self.max_components,
+            "max_excerpts": self.max_excerpts,
+            "max_seed_paths": self.max_seed_paths,
+            "package_budget_bytes": self.package_budget_bytes,
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["budget_sha256"] = self.budget_sha256
+        return body
+
+
+def seal_context_budget(
+    *,
+    package_budget_bytes=DEFAULT_PACKAGE_BUDGET_BYTES,
+    excerpt_budget_bytes=DEFAULT_EXCERPT_BUDGET_BYTES,
+    max_excerpts=MAX_EXCERPTS,
+    max_components=MAX_COMPONENTS,
+    max_seed_paths=MAX_SEED_PATHS,
+    dep_depth=DEFAULT_DEP_DEPTH,
+):
+    values = {
+        "package_budget_bytes": package_budget_bytes,
+        "excerpt_budget_bytes": excerpt_budget_bytes,
+        "max_excerpts": max_excerpts,
+        "max_components": max_components,
+        "max_seed_paths": max_seed_paths,
+        "dep_depth": dep_depth,
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(ContextBudget)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return ContextBudget(
+        **values,
+        budget_sha256=_digest(provisional._payload()),
+        _token=_BUDGET_TOKEN,
+    )
+
+
+@dataclass(frozen=True)
+class ContextScope:
+    """Declared scope — intent only; not write permission."""
+
+    allowed_paths: tuple
+    forbidden_paths: tuple
+    seed_paths: tuple
+    components: tuple
+    scope_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _SCOPE_TOKEN:
+            raise ContextEngineError(
+                "context scope requires trusted system construction"
+            )
+        if type(self.allowed_paths) is not tuple:
+            raise ContextEngineError("allowed_paths malformed")
+        if type(self.forbidden_paths) is not tuple:
+            raise ContextEngineError("forbidden_paths malformed")
+        if type(self.seed_paths) is not tuple:
+            raise ContextEngineError("seed_paths malformed")
+        if type(self.components) is not tuple:
+            raise ContextEngineError("components malformed")
+        if len(self.allowed_paths) > MAX_ALLOWED_PATHS:
+            raise ContextEngineError("allowed_paths exceed bound")
+        if len(self.forbidden_paths) > MAX_FORBIDDEN_PATHS:
+            raise ContextEngineError("forbidden_paths exceed bound")
+        if len(self.seed_paths) > MAX_SEED_PATHS:
+            raise ContextEngineError("seed_paths exceed bound")
+        if len(self.components) > MAX_COMPONENTS:
+            raise ContextEngineError("components exceed bound")
+        if self.allowed_paths != tuple(sorted(set(self.allowed_paths))):
+            raise ContextEngineError("allowed_paths not canonical")
+        if self.forbidden_paths != tuple(sorted(set(self.forbidden_paths))):
+            raise ContextEngineError("forbidden_paths not canonical")
+        if self.seed_paths != tuple(sorted(set(self.seed_paths))):
+            raise ContextEngineError("seed_paths not canonical")
+        if self.components != tuple(sorted(set(self.components))):
+            raise ContextEngineError("components not canonical")
+        overlap = set(self.allowed_paths) & set(self.forbidden_paths)
+        if overlap:
+            raise ContextEngineError("allowed/forbidden path conflict")
+        for path in self.seed_paths:
+            if path in self.forbidden_paths:
+                raise ContextEngineError("seed path is forbidden")
+        _require_no_authority(self)
+        _require_sha256(self.scope_sha256, "scope digest")
+        if self.scope_sha256 != _digest(self._payload()):
+            raise ContextEngineError("scope digest mismatch")
+
+    def _body(self):
+        body = {
+            "allowed_paths": list(self.allowed_paths),
+            "components": list(self.components),
+            "forbidden_paths": list(self.forbidden_paths),
+            "seed_paths": list(self.seed_paths),
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["scope_sha256"] = self.scope_sha256
+        return body
+
+
+def seal_context_scope(
+    *,
+    allowed_paths=(),
+    forbidden_paths=(),
+    seed_paths=(),
+    components=(),
+):
+    allowed = _sorted_unique_paths(
+        allowed_paths, "allowed_paths", MAX_ALLOWED_PATHS
+    )
+    forbidden = _sorted_unique_paths(
+        forbidden_paths, "forbidden_paths", MAX_FORBIDDEN_PATHS
+    )
+    seeds = _sorted_unique_paths(seed_paths, "seed_paths", MAX_SEED_PATHS)
+    comps = _sorted_unique_components(
+        components, "components", MAX_COMPONENTS
+    )
+    values = {
+        "allowed_paths": allowed,
+        "forbidden_paths": forbidden,
+        "seed_paths": seeds,
+        "components": comps,
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(ContextScope)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return ContextScope(
+        **values,
+        scope_sha256=_digest(provisional._payload()),
+        _token=_SCOPE_TOKEN,
+    )
+
+
+@dataclass(frozen=True)
+class ContextTaskRequest:
+    """Frozen task intent for context assembly — NOT permission.
+
+    Binds task_id, base_sha, objective, acceptance, scope, budget.
+    Zero authority. No timestamps in digests. No secrets/network/creds.
+    """
+
+    engine_version: str
+    task_id: str
+    base_sha: str
+    objective: str
+    acceptance: tuple
+    scope: ContextScope
+    budget: ContextBudget
+    non_goals: tuple
+    request_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _REQUEST_TOKEN:
+            raise ContextEngineError(
+                "context task request requires trusted system construction"
+            )
+        if self.engine_version != ENGINE_VERSION:
+            raise ContextEngineError("engine version unsupported")
+        if not isinstance(self.task_id, str) or (
+            _TASK_ID.fullmatch(self.task_id) is None
+        ):
+            raise ContextEngineError("task_id malformed")
+        _require_base_sha(self.base_sha)
+        _require_text(self.objective, "objective", MAX_OBJECTIVE_BYTES)
+        if type(self.acceptance) is not tuple:
+            raise ContextEngineError("acceptance malformed")
+        if len(self.acceptance) > 64:
+            raise ContextEngineError("acceptance exceeds bound")
+        total_acc = 0
+        for item in self.acceptance:
+            _require_text(item, "acceptance item", MAX_TEXT_FIELD_BYTES)
+            total_acc += _utf8_len(item)
+        if total_acc > MAX_ACCEPTANCE_BYTES:
+            raise ContextEngineError("acceptance exceeds byte bound")
+        if type(self.non_goals) is not tuple or len(self.non_goals) > 64:
+            raise ContextEngineError("non_goals malformed")
+        for item in self.non_goals:
+            _require_text(item, "non_goal", MAX_TEXT_FIELD_BYTES)
+        if not isinstance(self.scope, ContextScope):
+            raise ContextEngineError("scope invalid")
+        if not isinstance(self.budget, ContextBudget):
+            raise ContextEngineError("budget invalid")
+        if len(self.scope.seed_paths) > self.budget.max_seed_paths:
+            raise ContextEngineError("seed paths exceed budget bound")
+        if len(self.scope.components) > self.budget.max_components:
+            raise ContextEngineError("components exceed budget bound")
+        _require_no_authority(self)
+        _require_sha256(self.request_sha256, "request digest")
+        if self.request_sha256 != _digest(self._payload()):
+            raise ContextEngineError("request digest mismatch")
+
+    def _body(self):
+        body = {
+            "acceptance": list(self.acceptance),
+            "base_sha": self.base_sha,
+            "budget": self.budget.to_dict(),
+            "engine_version": ENGINE_VERSION,
+            "non_goals": list(self.non_goals),
+            "objective": self.objective,
+            "scope": self.scope.to_dict(),
+            "task_id": self.task_id,
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["request_sha256"] = self.request_sha256
+        return body
+
+    def canonical_bytes(self):
+        return _canonical(self.to_dict())
+
+
+def seal_context_task_request(
+    *,
+    task_id,
+    base_sha,
+    objective,
+    acceptance=(),
+    allowed_paths=(),
+    forbidden_paths=(),
+    seed_paths=(),
+    components=(),
+    non_goals=(),
+    budget=None,
+):
+    """Seal a frozen ContextTaskRequest. Request = intent, not permission."""
+    scope = seal_context_scope(
+        allowed_paths=allowed_paths,
+        forbidden_paths=forbidden_paths,
+        seed_paths=seed_paths,
+        components=components,
+    )
+    if budget is None:
+        budget = seal_context_budget()
+    elif not isinstance(budget, ContextBudget):
+        raise ContextEngineError("budget invalid")
+    if type(acceptance) not in (list, tuple):
+        raise ContextEngineError("acceptance malformed")
+    if type(non_goals) not in (list, tuple):
+        raise ContextEngineError("non_goals malformed")
+    values = {
+        "engine_version": ENGINE_VERSION,
+        "task_id": task_id,
+        "base_sha": base_sha,
+        "objective": objective,
+        "acceptance": tuple(acceptance),
+        "scope": scope,
+        "budget": budget,
+        "non_goals": tuple(non_goals),
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(ContextTaskRequest)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return ContextTaskRequest(
+        **values,
+        request_sha256=_digest(provisional._payload()),
+        _token=_REQUEST_TOKEN,
+    )
+
+
+@dataclass(frozen=True)
+class ContextUncertainty:
+    """Descriptive uncertainty — never invents certainty."""
+
+    kind: str
+    subject: str
+    detail_code: str
+    uncertainty_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _UNCERTAINTY_TOKEN:
+            raise ContextEngineError(
+                "uncertainty requires trusted system construction"
+            )
+        if self.kind not in UNCERTAINTY_KINDS:
+            raise ContextEngineError("uncertainty kind unsupported")
+        _require_text(self.subject, "subject", MAX_TEXT_FIELD_BYTES)
+        _require_text(self.detail_code, "detail_code", 128)
+        _require_no_authority(self)
+        _require_sha256(self.uncertainty_sha256, "uncertainty digest")
+        if self.uncertainty_sha256 != _digest(self._payload()):
+            raise ContextEngineError("uncertainty digest mismatch")
+
+    def _body(self):
+        body = {
+            "detail_code": self.detail_code,
+            "kind": self.kind,
+            "subject": self.subject,
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["uncertainty_sha256"] = self.uncertainty_sha256
+        return body
+
+
+def seal_uncertainty(*, kind, subject, detail_code):
+    values = {
+        "kind": kind,
+        "subject": subject,
+        "detail_code": detail_code,
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(ContextUncertainty)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return ContextUncertainty(
+        **values,
+        uncertainty_sha256=_digest(provisional._payload()),
+        _token=_UNCERTAINTY_TOKEN,
+    )
+
+
+@dataclass(frozen=True)
+class SourceRef:
+    """Provenance-bearing reference to included evidence."""
+
+    kind: str
+    path: str | None
+    selection_tag: str
+    digest: str
+    region: tuple | None
+    source_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _SOURCE_TOKEN:
+            raise ContextEngineError(
+                "source ref requires trusted system construction"
+            )
+        if self.kind not in SOURCE_KINDS:
+            raise ContextEngineError("source kind unsupported")
+        if self.selection_tag not in SELECTION_TAGS:
+            raise ContextEngineError("selection tag unsupported")
+        if self.path is not None:
+            _canonical_repo_path(self.path, "source path")
+        _require_sha256(self.digest, "source content digest")
+        if self.region is not None:
+            if (
+                type(self.region) is not tuple
+                or len(self.region) != 2
+                or type(self.region[0]) is not int
+                or type(self.region[1]) is not int
+                or self.region[0] < 1
+                or self.region[1] < self.region[0]
+            ):
+                raise ContextEngineError("region malformed")
+        _require_no_authority(self)
+        _require_sha256(self.source_sha256, "source ref digest")
+        if self.source_sha256 != _digest(self._payload()):
+            raise ContextEngineError("source ref digest mismatch")
+
+    def _body(self):
+        body = {
+            "digest": self.digest,
+            "kind": self.kind,
+            "path": self.path,
+            "region": list(self.region) if self.region is not None else None,
+            "selection_tag": self.selection_tag,
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["source_sha256"] = self.source_sha256
+        return body
+
+
+def seal_source_ref(*, kind, path, selection_tag, digest, region=None):
+    canon_path = None if path is None else _canonical_repo_path(path)
+    values = {
+        "kind": kind,
+        "path": canon_path,
+        "selection_tag": selection_tag,
+        "digest": digest,
+        "region": None if region is None else tuple(region),
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(SourceRef)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return SourceRef(
+        **values,
+        source_sha256=_digest(provisional._payload()),
+        _token=_SOURCE_TOKEN,
+    )
+
+
+def context_engine_is_descriptive_only():
+    """TRUST REVIEW helper: True — engine has no enforcement authority."""
+    return True
+
+
+def context_request_grants_write_permission(request):
+    """Visibility/intent ≠ write permission. Always False."""
+    if not isinstance(request, ContextTaskRequest):
+        raise ContextEngineError("request invalid")
+    return False
