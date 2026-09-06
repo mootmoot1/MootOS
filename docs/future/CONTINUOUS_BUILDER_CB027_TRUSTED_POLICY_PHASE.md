@@ -16,7 +16,6 @@ which repository-relative paths are Trusted Computing Base (TCB). This phase:
 3. Admits authoritative inventories inside `verify_candidate_structure`
 4. Proves adversarial bypasses fail closed
 5. Integrates Cases A–H across real in-repo components
-6. Protects the enforcement implementation itself inside the canonical TCB
 
 ## Architecture
 
@@ -76,9 +75,10 @@ Path count: **12**. Registry digest (`registry_sha256`):
 | `backend/continuous_builder/trusted_policy.py` | cb_trusted_policy | trusted_policy | human_only |
 | `backend/continuous_builder/trusted_policy_enforcement.py` | cb_trusted_policy | trusted_policy | human_only |
 
-The enforcement module is intentionally `human_only`: code that decides
-whether a proposed change is protected must not be able to classify its own
-modification as an ordinary worker change.
+The enforcement engine is therefore protected by the same canonical policy it
+uses to classify worker-proposed changes. A proposal that modifies
+`trusted_policy_enforcement.py` is `protected_change_forbidden`, never
+`ordinary_change`.
 
 ## Decision states
 
@@ -118,11 +118,9 @@ mods, unknown policy injection, malformed encoding, oversized set,
 duplicate ownership at registry, authority flags true, omission cannot pass,
 uncertainty ≠ pass. **No bypass became ordinary** in the suite.
 
-Phase-closure coverage additionally proves
-`backend/continuous_builder/trusted_policy_enforcement.py` is in the canonical
-TCB under `cb_trusted_policy` / `trusted_policy` / `human_only`, and that
-asking the enforcement layer to classify a change to its own module yields
-`protected_change_forbidden`, never `ordinary_change`.
+Closure coverage additionally proves `trusted_policy_enforcement.py` is in the
+canonical TCB, is `human_only`, and cannot classify its own proposed
+modification as ordinary.
 
 ## Integration proof (CB-027F Cases A–H)
 
