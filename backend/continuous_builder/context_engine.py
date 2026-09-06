@@ -1241,3 +1241,548 @@ def extract_excerpt(
         restriction=None,
         provenance="trusted_extraction",
     )
+
+
+
+# ---------------------------------------------------------------------------
+# CB-029C — deterministic planner (System Model only; no LLM)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SelectionItem:
+    """One planned evidence item with selection tag."""
+
+    path: str | None
+    component_id: str | None
+    selection_tag: str
+    reason_code: str
+    editable: bool
+    item_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _SELECTION_TOKEN:
+            raise ContextEngineError(
+                "selection item requires trusted system construction"
+            )
+        if self.selection_tag not in SELECTION_TAGS:
+            raise ContextEngineError("selection tag unsupported")
+        if self.path is not None:
+            _canonical_repo_path(self.path)
+        if self.component_id is not None:
+            if _COMPONENT_ID.fullmatch(self.component_id) is None:
+                raise ContextEngineError("component id malformed")
+        _require_text(self.reason_code, "reason_code", 128)
+        if type(self.editable) is not bool:
+            raise ContextEngineError("editable flag malformed")
+        _require_no_authority(self)
+        _require_sha256(self.item_sha256, "selection item digest")
+        if self.item_sha256 != _digest(self._payload()):
+            raise ContextEngineError("selection item digest mismatch")
+
+    def _body(self):
+        body = {
+            "component_id": self.component_id,
+            "editable": self.editable,
+            "path": self.path,
+            "reason_code": self.reason_code,
+            "selection_tag": self.selection_tag,
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["item_sha256"] = self.item_sha256
+        return body
+
+
+def _seal_selection_item(
+    *, path, component_id, selection_tag, reason_code, editable
+):
+    values = {
+        "path": path,
+        "component_id": component_id,
+        "selection_tag": selection_tag,
+        "reason_code": reason_code,
+        "editable": editable,
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(SelectionItem)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return SelectionItem(
+        **values,
+        item_sha256=_digest(provisional._payload()),
+        _token=_SELECTION_TOKEN,
+    )
+
+
+@dataclass(frozen=True)
+class ContextSelectionPlan:
+    """Deterministic selection plan — visibility ≠ edit permission."""
+
+    request_sha256: str
+    model_sha256: str
+    base_sha: str
+    items: tuple
+    uncertainties: tuple
+    plan_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _SELECTION_TOKEN:
+            raise ContextEngineError(
+                "selection plan requires trusted system construction"
+            )
+        _require_sha256(self.request_sha256, "request digest")
+        _require_sha256(self.model_sha256, "model digest")
+        _require_base_sha(self.base_sha)
+        if type(self.items) is not tuple or len(self.items) > MAX_EXCERPTS * 2:
+            raise ContextEngineError("selection items malformed")
+        if any(not isinstance(item, SelectionItem) for item in self.items):
+            raise ContextEngineError("selection items invalid")
+        if type(self.uncertainties) is not tuple or (
+            len(self.uncertainties) > MAX_UNCERTAINTIES
+        ):
+            raise ContextEngineError("plan uncertainties malformed")
+        _require_no_authority(self)
+        _require_sha256(self.plan_sha256, "plan digest")
+        if self.plan_sha256 != _digest(self._payload()):
+            raise ContextEngineError("plan digest mismatch")
+
+    def _body(self):
+        body = {
+            "base_sha": self.base_sha,
+            "items": [item.to_dict() for item in self.items],
+            "model_sha256": self.model_sha256,
+            "request_sha256": self.request_sha256,
+            "uncertainties": [item.to_dict() for item in self.uncertainties],
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["plan_sha256"] = self.plan_sha256
+        return body
+
+
+def _seal_selection_plan(
+    *, request_sha256, model_sha256, base_sha, items, uncertainties
+):
+    ordered_items = tuple(
+        sorted(
+            items,
+            key=lambda item: (
+                item.selection_tag,
+                item.path or "",
+                item.component_id or "",
+                item.reason_code,
+            ),
+        )
+    )
+    ordered_unc = tuple(
+        sorted(
+            uncertainties,
+            key=lambda item: (item.kind, item.subject, item.detail_code),
+        )
+    )
+    values = {
+        "request_sha256": request_sha256,
+        "model_sha256": model_sha256,
+        "base_sha": base_sha,
+        "items": ordered_items,
+        "uncertainties": ordered_unc,
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(ContextSelectionPlan)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return ContextSelectionPlan(
+        **values,
+        plan_sha256=_digest(provisional._payload()),
+        _token=_SELECTION_TOKEN,
+    )
+
+
+def _path_is_editable(path, scope):
+    """Visibility ≠ edit. Editable only if in allowed and not forbidden."""
+    if path in scope.forbidden_paths:
+        return False
+    if scope.allowed_paths and path not in scope.allowed_paths:
+        return False
+    if not scope.allowed_paths:
+        # No allowed list declared — nothing is editable via context alone.
+        return False
+    return True
+
+
+def _inventory_paths(model):
+    return {item.path for item in model.inventory.files}
+
+
+def _expand_component_neighborhood(model, seed_components, depth, budget_max):
+    """Bounded BFS over dependency/dependent edges. depth <= MAX_DEP_DEPTH."""
+    selected = {}
+    for cid in seed_components:
+        selected[cid] = "REQUIRED"
+    frontier = list(seed_components)
+    for _level in range(max(depth, 0)):
+        nxt = []
+        for cid in frontier:
+            if len(selected) >= budget_max:
+                return selected, True
+            for edge in dependencies_of(model, cid):
+                tgt = edge.get("target_component_id")
+                if tgt and tgt not in selected:
+                    selected[tgt] = "SUPPORTING"
+                    nxt.append(tgt)
+                elif edge.get("kind") in (
+                    "unresolved_import", "ambiguous_import"
+                ):
+                    pass
+            for edge in dependents_of(model, cid):
+                src = edge.get("source_component_id")
+                if src and src not in selected:
+                    selected[src] = "SUPPORTING"
+                    nxt.append(src)
+            if len(selected) >= budget_max:
+                return selected, True
+        frontier = nxt
+        if not frontier:
+            break
+    truncated = len(selected) >= budget_max
+    return selected, truncated
+
+
+def plan_context_selection(request, model):
+    """Deterministic planner using System Model only (no LLM).
+
+    Signals: allowed/seed, ownership, deps/dependents, impact, TCB, tests,
+    arch docs when deterministic. Tags REQUIRED/SUPPORTING/POSSIBLE/OMITTED/
+    UNKNOWN. Conservative; no unbounded recursion. Visibility ≠ edit.
+    """
+    if not isinstance(request, ContextTaskRequest):
+        raise ContextEngineError("request invalid")
+    if not isinstance(model, SystemModel):
+        raise ContextEngineError("model invalid")
+    if request.base_sha != model.base_sha:
+        raise ContextEngineError("request/model base_sha mismatch")
+
+    uncertainties = []
+    items = []
+    seen_paths = set()
+    inventory = _inventory_paths(model)
+    scope = request.scope
+    budget = request.budget
+
+    # Seed paths → REQUIRED
+    for path in scope.seed_paths:
+        if path in scope.forbidden_paths:
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="restricted_path",
+                    subject=path,
+                    detail_code="seed_forbidden",
+                )
+            )
+            continue
+        if path not in inventory:
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="missing_source",
+                    subject=path,
+                    detail_code="seed_not_in_model",
+                )
+            )
+            items.append(
+                _seal_selection_item(
+                    path=path,
+                    component_id=None,
+                    selection_tag="UNKNOWN",
+                    reason_code="seed_missing",
+                    editable=False,
+                )
+            )
+            continue
+        cid = component_for_path(model, path)
+        if cid in ("UNKNOWN", "AMBIGUOUS", "EXCLUDED"):
+            tag = "UNKNOWN" if cid == "UNKNOWN" else "POSSIBLE"
+            uncertainties.append(
+                seal_uncertainty(
+                    kind=(
+                        "ambiguous_ownership"
+                        if cid == "AMBIGUOUS"
+                        else "unknown_ownership"
+                    ),
+                    subject=path,
+                    detail_code=str(cid).lower(),
+                )
+            )
+            comp = None if cid in ("UNKNOWN", "EXCLUDED") else None
+        else:
+            tag = "REQUIRED"
+            comp = cid
+        secret = classify_secret_path(path)
+        if secret is not None:
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="restricted_secret",
+                    subject=path,
+                    detail_code=secret,
+                )
+            )
+            tag = "OMITTED"
+            editable = False
+        else:
+            editable = _path_is_editable(path, scope)
+        items.append(
+            _seal_selection_item(
+                path=path,
+                component_id=comp,
+                selection_tag=tag,
+                reason_code="seed_path",
+                editable=editable,
+            )
+        )
+        seen_paths.add(path)
+
+    # Allowed paths not already seeded → REQUIRED (declared editable intent)
+    for path in scope.allowed_paths:
+        if path in seen_paths:
+            continue
+        if path not in inventory:
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="missing_source",
+                    subject=path,
+                    detail_code="allowed_not_in_model",
+                )
+            )
+            continue
+        if classify_secret_path(path) is not None:
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="restricted_secret",
+                    subject=path,
+                    detail_code=classify_secret_path(path),
+                )
+            )
+            items.append(
+                _seal_selection_item(
+                    path=path,
+                    component_id=None,
+                    selection_tag="OMITTED",
+                    reason_code="secret_excluded",
+                    editable=False,
+                )
+            )
+            seen_paths.add(path)
+            continue
+        cid = component_for_path(model, path)
+        comp = cid if cid not in ("UNKNOWN", "AMBIGUOUS", "EXCLUDED") else None
+        items.append(
+            _seal_selection_item(
+                path=path,
+                component_id=comp,
+                selection_tag="REQUIRED",
+                reason_code="allowed_path",
+                editable=_path_is_editable(path, scope),
+            )
+        )
+        seen_paths.add(path)
+
+    # Seed components from request + ownership of seeds
+    seed_components = list(scope.components)
+    for item in items:
+        if item.component_id and item.component_id not in seed_components:
+            seed_components.append(item.component_id)
+    seed_components = seed_components[: budget.max_components]
+
+    neighborhood, neigh_trunc = _expand_component_neighborhood(
+        model,
+        seed_components,
+        budget.dep_depth,
+        budget.max_components,
+    )
+    if neigh_trunc:
+        uncertainties.append(
+            seal_uncertainty(
+                kind="budget_exhausted",
+                subject="components",
+                detail_code="component_bound",
+            )
+        )
+
+    # Impact from seed+allowed paths
+    impact_paths = tuple(
+        sorted(set(list(scope.seed_paths) + list(scope.allowed_paths)))
+    )[:256]
+    if impact_paths:
+        impact = impacted_components(model, impact_paths)
+        for cid in impact.impacted_components:
+            if cid not in neighborhood:
+                if len(neighborhood) < budget.max_components:
+                    neighborhood[cid] = "POSSIBLE"
+        for subject in impact.uncertain_subjects:
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="model_uncertainty",
+                    subject=str(subject)[:200],
+                    detail_code="impact_uncertain",
+                )
+            )
+
+    # Collect files from neighborhood components (bounded)
+    path_budget = budget.max_excerpts
+    for cid, tag in sorted(neighborhood.items()):
+        files = files_for_component(model, cid)
+        # Prefer module files; include tests/docs as SUPPORTING/POSSIBLE
+        for fpath in files:
+            if len(seen_paths) >= path_budget:
+                uncertainties.append(
+                    seal_uncertainty(
+                        kind="budget_exhausted",
+                        subject="excerpts",
+                        detail_code="excerpt_bound",
+                    )
+                )
+                break
+            if fpath in seen_paths:
+                continue
+            if fpath in scope.forbidden_paths:
+                items.append(
+                    _seal_selection_item(
+                        path=fpath,
+                        component_id=cid,
+                        selection_tag="OMITTED",
+                        reason_code="forbidden",
+                        editable=False,
+                    )
+                )
+                seen_paths.add(fpath)
+                continue
+            if classify_secret_path(fpath) is not None:
+                items.append(
+                    _seal_selection_item(
+                        path=fpath,
+                        component_id=cid,
+                        selection_tag="OMITTED",
+                        reason_code="secret_excluded",
+                        editable=False,
+                    )
+                )
+                seen_paths.add(fpath)
+                continue
+            name = fpath.split("/")[-1]
+            is_test = (
+                fpath.startswith("tests/")
+                or name.startswith("test_")
+                or name.endswith("_test.py")
+            )
+            is_doc = fpath.startswith("docs/") or name.endswith(".md")
+            if tag == "REQUIRED" and not is_test and not is_doc:
+                sel = "REQUIRED"
+                reason = "owned_component"
+            elif is_test:
+                sel = "SUPPORTING"
+                reason = "related_test"
+            elif is_doc:
+                # Architecture docs when under docs/future/architecture or ADR-ish
+                if (
+                    "/architecture/" in fpath
+                    or "/adr/" in fpath.lower()
+                    or "ARCHITECTURE" in name.upper()
+                    or name.upper().startswith("ADR")
+                ):
+                    sel = "SUPPORTING"
+                    reason = "architecture_doc"
+                else:
+                    sel = "POSSIBLE"
+                    reason = "documentation"
+            else:
+                sel = "SUPPORTING" if tag == "SUPPORTING" else "POSSIBLE"
+                reason = "neighborhood"
+            # TCB warning signal — still visible descriptively, not editable
+            # via context alone unless allowed.
+            editable = _path_is_editable(fpath, scope)
+            if is_tcb_path(fpath):
+                reason = "tcb_path"
+                # Still may be SUPPORTING/REQUIRED for visibility.
+            items.append(
+                _seal_selection_item(
+                    path=fpath,
+                    component_id=cid,
+                    selection_tag=sel,
+                    reason_code=reason,
+                    editable=editable,
+                )
+            )
+            seen_paths.add(fpath)
+        if len(seen_paths) >= path_budget:
+            break
+
+    # Explicit component-only entries for seed components without files listed
+    for cid in seed_components:
+        if any(item.component_id == cid for item in items):
+            continue
+        items.append(
+            _seal_selection_item(
+                path=None,
+                component_id=cid,
+                selection_tag="REQUIRED",
+                reason_code="seed_component",
+                editable=False,
+            )
+        )
+
+    if len(uncertainties) > MAX_UNCERTAINTIES:
+        uncertainties = uncertainties[:MAX_UNCERTAINTIES]
+
+    return _seal_selection_plan(
+        request_sha256=request.request_sha256,
+        model_sha256=model.model_sha256,
+        base_sha=request.base_sha,
+        items=items,
+        uncertainties=uncertainties,
+    )
+
+
+def selection_grants_edit_permission(plan, path):
+    """Explicit proof: visibility on plan ≠ write permission."""
+    if not isinstance(plan, ContextSelectionPlan):
+        raise ContextEngineError("plan invalid")
+    try:
+        canon = _canonical_repo_path(path)
+    except ContextEngineError:
+        return False
+    for item in plan.items:
+        if item.path == canon and item.editable:
+            # editable flag is intent from allowed_paths — still not authority.
+            # Context Engine never grants write; policy must re-check.
+            return False
+    return False
