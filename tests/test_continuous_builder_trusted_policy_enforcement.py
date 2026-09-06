@@ -1,4 +1,6 @@
-"""Focused tests for CB-027B TCB enforcement wiring."""
+"""Focused tests for CB-027B/C TCB enforcement and decision receipts."""
+
+import dataclasses
 
 import pytest
 
@@ -13,7 +15,9 @@ from backend.continuous_builder.trusted_policy_enforcement import (
     OUTCOME_REVIEW,
     TCBMatchRecord,
     TrustedPolicyDecision,
+    TrustedPolicyDecisionReceipt,
     TrustedPolicyEnforcementError,
+    create_trusted_policy_decision_receipt,
     evaluate_changed_paths_against_tcb,
 )
 
@@ -270,3 +274,279 @@ def test_empty_change_set_is_ordinary():
     decision = evaluate_changed_paths_against_tcb(())
     assert decision.outcome == OUTCOME_ORDINARY
     assert "empty_change_set" in decision.reason_codes
+
+
+# --- CB-027C receipts -------------------------------------------------------
+
+
+def _decision(paths=("backend/memory.py",)):
+    return evaluate_changed_paths_against_tcb(paths)
+
+
+def test_receipt_deterministic_repeat():
+    decision = _decision(
+        (
+            "backend/memory.py",
+            "backend/continuous_builder/verifier_core.py",
+        )
+    )
+    a = create_trusted_policy_decision_receipt(
+        decision,
+        candidate_digest="ab" * 32,
+        worker_request_digest="cd" * 32,
+        input_identity="candidate-1",
+    )
+    b = create_trusted_policy_decision_receipt(
+        decision,
+        candidate_digest="ab" * 32,
+        worker_request_digest="cd" * 32,
+        input_identity="candidate-1",
+    )
+    assert a.receipt_sha256 == b.receipt_sha256
+    assert a.canonical_bytes() == b.canonical_bytes()
+    assert a.decision_sha256 == decision.decision_sha256
+    assert a.registry_sha256 == decision.registry_sha256
+    assert a.outcome == decision.outcome
+    assert a.tcb_match_count == len(decision.tcb_matches)
+    assert a.reason_codes == decision.reason_codes
+
+
+def test_forged_receipt_digest_rejected():
+    receipt = create_trusted_policy_decision_receipt(_decision())
+    with pytest.raises(TrustedPolicyEnforcementError, match="digest"):
+        TrustedPolicyDecisionReceipt(
+            receipt_version=receipt.receipt_version,
+            policy_version=receipt.policy_version,
+            registry_version=receipt.registry_version,
+            registry_sha256=receipt.registry_sha256,
+            decision_sha256=receipt.decision_sha256,
+            outcome=receipt.outcome,
+            canonical_paths_sha256=receipt.canonical_paths_sha256,
+            tcb_match_count=receipt.tcb_match_count,
+            tcb_matches_sha256=receipt.tcb_matches_sha256,
+            reason_codes=receipt.reason_codes,
+            reason_codes_sha256=receipt.reason_codes_sha256,
+            candidate_digest=receipt.candidate_digest,
+            worker_request_digest=receipt.worker_request_digest,
+            input_identity=receipt.input_identity,
+            receipt_sha256="ef" * 32,
+            _token=getattr(receipt, "_token"),
+        )
+
+
+def test_forged_classification_outcome_on_receipt_rejected():
+    decision = _decision(("backend/continuous_builder/verifier_core.py",))
+    receipt = create_trusted_policy_decision_receipt(decision)
+    with pytest.raises(TrustedPolicyEnforcementError, match="digest"):
+        TrustedPolicyDecisionReceipt(
+            receipt_version=receipt.receipt_version,
+            policy_version=receipt.policy_version,
+            registry_version=receipt.registry_version,
+            registry_sha256=receipt.registry_sha256,
+            decision_sha256=receipt.decision_sha256,
+            outcome=OUTCOME_ORDINARY,
+            canonical_paths_sha256=receipt.canonical_paths_sha256,
+            tcb_match_count=receipt.tcb_match_count,
+            tcb_matches_sha256=receipt.tcb_matches_sha256,
+            reason_codes=receipt.reason_codes,
+            reason_codes_sha256=receipt.reason_codes_sha256,
+            candidate_digest=receipt.candidate_digest,
+            worker_request_digest=receipt.worker_request_digest,
+            input_identity=receipt.input_identity,
+            receipt_sha256=receipt.receipt_sha256,
+            _token=getattr(receipt, "_token"),
+        )
+
+
+def test_forged_registry_digest_on_receipt_rejected():
+    decision = _decision()
+    receipt = create_trusted_policy_decision_receipt(decision)
+    with pytest.raises(TrustedPolicyEnforcementError, match="digest"):
+        TrustedPolicyDecisionReceipt(
+            receipt_version=receipt.receipt_version,
+            policy_version=receipt.policy_version,
+            registry_version=receipt.registry_version,
+            registry_sha256="aa" * 32,
+            decision_sha256=receipt.decision_sha256,
+            outcome=receipt.outcome,
+            canonical_paths_sha256=receipt.canonical_paths_sha256,
+            tcb_match_count=receipt.tcb_match_count,
+            tcb_matches_sha256=receipt.tcb_matches_sha256,
+            reason_codes=receipt.reason_codes,
+            reason_codes_sha256=receipt.reason_codes_sha256,
+            candidate_digest=receipt.candidate_digest,
+            worker_request_digest=receipt.worker_request_digest,
+            input_identity=receipt.input_identity,
+            receipt_sha256=receipt.receipt_sha256,
+            _token=getattr(receipt, "_token"),
+        )
+
+
+def test_altered_path_list_digest_rejected():
+    decision = _decision(("backend/memory.py", "frontend/app.js"))
+    receipt = create_trusted_policy_decision_receipt(decision)
+    with pytest.raises(TrustedPolicyEnforcementError, match="digest"):
+        TrustedPolicyDecisionReceipt(
+            receipt_version=receipt.receipt_version,
+            policy_version=receipt.policy_version,
+            registry_version=receipt.registry_version,
+            registry_sha256=receipt.registry_sha256,
+            decision_sha256=receipt.decision_sha256,
+            outcome=receipt.outcome,
+            canonical_paths_sha256="bb" * 32,
+            tcb_match_count=receipt.tcb_match_count,
+            tcb_matches_sha256=receipt.tcb_matches_sha256,
+            reason_codes=receipt.reason_codes,
+            reason_codes_sha256=receipt.reason_codes_sha256,
+            candidate_digest=receipt.candidate_digest,
+            worker_request_digest=receipt.worker_request_digest,
+            input_identity=receipt.input_identity,
+            receipt_sha256=receipt.receipt_sha256,
+            _token=getattr(receipt, "_token"),
+        )
+
+
+def test_altered_component_match_digest_rejected():
+    decision = _decision(("backend/continuous_builder/verifier_core.py",))
+    receipt = create_trusted_policy_decision_receipt(decision)
+    with pytest.raises(TrustedPolicyEnforcementError, match="digest"):
+        TrustedPolicyDecisionReceipt(
+            receipt_version=receipt.receipt_version,
+            policy_version=receipt.policy_version,
+            registry_version=receipt.registry_version,
+            registry_sha256=receipt.registry_sha256,
+            decision_sha256=receipt.decision_sha256,
+            outcome=receipt.outcome,
+            canonical_paths_sha256=receipt.canonical_paths_sha256,
+            tcb_match_count=receipt.tcb_match_count,
+            tcb_matches_sha256="cc" * 32,
+            reason_codes=receipt.reason_codes,
+            reason_codes_sha256=receipt.reason_codes_sha256,
+            candidate_digest=receipt.candidate_digest,
+            worker_request_digest=receipt.worker_request_digest,
+            input_identity=receipt.input_identity,
+            receipt_sha256=receipt.receipt_sha256,
+            _token=getattr(receipt, "_token"),
+        )
+
+
+def test_altered_reason_codes_rejected():
+    decision = _decision(("backend/continuous_builder/verifier_core.py",))
+    receipt = create_trusted_policy_decision_receipt(decision)
+    with pytest.raises(TrustedPolicyEnforcementError, match="digest"):
+        TrustedPolicyDecisionReceipt(
+            receipt_version=receipt.receipt_version,
+            policy_version=receipt.policy_version,
+            registry_version=receipt.registry_version,
+            registry_sha256=receipt.registry_sha256,
+            decision_sha256=receipt.decision_sha256,
+            outcome=receipt.outcome,
+            canonical_paths_sha256=receipt.canonical_paths_sha256,
+            tcb_match_count=receipt.tcb_match_count,
+            tcb_matches_sha256=receipt.tcb_matches_sha256,
+            reason_codes=("forged_reason",),
+            reason_codes_sha256=receipt.reason_codes_sha256,
+            candidate_digest=receipt.candidate_digest,
+            worker_request_digest=receipt.worker_request_digest,
+            input_identity=receipt.input_identity,
+            receipt_sha256=receipt.receipt_sha256,
+            _token=getattr(receipt, "_token"),
+        )
+
+
+def test_receipt_authority_promotion_rejected():
+    receipt = create_trusted_policy_decision_receipt(_decision())
+    for flag in AUTHORITY_FLAGS:
+        with pytest.raises(TrustedPolicyEnforcementError, match="authority"):
+            TrustedPolicyDecisionReceipt(
+                receipt_version=receipt.receipt_version,
+                policy_version=receipt.policy_version,
+                registry_version=receipt.registry_version,
+                registry_sha256=receipt.registry_sha256,
+                decision_sha256=receipt.decision_sha256,
+                outcome=receipt.outcome,
+                canonical_paths_sha256=receipt.canonical_paths_sha256,
+                tcb_match_count=receipt.tcb_match_count,
+                tcb_matches_sha256=receipt.tcb_matches_sha256,
+                reason_codes=receipt.reason_codes,
+                reason_codes_sha256=receipt.reason_codes_sha256,
+                candidate_digest=receipt.candidate_digest,
+                worker_request_digest=receipt.worker_request_digest,
+                input_identity=receipt.input_identity,
+                receipt_sha256=receipt.receipt_sha256,
+                **{flag: True},
+                _token=getattr(receipt, "_token"),
+            )
+
+
+def test_worker_cannot_instantiate_receipt_without_token():
+    with pytest.raises(TrustedPolicyEnforcementError, match="trusted derived"):
+        TrustedPolicyDecisionReceipt(
+            receipt_version="cb-trusted-policy-decision-receipt-v1",
+            policy_version="cb-trusted-policy-enforcement-v1",
+            registry_version="mootos-tcb-registry-v1",
+            registry_sha256="0" * 64,
+            decision_sha256="0" * 64,
+            outcome=OUTCOME_ORDINARY,
+            canonical_paths_sha256="0" * 64,
+            tcb_match_count=0,
+            tcb_matches_sha256="0" * 64,
+            reason_codes=(),
+            reason_codes_sha256="0" * 64,
+            candidate_digest=None,
+            worker_request_digest=None,
+            input_identity=None,
+            receipt_sha256="0" * 64,
+        )
+
+
+def test_stale_registry_digest_on_decision_cannot_mint_receipt():
+    decision = _decision()
+    # Bypass construction to plant a wrong registry digest; the sealed
+    # receipt factory must still fail closed against the live registry.
+    bypass = object.__new__(TrustedPolicyDecision)
+    for item in dataclasses.fields(decision):
+        value = getattr(decision, item.name)
+        if item.name == "registry_sha256":
+            value = "dd" * 32
+        object.__setattr__(bypass, item.name, value)
+    with pytest.raises(TrustedPolicyEnforcementError):
+        create_trusted_policy_decision_receipt(bypass)
+
+
+def test_receipt_stable_ordering_independent_of_input_order():
+    paths_a = (
+        "frontend/app.js",
+        "backend/continuous_builder/check_runner.py",
+        "backend/memory.py",
+    )
+    paths_b = tuple(reversed(paths_a))
+    receipt_a = create_trusted_policy_decision_receipt(_decision(paths_a))
+    receipt_b = create_trusted_policy_decision_receipt(_decision(paths_b))
+    assert receipt_a.receipt_sha256 == receipt_b.receipt_sha256
+    assert receipt_a.canonical_paths_sha256 == receipt_b.canonical_paths_sha256
+    assert receipt_a.tcb_matches_sha256 == receipt_b.tcb_matches_sha256
+
+
+def test_receipt_rejects_malformed_identity():
+    decision = _decision()
+    with pytest.raises(TrustedPolicyEnforcementError, match="identity"):
+        create_trusted_policy_decision_receipt(
+            decision, input_identity="bad identity with spaces!"
+        )
+
+
+def test_receipt_binds_candidate_and_request_digests():
+    decision = _decision(("backend/continuous_builder/trusted_policy.py",))
+    receipt = create_trusted_policy_decision_receipt(
+        decision,
+        candidate_digest="11" * 32,
+        worker_request_digest="22" * 32,
+        input_identity="attempt:abc",
+    )
+    assert receipt.candidate_digest == "11" * 32
+    assert receipt.worker_request_digest == "22" * 32
+    assert receipt.input_identity == "attempt:abc"
+    assert receipt.outcome == OUTCOME_FORBIDDEN
+    for flag in AUTHORITY_FLAGS:
+        assert getattr(receipt, flag) is False

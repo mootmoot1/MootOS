@@ -6,8 +6,8 @@ bounded worker-proposed changed-path sets. Classification always derives from
 registry. Decisions are evidence only: every authority flag is structurally
 false. Workers propose paths; the system owns truth.
 
-CB-027B is POLICY ENFORCEMENT only. Receipt sealing and admission wiring are
-later slices.
+CB-027C adds immutable decision receipts: evidence that trusted policy
+observed a decision. Receipts never authorize action.
 """
 
 import hashlib
@@ -29,10 +29,13 @@ class TrustedPolicyEnforcementError(ValueError):
 
 
 ENFORCEMENT_POLICY_VERSION = "cb-trusted-policy-enforcement-v1"
+RECEIPT_VERSION = "cb-trusted-policy-decision-receipt-v1"
 
 MAX_CHANGED_PATHS = 256
 MAX_PATH_BYTES = 4096
 MAX_DECISION_BYTES = 64 * 1024
+MAX_RECEIPT_BYTES = 64 * 1024
+MAX_IDENTITY_BYTES = 128
 MAX_REASON_CODES = 64
 MAX_MATCHES = 256
 
@@ -80,6 +83,8 @@ _REASON = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _GLOB_META = re.compile(r"[*?\[\]{}]")
 _DECISION_TOKEN = object()
 _MATCH_TOKEN = object()
+_RECEIPT_TOKEN = object()
+_IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$")
 
 
 def _canonical(value):
@@ -555,4 +560,234 @@ def evaluate_changed_paths_against_tcb(changed_paths):
         tcb_matches=matches,
         reason_codes=reason_codes,
         input_path_count=input_path_count,
+    )
+
+
+def _optional_identity(value, label):
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or _IDENTITY.fullmatch(value) is None
+        or len(value.encode("utf-8")) > MAX_IDENTITY_BYTES
+    ):
+        raise TrustedPolicyEnforcementError(f"{label} is malformed")
+    return value
+
+
+def _optional_digest(value, label):
+    if value is None:
+        return None
+    _sha256(value, label)
+    return value
+
+
+@dataclass(frozen=True)
+class TrustedPolicyDecisionReceipt:
+    """Immutable evidence that trusted policy observed one decision.
+
+    Receipt = "trusted policy observed this", never authorization. Workers
+    cannot mint a valid receipt by supplying arbitrary field values.
+    """
+
+    receipt_version: str
+    policy_version: str
+    registry_version: str
+    registry_sha256: str
+    decision_sha256: str
+    outcome: str
+    canonical_paths_sha256: str
+    tcb_match_count: int
+    tcb_matches_sha256: str
+    reason_codes: tuple
+    reason_codes_sha256: str
+    candidate_digest: str
+    worker_request_digest: str
+    input_identity: str
+    receipt_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _RECEIPT_TOKEN:
+            raise TrustedPolicyEnforcementError(
+                "trusted policy receipt requires trusted derived evidence"
+            )
+        if self.receipt_version != RECEIPT_VERSION:
+            raise TrustedPolicyEnforcementError(
+                "receipt version is unsupported"
+            )
+        if self.policy_version != ENFORCEMENT_POLICY_VERSION:
+            raise TrustedPolicyEnforcementError(
+                "receipt policy version is unsupported"
+            )
+        if self.registry_version != "mootos-tcb-registry-v1":
+            raise TrustedPolicyEnforcementError(
+                "receipt registry version is unsupported"
+            )
+        if self.outcome not in OUTCOMES:
+            raise TrustedPolicyEnforcementError("receipt outcome unsupported")
+        for value, label in (
+            (self.registry_sha256, "registry digest"),
+            (self.decision_sha256, "decision digest"),
+            (self.canonical_paths_sha256, "canonical paths digest"),
+            (self.tcb_matches_sha256, "TCB matches digest"),
+            (self.reason_codes_sha256, "reason codes digest"),
+            (self.receipt_sha256, "receipt digest"),
+        ):
+            _sha256(value, label)
+        for value, label in (
+            (self.candidate_digest, "candidate digest"),
+            (self.worker_request_digest, "worker request digest"),
+        ):
+            _optional_digest(value, label)
+        _optional_identity(self.input_identity, "input identity")
+        if type(self.tcb_match_count) is not int or self.tcb_match_count < 0:
+            raise TrustedPolicyEnforcementError(
+                "TCB match count is malformed"
+            )
+        if type(self.reason_codes) is not tuple:
+            raise TrustedPolicyEnforcementError("reason codes malformed")
+        reasons = tuple(_reason_code(code) for code in self.reason_codes)
+        if reasons != tuple(sorted(set(reasons))):
+            raise TrustedPolicyEnforcementError(
+                "reason codes are not canonical"
+            )
+        object.__setattr__(self, "reason_codes", reasons)
+        if self.reason_codes_sha256 != _digest(_canonical(list(reasons))):
+            raise TrustedPolicyEnforcementError(
+                "reason codes digest mismatch"
+            )
+        if any(getattr(self, name) is not False for name in AUTHORITY_FLAGS):
+            raise TrustedPolicyEnforcementError(
+                "receipt cannot claim authority"
+            )
+        if self.receipt_sha256 != _digest(self._payload()):
+            raise TrustedPolicyEnforcementError("receipt digest mismatch")
+        if len(self.canonical_bytes()) > MAX_RECEIPT_BYTES:
+            raise TrustedPolicyEnforcementError("receipt exceeds byte bound")
+
+    def _body(self):
+        return {
+            "candidate_digest": self.candidate_digest,
+            "canonical_paths_sha256": self.canonical_paths_sha256,
+            "decision_sha256": self.decision_sha256,
+            "github_authorized": False,
+            "input_identity": self.input_identity,
+            "main_advancement_authorized": False,
+            "merge_authorized": False,
+            "outcome": self.outcome,
+            "policy_version": ENFORCEMENT_POLICY_VERSION,
+            "publication_authorized": False,
+            "queue_transition_authorized": False,
+            "reason_codes": list(self.reason_codes),
+            "reason_codes_sha256": self.reason_codes_sha256,
+            "receipt_version": RECEIPT_VERSION,
+            "registry_sha256": self.registry_sha256,
+            "registry_version": self.registry_version,
+            "tcb_match_count": self.tcb_match_count,
+            "tcb_matches_sha256": self.tcb_matches_sha256,
+            "worker_output_trusted": False,
+            "worker_request_digest": self.worker_request_digest,
+        }
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def canonical_bytes(self):
+        body = self._body()
+        body["receipt_sha256"] = self.receipt_sha256
+        return _canonical(body)
+
+    def to_dict(self):
+        body = self._body()
+        body["receipt_sha256"] = self.receipt_sha256
+        return body
+
+
+def create_trusted_policy_decision_receipt(
+    decision,
+    *,
+    candidate_digest=None,
+    worker_request_digest=None,
+    input_identity=None,
+):
+    """Seal evidence that trusted policy observed ``decision``.
+
+    Only a validated ``TrustedPolicyDecision`` may be wrapped. Optional
+    identity digests bind the receipt to a candidate / request when known.
+    """
+    if not isinstance(decision, TrustedPolicyDecision):
+        raise TrustedPolicyEnforcementError("decision is invalid")
+    try:
+        TrustedPolicyDecision(
+            outcome=decision.outcome,
+            policy_version=decision.policy_version,
+            registry_version=decision.registry_version,
+            registry_sha256=decision.registry_sha256,
+            canonical_paths=decision.canonical_paths,
+            canonical_paths_sha256=decision.canonical_paths_sha256,
+            ordinary_paths=decision.ordinary_paths,
+            tcb_matches=decision.tcb_matches,
+            reason_codes=decision.reason_codes,
+            input_path_count=decision.input_path_count,
+            decision_sha256=decision.decision_sha256,
+            publication_authorized=decision.publication_authorized,
+            queue_transition_authorized=decision.queue_transition_authorized,
+            github_authorized=decision.github_authorized,
+            merge_authorized=decision.merge_authorized,
+            main_advancement_authorized=decision.main_advancement_authorized,
+            worker_output_trusted=decision.worker_output_trusted,
+            _token=getattr(decision, "_token"),
+        )
+    except TrustedPolicyEnforcementError as error:
+        raise TrustedPolicyEnforcementError(
+            "decision failed authoritative validation"
+        ) from error
+
+    registry = create_mootos_tcb_registry_v1()
+    if decision.registry_sha256 != registry.registry_sha256:
+        raise TrustedPolicyEnforcementError(
+            "decision registry digest mismatch"
+        )
+
+    candidate_digest = _optional_digest(candidate_digest, "candidate digest")
+    worker_request_digest = _optional_digest(
+        worker_request_digest, "worker request digest"
+    )
+    input_identity = _optional_identity(input_identity, "input identity")
+
+    matches_body = [match.to_dict() for match in decision.tcb_matches]
+    values = {
+        "receipt_version": RECEIPT_VERSION,
+        "policy_version": ENFORCEMENT_POLICY_VERSION,
+        "registry_version": decision.registry_version,
+        "registry_sha256": decision.registry_sha256,
+        "decision_sha256": decision.decision_sha256,
+        "outcome": decision.outcome,
+        "canonical_paths_sha256": decision.canonical_paths_sha256,
+        "tcb_match_count": len(decision.tcb_matches),
+        "tcb_matches_sha256": _digest(_canonical(matches_body)),
+        "reason_codes": decision.reason_codes,
+        "reason_codes_sha256": _digest(
+            _canonical(list(decision.reason_codes))
+        ),
+        "candidate_digest": candidate_digest,
+        "worker_request_digest": worker_request_digest,
+        "input_identity": input_identity,
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(TrustedPolicyDecisionReceipt)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return TrustedPolicyDecisionReceipt(
+        **values,
+        receipt_sha256=_digest(provisional._payload()),
+        _token=_RECEIPT_TOKEN,
     )
