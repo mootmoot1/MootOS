@@ -112,6 +112,7 @@ IMPACT_STATES = frozenset({
 AUTHORITY_FLAGS = TCB_AUTHORITY_FLAGS
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 _COMPONENT_ID = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 _EXCLUDE_DIR_NAMES = frozenset({
     ".git",
@@ -178,6 +179,14 @@ def _digest(value):
 
 def _require_sha256(value, label):
     if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+        raise SystemModelError(f"{label} is malformed")
+
+
+def _require_base_sha(value, label="base_sha"):
+    """Accept git commit SHA-1 (40) or content SHA-256 (64), lowercase hex."""
+    if not isinstance(value, str) or not (
+        _SHA256.fullmatch(value) or _GIT_SHA.fullmatch(value)
+    ):
         raise SystemModelError(f"{label} is malformed")
 
 
@@ -848,7 +857,7 @@ class SystemModel:
             )
         if self.model_version != MODEL_VERSION:
             raise SystemModelError("model version is unsupported")
-        _require_sha256(self.base_sha, "base_sha")
+        _require_base_sha(self.base_sha, "base_sha")
         _require_sha256(self.root_fingerprint, "root fingerprint")
         _require_sha256(self.tcb_registry_sha256, "tcb registry digest")
         _require_sha256(self.model_sha256, "model digest")
@@ -1022,12 +1031,12 @@ class SystemModelSnapshot:
             raise SystemModelError("snapshot model version unsupported")
         for value, label in (
             (self.model_sha256, "model digest"),
-            (self.base_sha, "base_sha"),
             (self.root_fingerprint, "root fingerprint"),
             (self.tcb_registry_sha256, "tcb registry digest"),
             (self.snapshot_sha256, "snapshot digest"),
         ):
             _require_sha256(value, label)
+        _require_base_sha(self.base_sha, "base_sha")
         for name in (
             "file_count",
             "component_count",
@@ -1581,7 +1590,7 @@ def build_system_model(repo_root, *, base_sha, include_excluded=False):
     never authorizes action.  TCB membership uses only
     ``create_mootos_tcb_registry_v1()``.
     """
-    _require_sha256(base_sha, "base_sha")
+    _require_base_sha(base_sha, "base_sha")
     inventory = build_repository_inventory(
         repo_root, include_excluded=include_excluded
     )
