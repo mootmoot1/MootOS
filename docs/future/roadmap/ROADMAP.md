@@ -114,6 +114,17 @@ Prefer the concurrency level with the highest useful throughput, not the highest
 5. Parallel/background worker scaling does not activate until conflict control, leases, budgets, kill switches, and verifier evidence are proven.
 6. Main merge/deployment authority remains human-controlled unless separately redesigned and approved in a future governance program.
 
+## ARCHITECTURE ECONOMY / HARDENING CHECKPOINTS
+
+Do not optimize for raw line-count reduction. Optimize for fewer accidental concepts, less duplicate non-security logic, narrower modules, lower worker context burden, and equal-or-stronger verification/security.
+
+- Keep a lightweight code-economy check in every major phase: reuse existing trusted primitives where appropriate, avoid speculative wrappers and god-modules, and explicitly distinguish intentional trust-boundary duplication from accidental duplication.
+- After the GP-A / GP-B / GP-C / GP-D foundation is complete, run the first deep **Architecture Economy Audit** before stacking more autonomy/runtime layers. The audit should inspect the Continuous Builder as a whole and identify duplicated validation/canonicalization/path/schema/evidence mechanisms, oversized modules, unnecessary indirection, and obsolete scaffolding — but must not assume repetition inside separate trust boundaries is bad.
+- Audit first, refactor second. The audit produces a ranked plan with safe wins, architecture-decision items, and intentional duplication that should remain untouched. Human review is required before broad refactoring.
+- Follow the audit with a bounded **Hardening + Economy Pass**: small behavior-preserving slices, tests before/after, no weakening of TCB/authority checks, and no Main merge without human approval.
+- Run a second, smaller architecture-economy audit after the first autonomous single-worker loop has been proven and before major GPU/multi-worker/concurrency scaling. Use measured failure, context-size, repair, and change-size evidence to decide what to simplify.
+- Success is not “fewest lines.” Success is simpler system reasoning, fewer accidental implementations of the same concept, smaller context packages, easier maintenance, and unchanged-or-better safety/reliability.
+
 ## NEXT
 
 1. Minimum contained worker runtime and one-worker proof.
