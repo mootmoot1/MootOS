@@ -827,3 +827,417 @@ def context_request_grants_write_permission(request):
     if not isinstance(request, ContextTaskRequest):
         raise ContextEngineError("request invalid")
     return False
+
+
+
+# ---------------------------------------------------------------------------
+# CB-029B — trusted excerpt extraction (secret-safe, fail-closed)
+# ---------------------------------------------------------------------------
+
+
+def classify_secret_path(path):
+    """Return detail_code if path is secret-restricted, else None."""
+    try:
+        canon = _canonical_repo_path(path, "secret path")
+    except ContextEngineError:
+        return "malformed_path"
+    segments = canon.split("/")
+    name = segments[-1]
+    lower = name.lower()
+    if name in _SECRET_FILE_NAMES or lower in _SECRET_FILE_NAMES:
+        return "secret_filename"
+    for prefix in _SECRET_NAME_PREFIXES:
+        if name.startswith(prefix) and name != ".env.example":
+            return "secret_env_file"
+    for suffix in _SECRET_NAME_SUFFIXES:
+        if lower.endswith(suffix):
+            return "secret_key_material"
+    for seg in segments[:-1]:
+        if seg.lower() in _SECRET_PATH_SEGMENTS:
+            return "secret_path_segment"
+    # API-key style filenames
+    if "api_key" in lower or "apikey" in lower or lower.endswith(".api_key"):
+        return "secret_api_key_file"
+    if "access_token" in lower or lower.endswith(".token"):
+        return "secret_token_file"
+    return None
+
+
+def _content_looks_secret(text):
+    for marker in _SECRET_CONTENT_MARKERS:
+        if marker in text:
+            return True
+    return False
+
+
+def _is_probably_text(data):
+    if b"\x00" in data:
+        return False
+    # Reject high ratio of non-text bytes.
+    if not data:
+        return True
+    sample = data[:4096]
+    try:
+        sample.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    nonprint = sum(
+        1 for b in sample
+        if b < 9 or (13 < b < 32) or b == 127
+    )
+    return (nonprint / max(len(sample), 1)) < 0.05
+
+
+def _resolve_regular_file(repo_root, rel_path):
+    root = Path(repo_root)
+    try:
+        root = root.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ContextEngineError("repo root is unresolvable") from error
+    if not root.is_dir():
+        raise ContextEngineError("repo root must be a directory")
+    canon = _canonical_repo_path(rel_path)
+    # Reject .git dumps and DB/WAL.
+    segments = canon.split("/")
+    if ".git" in segments:
+        raise ContextEngineError("git object path rejected")
+    name = segments[-1]
+    if name.startswith("mootos.db") or name.endswith(
+        ("-wal", "-shm", "-journal")
+    ):
+        if "mootos.db" in name:
+            raise ContextEngineError("database path rejected")
+    full = root.joinpath(*segments)
+    # Never follow symlinks: reject if any ancestor or file is a symlink.
+    cursor = root
+    for seg in segments:
+        cursor = cursor / seg
+        try:
+            if cursor.is_symlink():
+                raise ContextEngineError("symlink rejected")
+        except OSError as error:
+            raise ContextEngineError("path stat failed") from error
+    try:
+        if not full.is_file() or full.is_symlink():
+            raise ContextEngineError("path is not a regular file")
+        resolved = full.resolve(strict=True)
+        resolved.relative_to(root)
+    except (OSError, ValueError, RuntimeError) as error:
+        raise ContextEngineError("path escapes repository or missing") from error
+    if resolved.is_symlink():
+        raise ContextEngineError("symlink rejected")
+    return root, canon, resolved
+
+
+@dataclass(frozen=True)
+class ContextExcerpt:
+    """Sealed line-oriented excerpt bound to path + file digest + revision."""
+
+    path: str
+    base_sha: str
+    file_sha256: str
+    excerpt_sha256: str
+    start_line: int
+    end_line: int
+    text: str
+    truncated: bool
+    available: bool
+    restriction: str | None
+    provenance: str
+    record_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _EXCERPT_TOKEN:
+            raise ContextEngineError(
+                "excerpt requires trusted system construction"
+            )
+        _canonical_repo_path(self.path)
+        _require_base_sha(self.base_sha)
+        _require_sha256(self.file_sha256, "file digest")
+        _require_sha256(self.excerpt_sha256, "excerpt digest")
+        if type(self.start_line) is not int or type(self.end_line) is not int:
+            raise ContextEngineError("line bounds malformed")
+        if self.available:
+            if self.start_line < 1 or self.end_line < self.start_line:
+                raise ContextEngineError("line bounds invalid")
+            if not isinstance(self.text, str):
+                raise ContextEngineError("excerpt text malformed")
+            if self.restriction is not None:
+                raise ContextEngineError("available excerpt cannot be restricted")
+        else:
+            if self.text != "":
+                raise ContextEngineError("unavailable excerpt must be empty")
+            if self.restriction is None:
+                raise ContextEngineError("unavailable excerpt needs restriction")
+            _require_text(self.restriction, "restriction", 128)
+        if type(self.truncated) is not bool:
+            raise ContextEngineError("truncated flag malformed")
+        _require_text(self.provenance, "provenance", 128)
+        _require_no_authority(self)
+        _require_sha256(self.record_sha256, "excerpt record digest")
+        if self.record_sha256 != _digest(self._payload()):
+            raise ContextEngineError("excerpt record digest mismatch")
+
+    def _body(self):
+        body = {
+            "available": self.available,
+            "base_sha": self.base_sha,
+            "end_line": self.end_line,
+            "excerpt_sha256": self.excerpt_sha256,
+            "file_sha256": self.file_sha256,
+            "path": self.path,
+            "provenance": self.provenance,
+            "restriction": self.restriction,
+            "start_line": self.start_line,
+            "text": self.text,
+            "truncated": self.truncated,
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["record_sha256"] = self.record_sha256
+        return body
+
+
+def _seal_excerpt(
+    *,
+    path,
+    base_sha,
+    file_sha256,
+    excerpt_sha256,
+    start_line,
+    end_line,
+    text,
+    truncated,
+    available,
+    restriction,
+    provenance,
+):
+    values = {
+        "path": path,
+        "base_sha": base_sha,
+        "file_sha256": file_sha256,
+        "excerpt_sha256": excerpt_sha256,
+        "start_line": start_line,
+        "end_line": end_line,
+        "text": text,
+        "truncated": truncated,
+        "available": available,
+        "restriction": restriction,
+        "provenance": provenance,
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(ContextExcerpt)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return ContextExcerpt(
+        **values,
+        record_sha256=_digest(provisional._payload()),
+        _token=_EXCERPT_TOKEN,
+    )
+
+
+def _unavailable_excerpt(*, path, base_sha, restriction, provenance):
+    empty = ""
+    return _seal_excerpt(
+        path=path,
+        base_sha=base_sha,
+        file_sha256=_digest(b""),
+        excerpt_sha256=_digest(empty),
+        start_line=0,
+        end_line=0,
+        text=empty,
+        truncated=False,
+        available=False,
+        restriction=restriction,
+        provenance=provenance,
+    )
+
+
+def extract_excerpt(
+    repo_root,
+    *,
+    base_sha,
+    path,
+    region=None,
+    budget_bytes=DEFAULT_EXCERPT_BUDGET_BYTES,
+):
+    """Trusted excerpt extraction: root+base_sha+path(+region)+budget.
+
+    Regular files only. No symlink/traversal/absolute/.git/DB/WAL/creds.
+    Secret policy fail-closed: never puts secret bytes in package/logs/errors.
+    Binary → unavailable/non-text. Line-oriented text with truncation flag.
+    """
+    _require_base_sha(base_sha)
+    if type(budget_bytes) is not int or budget_bytes < 256:
+        raise ContextEngineError("excerpt budget malformed")
+    if budget_bytes > HARD_MAX_EXCERPT_BUDGET_BYTES:
+        raise ContextEngineError("excerpt budget exceeds hard max")
+
+    secret = classify_secret_path(path)
+    if secret is not None:
+        # Never read secret bytes — structured restriction only.
+        try:
+            canon = _canonical_repo_path(path)
+        except ContextEngineError:
+            canon = "restricted"
+        return _unavailable_excerpt(
+            path=canon if secret != "malformed_path" else "restricted",
+            base_sha=base_sha,
+            restriction=secret,
+            provenance="secret_policy",
+        )
+
+    try:
+        _root, canon, full = _resolve_regular_file(repo_root, path)
+    except ContextEngineError as error:
+        # Do not echo path details that might include secrets in odd cases.
+        code = str(error)
+        if "symlink" in code:
+            restriction = "symlink_rejected"
+        elif "git" in code:
+            restriction = "git_path_rejected"
+        elif "database" in code:
+            restriction = "database_rejected"
+        elif "regular file" in code or "missing" in code or "escapes" in code:
+            restriction = "path_unavailable"
+        else:
+            restriction = "path_rejected"
+        try:
+            canon = _canonical_repo_path(path)
+        except ContextEngineError:
+            canon = "rejected"
+        return _unavailable_excerpt(
+            path=canon,
+            base_sha=base_sha,
+            restriction=restriction,
+            provenance="path_policy",
+        )
+
+    try:
+        size = full.stat().st_size
+    except OSError as error:
+        raise ContextEngineError("stat failed") from error
+    max_read = HARD_MAX_EXCERPT_BUDGET_BYTES * 32
+    if size > max_read:
+        return _unavailable_excerpt(
+            path=canon,
+            base_sha=base_sha,
+            restriction="file_too_large",
+            provenance="size_policy",
+        )
+    try:
+        data = full.read_bytes()
+    except OSError as error:
+        raise ContextEngineError("read failed") from error
+    if len(data) != size:
+        raise ContextEngineError("size changed during read")
+    file_digest = _digest(data)
+
+    if not _is_probably_text(data):
+        return _unavailable_excerpt(
+            path=canon,
+            base_sha=base_sha,
+            restriction="non_text",
+            provenance="binary_policy",
+        )
+
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return _unavailable_excerpt(
+            path=canon,
+            base_sha=base_sha,
+            restriction="non_text",
+            provenance="decode_policy",
+        )
+
+    if _content_looks_secret(text):
+        # Fail closed — do not return secret bytes.
+        return _unavailable_excerpt(
+            path=canon,
+            base_sha=base_sha,
+            restriction="secret_content",
+            provenance="secret_content_policy",
+        )
+
+    lines = text.splitlines(keepends=True)
+    if not lines and text == "":
+        lines = []
+    total = len(lines)
+    if region is None:
+        start, end = 1, max(total, 0)
+    else:
+        if (
+            type(region) not in (list, tuple)
+            or len(region) != 2
+            or type(region[0]) is not int
+            or type(region[1]) is not int
+            or region[0] < 1
+            or region[1] < region[0]
+        ):
+            raise ContextEngineError("region malformed")
+        start, end = region[0], region[1]
+        if total == 0:
+            start, end = 1, 0
+        else:
+            end = min(end, total)
+            start = min(start, total) if total else 1
+            if start > end:
+                start, end = 1, 0
+
+    if total == 0:
+        selected = ""
+        start_line, end_line = 0, 0
+        truncated = False
+    else:
+        # region is 1-indexed inclusive
+        chunk_lines = lines[start - 1:end]
+        selected = "".join(chunk_lines)
+        start_line, end_line = start, start - 1 + len(chunk_lines)
+        truncated = False
+        if _utf8_len(selected) > budget_bytes:
+            # Truncate by whole lines to budget.
+            out = []
+            size = 0
+            for line in chunk_lines:
+                line_size = len(line.encode("utf-8"))
+                if size + line_size > budget_bytes:
+                    truncated = True
+                    break
+                out.append(line)
+                size += line_size
+            selected = "".join(out)
+            end_line = start_line - 1 + len(out) if out else 0
+            if not out:
+                start_line, end_line = 0, 0
+                truncated = True
+
+    excerpt_digest = _digest(selected)
+    return _seal_excerpt(
+        path=canon,
+        base_sha=base_sha,
+        file_sha256=file_digest,
+        excerpt_sha256=excerpt_digest,
+        start_line=start_line,
+        end_line=end_line,
+        text=selected,
+        truncated=truncated,
+        available=True,
+        restriction=None,
+        provenance="trusted_extraction",
+    )
