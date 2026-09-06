@@ -40,15 +40,16 @@ risk never grants or denies by itself; deterministic rules do.
 
 ## Module inventory
 
-| Module | Approx lines | Slice |
-| --- | ---: | --- |
-| `gpc_capability_vocabulary.py` | ~689 | C1 |
-| `gpc_admission_input.py` | ~332 | C2 |
-| `gpc_policy_matrix.py` | ~258 | C3 |
-| `gpc_scope_risk_tcb.py` | ~233 | C4 |
-| `gpc_budget_constraints.py` | ~100 | C5 |
-| `gpc_admission_decision.py` | ~589 | C6/C7 |
-| `gpc_eval_corpus.py` | ~908 | C8 |
+| Module | Role | Slice |
+| --- | --- | --- |
+| `gpc_trusted_admission_core.py` | **TRUSTED** — sole authoritative admission algorithm + facts/decision DTOs | C-trusted |
+| `gpc_capability_vocabulary.py` | UNTRUSTED request sealing; re-exports outcome/capability tables from core | C1 |
+| `gpc_admission_input.py` | UNTRUSTED assembler (binds GP-B + vocabulary + TCB identity) | C2 |
+| `gpc_policy_matrix.py` | Thin re-export of core matrix | C3 |
+| `gpc_scope_risk_tcb.py` | Thin re-export of core scope/risk/TCB rules | C4 |
+| `gpc_budget_constraints.py` | Thin re-export of core budget checks | C5 |
+| `gpc_admission_decision.py` | Thin adapter: AdmissionInput → TrustedAdmissionFacts → core | C6/C7 |
+| `gpc_eval_corpus.py` | UNTRUSTED eval / adversarial corpus | C8 |
 
 Shared primitives: `gpa_eval_schema` digests/paths/`AUTHORITY_FLAGS`/
 UNKNOWN; GP-A taxonomy class IDs; GP-B `FrozenTaskContract` /
@@ -94,13 +95,11 @@ system.
 - **Runtime enforcement** of admitted bounds → **GP-D / GP-F**.
 - **Persistence** of decisions into queue / job store → **GP-D**.
 - **Provider routing / launch** → later phases; never here.
-- **TCB registry membership for GP-C modules** — this autonomous run
-  **did not** edit `trusted_policy.py` or add GP-C paths to the TCB
-  registry (CRITICAL TCB RULE). Registering
-  `gpc_admission_decision.py` / matrix / vocabulary under a new or
-  existing TCB component is a **human-gated follow-up** if desired;
-  smaller design avoids it by treating GP-C as consumer of TCB (like
-  GP-A/GP-B) rather than TCB itself until review.
+- **TCB registry membership** — authorized follow-up added exactly one
+  protected path: `backend/continuous_builder/gpc_trusted_admission_core.py`
+  under new component `cb_capability_admission` / category
+  `capability_admission` (human_only). Corpus, admission_input, GP-B,
+  System Model, Context Engine, and tests remain outside TCB.
 - Does not merge, publish, or advance Main.
 - Does not claim optimal or complete capability coverage — only
   deterministic admission over the sealed vocabulary.
@@ -126,9 +125,9 @@ trusted_policy queries; AUTHORITY_FLAGS zero-authority idiom; CB
 naming from worker_authorization / PR publication auth. Does **not**
 create a second tool registry or competing approval authority.
 
-Largest modules: `gpc_eval_corpus.py` (~908), `gpc_capability_vocabulary.py`
-(~689), `gpc_admission_decision.py` (~589). Correctness > security >
-determinism > maintainability > simplicity > size.
+Trusted core concentrates the algorithm (matrix + scope/risk/TCB +
+budget + facts + decision) in one auditable module; wrappers are thin.
+Correctness > security > determinism > maintainability > simplicity > size.
 
 ## Adversarial invariants (must hold)
 
@@ -144,6 +143,6 @@ determinism > maintainability > simplicity > size.
 
 ## STOP points obeyed
 
-No trusted_policy / TCB / protected-path / verifier / approval edits;
+Only the authorized +1 TCB path for the trusted core; no other TCB / verifier / approval edits;
 no schema/DB migration; no production/deploy; no network/cred
 expansion; no destructive ops; no provider execution; no Main merge.
