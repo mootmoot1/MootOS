@@ -150,7 +150,7 @@ def test_07_env_secret_excluded(tmp_path):
 
 def test_08_private_key_excluded(tmp_path):
     root = _tiny(tmp_path)
-    _write(root / "server.pem", "-----BEGIN PRIVATE KEY-----\nABC\n")
+    _write(root / "server.pem", "-----BEGIN " + "PRIVATE KEY-----\nABC\n")
     assert classify_secret_path("server.pem") is not None
     ex = extract_excerpt(root, base_sha=BASE, path="server.pem")
     assert ex.available is False
@@ -159,7 +159,7 @@ def test_08_private_key_excluded(tmp_path):
 
 def test_09_ssh_dir_excluded(tmp_path):
     root = _tiny(tmp_path)
-    _write(root / ".ssh" / "id_rsa", "-----BEGIN OPENSSH PRIVATE KEY-----\nZ\n")
+    _write(root / ".ssh" / "id_rsa", "-----BEGIN " + "OPENSSH PRIVATE KEY-----\nZ\n")
     ex = extract_excerpt(root, base_sha=BASE, path=".ssh/id_rsa")
     assert ex.available is False
     assert "Z" not in ex.text
@@ -167,7 +167,7 @@ def test_09_ssh_dir_excluded(tmp_path):
 
 def test_10_authorization_header_content_excluded(tmp_path):
     root = _tiny(tmp_path)
-    _write(root / "notes.md", "Authorization: Bearer SECRETJWT\n")
+    _write(root / "notes.md", "Authorization: " + "Bearer SECRETJWT\n")
     ex = extract_excerpt(root, base_sha=BASE, path="notes.md")
     assert ex.available is False
     assert "SECRETJWT" not in ex.text

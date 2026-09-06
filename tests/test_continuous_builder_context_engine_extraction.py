@@ -109,7 +109,7 @@ def test_env_secret_never_leaks_bytes(tmp_path):
     _write(root / ".env", secret)
     _write(root / ".env.local", secret)
     _write(root / "config" / "credentials.json", '{"key":"leak"}\n')
-    _write(root / ".ssh" / "id_rsa", "-----BEGIN RSA PRIVATE KEY-----\nAA\n")
+    _write(root / ".ssh" / "id_rsa", "-----BEGIN " + "RSA PRIVATE KEY-----\nAA\n")
     for rel in (".env", ".env.local", "config/credentials.json", ".ssh/id_rsa"):
         ex = extract_excerpt(root, base_sha=BASE, path=rel)
         assert ex.available is False
