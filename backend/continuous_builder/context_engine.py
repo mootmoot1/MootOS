@@ -966,12 +966,16 @@ class ContextExcerpt:
         if type(self.start_line) is not int or type(self.end_line) is not int:
             raise ContextEngineError("line bounds malformed")
         if self.available:
-            if self.start_line < 1 or self.end_line < self.start_line:
-                raise ContextEngineError("line bounds invalid")
             if not isinstance(self.text, str):
                 raise ContextEngineError("excerpt text malformed")
             if self.restriction is not None:
                 raise ContextEngineError("available excerpt cannot be restricted")
+            if self.text == "":
+                # Empty file / empty selection after truncation.
+                if self.start_line != 0 or self.end_line != 0:
+                    raise ContextEngineError("empty excerpt bounds invalid")
+            elif self.start_line < 1 or self.end_line < self.start_line:
+                raise ContextEngineError("line bounds invalid")
         else:
             if self.text != "":
                 raise ContextEngineError("unavailable excerpt must be empty")
@@ -2377,3 +2381,715 @@ def retrieve_related_tests(
                 }
             )
     return tuple(out)
+
+
+
+# ---------------------------------------------------------------------------
+# CB-029F — package assembly + hard budgets + receipt
+# ---------------------------------------------------------------------------
+
+
+# Priority order when package is full (critical first):
+_ASSEMBLY_PRIORITY = (
+    "task_contract",
+    "authority_non_goals",
+    "editable_path",
+    "acceptance",
+    "tcb_warning",
+    "interface_summary",
+    "dependency_summary",
+    "test_ref",
+    "architecture_evidence",
+    "file_excerpt",  # supporting excerpts last among content
+)
+
+
+@dataclass(frozen=True)
+class ContextPackage:
+    """Bounded context package — disposable view, not a source of truth."""
+
+    engine_version: str
+    request_sha256: str
+    model_sha256: str
+    base_sha: str
+    completeness: str
+    excerpts: tuple
+    interfaces: tuple
+    dependency_summaries: tuple
+    tests: tuple
+    architecture: tuple
+    source_refs: tuple
+    uncertainties: tuple
+    tcb_warnings: tuple
+    bytes_used: int
+    token_estimate: int
+    needs_review: bool
+    package_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _PACKAGE_TOKEN:
+            raise ContextEngineError(
+                "context package requires trusted system construction"
+            )
+        if self.engine_version != ENGINE_VERSION:
+            raise ContextEngineError("engine version unsupported")
+        _require_sha256(self.request_sha256, "request digest")
+        _require_sha256(self.model_sha256, "model digest")
+        _require_base_sha(self.base_sha)
+        if self.completeness not in COMPLETENESS_STATES:
+            raise ContextEngineError("completeness unsupported")
+        if type(self.bytes_used) is not int or self.bytes_used < 0:
+            raise ContextEngineError("bytes_used malformed")
+        if type(self.token_estimate) is not int or self.token_estimate < 0:
+            raise ContextEngineError("token_estimate malformed")
+        if type(self.needs_review) is not bool:
+            raise ContextEngineError("needs_review malformed")
+        for name in (
+            "excerpts", "interfaces", "dependency_summaries", "tests",
+            "architecture", "source_refs", "uncertainties", "tcb_warnings",
+        ):
+            value = getattr(self, name)
+            if type(value) is not tuple:
+                raise ContextEngineError(f"{name} malformed")
+        if len(self.excerpts) > MAX_EXCERPTS:
+            raise ContextEngineError("excerpts exceed bound")
+        _require_no_authority(self)
+        _require_sha256(self.package_sha256, "package digest")
+        if self.package_sha256 != _digest(self._payload()):
+            raise ContextEngineError("package digest mismatch")
+
+    def _body(self):
+        body = {
+            "architecture": [
+                item.to_dict() if hasattr(item, "to_dict") else item
+                for item in self.architecture
+            ],
+            "base_sha": self.base_sha,
+            "bytes_used": self.bytes_used,
+            "completeness": self.completeness,
+            "dependency_summaries": [
+                item.to_dict() for item in self.dependency_summaries
+            ],
+            "engine_version": ENGINE_VERSION,
+            "excerpts": [item.to_dict() for item in self.excerpts],
+            "interfaces": [item.to_dict() for item in self.interfaces],
+            "model_sha256": self.model_sha256,
+            "needs_review": self.needs_review,
+            "request_sha256": self.request_sha256,
+            "source_refs": [item.to_dict() for item in self.source_refs],
+            "tcb_warnings": list(self.tcb_warnings),
+            "tests": list(self.tests),
+            "token_estimate": self.token_estimate,
+            "uncertainties": [item.to_dict() for item in self.uncertainties],
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["package_sha256"] = self.package_sha256
+        return body
+
+    def canonical_bytes(self):
+        return _canonical(self.to_dict())
+
+
+def _seal_package(**fields):
+    values = dict(fields)
+    values["engine_version"] = ENGINE_VERSION
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(ContextPackage)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return ContextPackage(
+        **values,
+        package_sha256=_digest(provisional._payload()),
+        _token=_PACKAGE_TOKEN,
+    )
+
+
+@dataclass(frozen=True)
+class ContextReceipt:
+    """Receipt binding package/task/model/base digests and counts."""
+
+    package_sha256: str
+    request_sha256: str
+    model_sha256: str
+    base_sha: str
+    excerpt_count: int
+    interface_count: int
+    test_count: int
+    architecture_count: int
+    uncertainty_count: int
+    bytes_used: int
+    token_estimate: int
+    completeness: str
+    needs_review: bool
+    flags: tuple
+    receipt_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _RECEIPT_TOKEN:
+            raise ContextEngineError(
+                "receipt requires trusted system construction"
+            )
+        for label, value in (
+            ("package", self.package_sha256),
+            ("request", self.request_sha256),
+            ("model", self.model_sha256),
+            ("receipt", self.receipt_sha256),
+        ):
+            _require_sha256(value, f"{label} digest")
+        _require_base_sha(self.base_sha)
+        if self.completeness not in COMPLETENESS_STATES:
+            raise ContextEngineError("completeness unsupported")
+        if type(self.flags) is not tuple:
+            raise ContextEngineError("flags malformed")
+        _require_no_authority(self)
+        if self.receipt_sha256 != _digest(self._payload()):
+            raise ContextEngineError("receipt digest mismatch")
+
+    def _body(self):
+        body = {
+            "architecture_count": self.architecture_count,
+            "base_sha": self.base_sha,
+            "bytes_used": self.bytes_used,
+            "completeness": self.completeness,
+            "excerpt_count": self.excerpt_count,
+            "flags": list(self.flags),
+            "interface_count": self.interface_count,
+            "model_sha256": self.model_sha256,
+            "needs_review": self.needs_review,
+            "package_sha256": self.package_sha256,
+            "request_sha256": self.request_sha256,
+            "test_count": self.test_count,
+            "token_estimate": self.token_estimate,
+            "uncertainty_count": self.uncertainty_count,
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["receipt_sha256"] = self.receipt_sha256
+        return body
+
+
+def _seal_receipt(**fields):
+    values = dict(fields)
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(ContextReceipt)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return ContextReceipt(
+        **values,
+        receipt_sha256=_digest(provisional._payload()),
+        _token=_RECEIPT_TOKEN,
+    )
+
+
+def _estimate_tokens(byte_count):
+    # Conservative rough estimate only — never used as authority.
+    if byte_count <= 0:
+        return 0
+    return max(1, (byte_count + AVG_CHARS_PER_TOKEN - 1) // AVG_CHARS_PER_TOKEN)
+
+
+def _measure(obj):
+    if hasattr(obj, "canonical_bytes"):
+        return len(obj.canonical_bytes())
+    if hasattr(obj, "to_dict"):
+        return len(_canonical(obj.to_dict()))
+    return len(_canonical(obj))
+
+
+def assemble_context_package(repo_root, request, model):
+    """Assemble bounded context package from plan + extractions.
+
+    Priority when full: task contract → authority/non-goals → editable paths
+    → acceptance → TCB warnings → interfaces → deps → tests → arch →
+    supporting. Never silently drop critical; incomplete/needs_review if
+    critical missing. Completeness is descriptive only.
+    """
+    if not isinstance(request, ContextTaskRequest):
+        raise ContextEngineError("request invalid")
+    if not isinstance(model, SystemModel):
+        raise ContextEngineError("model invalid")
+    if request.base_sha != model.base_sha:
+        raise ContextEngineError("request/model base_sha mismatch")
+    budget = request.budget
+    if budget.package_budget_bytes > HARD_MAX_PACKAGE_BUDGET_BYTES:
+        raise ContextEngineError("package budget exceeds hard max")
+
+    plan = plan_context_selection(request, model)
+    uncertainties = list(plan.uncertainties)
+    excerpts = []
+    interfaces = []
+    dep_summaries = []
+    tests = []
+    architecture = []
+    source_refs = []
+    tcb_warnings = []
+    flags = []
+    bytes_used = 0
+    critical_missing = False
+    restricted_hit = False
+
+    # Critical envelope: task contract + non-goals + acceptance (always first)
+    contract_blob = {
+        "kind": "task_contract",
+        "task_id": request.task_id,
+        "objective": request.objective,
+        "request_sha256": request.request_sha256,
+        "base_sha": request.base_sha,
+    }
+    non_goals_blob = {
+        "kind": "authority_non_goals",
+        "non_goals": list(request.non_goals),
+        "authority_flags": _zero_authority_dict(),
+        "write_permission_granted": False,
+    }
+    acceptance_blob = {
+        "kind": "acceptance",
+        "acceptance": list(request.acceptance),
+    }
+    for blob in (contract_blob, non_goals_blob, acceptance_blob):
+        size = len(_canonical(blob))
+        if bytes_used + size > budget.package_budget_bytes:
+            critical_missing = True
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="critical_missing",
+                    subject=blob["kind"],
+                    detail_code="budget_blocked_critical",
+                )
+            )
+            flags.append("critical_budget_pressure")
+            break
+        bytes_used += size
+        source_refs.append(
+            seal_source_ref(
+                kind=blob["kind"],
+                path=None,
+                selection_tag="REQUIRED",
+                digest=_digest(_canonical(blob)),
+            )
+        )
+
+    # Editable / allowed paths as explicit refs
+    for path in request.scope.allowed_paths:
+        blob = {"kind": "editable_path", "path": path, "editable_intent": True}
+        size = len(_canonical(blob))
+        if bytes_used + size > budget.package_budget_bytes:
+            critical_missing = True
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="critical_missing",
+                    subject=path,
+                    detail_code="editable_path_omitted",
+                )
+            )
+            continue
+        bytes_used += size
+        # Bind inventory digest when present
+        digest = next(
+            (
+                item.content_sha256
+                for item in model.inventory.files
+                if item.path == path
+            ),
+            _digest(path),
+        )
+        source_refs.append(
+            seal_source_ref(
+                kind="editable_path",
+                path=path,
+                selection_tag="REQUIRED",
+                digest=digest,
+            )
+        )
+        if is_tcb_path(path):
+            warning = {
+                "path": path,
+                "is_tcb": True,
+                "detail_code": "tcb_editable_intent",
+                "classification": model_tcb_classification(model, path),
+            }
+            # Strip any accidental large payloads — classification is small.
+            wsize = len(_canonical(warning))
+            if bytes_used + wsize <= budget.package_budget_bytes:
+                bytes_used += wsize
+                tcb_warnings.append(warning)
+
+    # REQUIRED excerpts from plan (critical)
+    required_items = [
+        item for item in plan.items
+        if item.selection_tag == "REQUIRED" and item.path is not None
+        and item.reason_code != "secret_excluded"
+    ]
+    supporting_items = [
+        item for item in plan.items
+        if item.selection_tag in ("SUPPORTING", "POSSIBLE")
+        and item.path is not None
+    ]
+
+    def _add_excerpt(item, tag):
+        nonlocal bytes_used, critical_missing, restricted_hit
+        if len(excerpts) >= budget.max_excerpts:
+            return False
+        if item.path in request.scope.forbidden_paths:
+            return False
+        if classify_secret_path(item.path) is not None:
+            restricted_hit = True
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="restricted_secret",
+                    subject=item.path,
+                    detail_code="omitted_from_package",
+                )
+            )
+            return False
+        ex = extract_excerpt(
+            repo_root,
+            base_sha=request.base_sha,
+            path=item.path,
+            budget_bytes=budget.excerpt_budget_bytes,
+        )
+        size = _measure(ex)
+        if bytes_used + size > budget.package_budget_bytes:
+            if tag == "REQUIRED":
+                critical_missing = True
+                uncertainties.append(
+                    seal_uncertainty(
+                        kind="critical_missing",
+                        subject=item.path,
+                        detail_code="required_excerpt_budget",
+                    )
+                )
+            else:
+                uncertainties.append(
+                    seal_uncertainty(
+                        kind="budget_exhausted",
+                        subject=item.path,
+                        detail_code="supporting_omitted",
+                    )
+                )
+            return False
+        if not ex.available:
+            if ex.restriction and "secret" in ex.restriction:
+                restricted_hit = True
+            if tag == "REQUIRED":
+                critical_missing = True
+                uncertainties.append(
+                    seal_uncertainty(
+                        kind="critical_missing",
+                        subject=item.path,
+                        detail_code=ex.restriction or "unavailable",
+                    )
+                )
+            else:
+                uncertainties.append(
+                    seal_uncertainty(
+                        kind="missing_source",
+                        subject=item.path,
+                        detail_code=ex.restriction or "unavailable",
+                    )
+                )
+            # Still record unavailable structured excerpt without secret bytes.
+            excerpts.append(ex)
+            bytes_used += size
+            return True
+        excerpts.append(ex)
+        bytes_used += size
+        region = None
+        if ex.available and ex.start_line >= 1 and ex.end_line >= ex.start_line:
+            region = (ex.start_line, ex.end_line)
+        source_refs.append(
+            seal_source_ref(
+                kind="file_excerpt",
+                path=ex.path,
+                selection_tag=tag,
+                digest=ex.excerpt_sha256,
+                region=region,
+            )
+        )
+        if is_tcb_path(ex.path):
+            warning = {
+                "path": ex.path,
+                "is_tcb": True,
+                "detail_code": "tcb_visible_in_context",
+            }
+            wsize = len(_canonical(warning))
+            if bytes_used + wsize <= budget.package_budget_bytes:
+                bytes_used += wsize
+                tcb_warnings.append(warning)
+        return True
+
+    for item in required_items:
+        if len(excerpts) >= budget.max_excerpts:
+            break
+        _add_excerpt(item, "REQUIRED")
+
+    # Interfaces for required python neighbors
+    iface_paths = []
+    for item in required_items:
+        if item.path and item.path.endswith(".py") and item.path not in iface_paths:
+            iface_paths.append(item.path)
+    for item in supporting_items:
+        if item.path and item.path.endswith(".py") and item.selection_tag == "SUPPORTING":
+            if item.path not in iface_paths:
+                iface_paths.append(item.path)
+        if len(iface_paths) >= 16:
+            break
+    for path in iface_paths[:16]:
+        summary = enrich_interface_summary(
+            repo_root, base_sha=request.base_sha, path=path
+        )
+        size = _measure(summary)
+        if bytes_used + size > budget.package_budget_bytes:
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="budget_exhausted",
+                    subject=path,
+                    detail_code="interface_omitted",
+                )
+            )
+            continue
+        interfaces.append(summary)
+        bytes_used += size
+        if summary.available:
+            source_refs.append(
+                seal_source_ref(
+                    kind="interface_summary",
+                    path=path,
+                    selection_tag="SUPPORTING",
+                    digest=summary.summary_sha256,
+                )
+            )
+        elif summary.restriction == "parse_failure":
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="parse_failure",
+                    subject=path,
+                    detail_code="ast_failed",
+                )
+            )
+
+    # Dependency summaries for seed components
+    comp_ids = list(request.scope.components)
+    for item in plan.items:
+        if item.component_id and item.component_id not in comp_ids:
+            if item.selection_tag == "REQUIRED":
+                comp_ids.append(item.component_id)
+    for cid in comp_ids[: budget.max_components]:
+        dep = seal_dependency_summary(model, cid)
+        size = _measure(dep)
+        if bytes_used + size > budget.package_budget_bytes:
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="budget_exhausted",
+                    subject=cid,
+                    detail_code="deps_omitted",
+                )
+            )
+            continue
+        dep_summaries.append(dep)
+        bytes_used += size
+
+    # Related tests
+    seed_paths = list(request.scope.seed_paths) + list(request.scope.allowed_paths)
+    related = retrieve_related_tests(model, seed_paths=seed_paths)
+    for test in related:
+        size = len(_canonical(test))
+        if bytes_used + size > budget.package_budget_bytes:
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="budget_exhausted",
+                    subject=test["path"],
+                    detail_code="test_omitted",
+                )
+            )
+            break
+        tests.append(test)
+        bytes_used += size
+        source_refs.append(
+            seal_source_ref(
+                kind="test_ref",
+                path=test["path"],
+                selection_tag="SUPPORTING",
+                digest=test["digest"],
+            )
+        )
+
+    # Architecture evidence
+    arch = retrieve_architecture_evidence(
+        repo_root,
+        model,
+        base_sha=request.base_sha,
+        seed_paths=seed_paths,
+    )
+    for ex in arch:
+        size = _measure(ex)
+        if bytes_used + size > budget.package_budget_bytes:
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="budget_exhausted",
+                    subject=ex.path,
+                    detail_code="arch_omitted",
+                )
+            )
+            break
+        architecture.append(ex)
+        bytes_used += size
+        if ex.available:
+            region = None
+            if ex.start_line >= 1 and ex.end_line >= ex.start_line:
+                region = (ex.start_line, ex.end_line)
+            source_refs.append(
+                seal_source_ref(
+                    kind="architecture_evidence",
+                    path=ex.path,
+                    selection_tag="SUPPORTING",
+                    digest=ex.excerpt_sha256,
+                    region=region,
+                )
+            )
+
+    # Supporting excerpts last
+    for item in supporting_items:
+        if len(excerpts) >= budget.max_excerpts:
+            uncertainties.append(
+                seal_uncertainty(
+                    kind="budget_exhausted",
+                    subject="excerpts",
+                    detail_code="excerpt_count_bound",
+                )
+            )
+            break
+        if any(ex.path == item.path for ex in excerpts):
+            continue
+        if not _add_excerpt(item, item.selection_tag):
+            # budget stop for supporting is fine
+            if any(
+                u.detail_code == "supporting_omitted"
+                for u in uncertainties[-3:]
+            ):
+                # keep going until hard stop on bytes repeatedly
+                pass
+
+    # Completeness (descriptive only — never merge/execute/trust/approve)
+    if critical_missing:
+        completeness = "incomplete"
+        needs_review = True
+        flags.append("critical_missing")
+    elif restricted_hit and uncertainties:
+        completeness = "restricted"
+        needs_review = True
+        flags.append("restricted_content")
+    elif any(
+        item.kind in ("ambiguous_ownership", "model_uncertainty")
+        for item in uncertainties
+    ) and any(
+        item.kind == "critical_missing" for item in uncertainties
+    ):
+        completeness = "conflicting"
+        needs_review = True
+    elif uncertainties:
+        completeness = "sufficient_with_uncertainty"
+        needs_review = True
+    elif not excerpts and not request.scope.seed_paths:
+        completeness = "unknown"
+        needs_review = True
+    else:
+        completeness = "sufficient"
+        needs_review = False
+
+    if len(uncertainties) > MAX_UNCERTAINTIES:
+        uncertainties = uncertainties[:MAX_UNCERTAINTIES]
+        flags.append("uncertainty_truncated")
+
+    # Canonical order of collections
+    excerpts = tuple(
+        sorted(excerpts, key=lambda item: (item.path, item.start_line))
+    )
+    interfaces = tuple(sorted(interfaces, key=lambda item: item.path))
+    dep_summaries = tuple(
+        sorted(dep_summaries, key=lambda item: item.component_id)
+    )
+    tests = tuple(sorted(tests, key=lambda item: item["path"]))
+    architecture = tuple(sorted(architecture, key=lambda item: item.path))
+    source_refs = tuple(
+        sorted(
+            source_refs,
+            key=lambda item: (item.kind, item.path or "", item.digest),
+        )
+    )
+    uncertainties = tuple(
+        sorted(
+            uncertainties,
+            key=lambda item: (item.kind, item.subject, item.detail_code),
+        )
+    )
+    tcb_warnings = tuple(
+        sorted(tcb_warnings, key=lambda item: item.get("path", ""))
+    )
+    flags = tuple(sorted(set(flags)))
+
+    package = _seal_package(
+        request_sha256=request.request_sha256,
+        model_sha256=model.model_sha256,
+        base_sha=request.base_sha,
+        completeness=completeness,
+        excerpts=excerpts,
+        interfaces=interfaces,
+        dependency_summaries=dep_summaries,
+        tests=tests,
+        architecture=architecture,
+        source_refs=source_refs,
+        uncertainties=uncertainties,
+        tcb_warnings=tcb_warnings,
+        bytes_used=bytes_used,
+        token_estimate=_estimate_tokens(bytes_used),
+        needs_review=needs_review,
+    )
+    receipt = _seal_receipt(
+        package_sha256=package.package_sha256,
+        request_sha256=request.request_sha256,
+        model_sha256=model.model_sha256,
+        base_sha=request.base_sha,
+        excerpt_count=len(excerpts),
+        interface_count=len(interfaces),
+        test_count=len(tests),
+        architecture_count=len(architecture),
+        uncertainty_count=len(uncertainties),
+        bytes_used=bytes_used,
+        token_estimate=package.token_estimate,
+        completeness=completeness,
+        needs_review=needs_review,
+        flags=flags,
+    )
+    return package, receipt
