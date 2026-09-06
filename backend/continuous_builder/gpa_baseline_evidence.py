@@ -31,6 +31,17 @@ What this can and cannot tell us:
   outcome -- git records none of this. These stay ``UNKNOWN``. This
   module makes no network call to any provider to try to fill them in.
 
+History availability -- a *shallow* checkout (e.g. CI's ``fetch-depth:
+1``) has no merge graph to inspect at all. That is a fundamentally
+different state from "history was inspected and no merges were found in
+range", and this module never conflates the two: both
+:func:`discover_merge_commit_shas` and :func:`reconstruct_pr_observation`
+raise :class:`HistoryUnavailableError` (rather than silently returning
+an empty result) when the local checkout is shallow, and
+:class:`BaselineEvidenceSnapshot` carries an explicit
+``history_available`` flag rather than ever letting "unavailable" show
+up indistinguishably as "zero historical merges".
+
 Zero authority. A historical observation is evidence, not a judgment --
 it grants no capability and does not feed any current decision.
 """
@@ -88,6 +99,16 @@ class BaselineEvidenceError(GPAEvalSchemaError):
     """Raised when baseline evidence cannot be reconstructed safely."""
 
 
+class HistoryUnavailableError(BaselineEvidenceError):
+    """Raised when the local checkout has no usable merge history.
+
+    Distinct from a plain :class:`BaselineEvidenceError` on purpose: a
+    caller catching this specific error knows the reason nothing was
+    found is "this checkout is shallow", never "the repository was fully
+    inspected and genuinely has zero matching merges".
+    """
+
+
 def _run_git(repo_root, args):
     try:
         proc = subprocess.run(
@@ -103,13 +124,32 @@ def _run_git(repo_root, args):
     return proc.stdout
 
 
+def repository_history_is_shallow(repo_root):
+    """True iff the local checkout is a shallow clone (e.g. CI's
+    ``fetch-depth: 1``). Read-only (``git rev-parse``); no network.
+    """
+    output = _run_git(
+        repo_root, ["rev-parse", "--is-shallow-repository"],
+    ).strip()
+    return output == "true"
+
+
 def discover_merge_commit_shas(repo_root, *, limit=30):
     """Return the ``limit`` most recent merge commit SHAs on the current
     branch, newest first. Read-only (``git log``); no checkout, no
     network.
+
+    Raises :class:`HistoryUnavailableError` -- rather than returning an
+    empty tuple -- when the checkout is shallow: an empty tuple must only
+    ever mean "the full history was inspected and no merges matched",
+    never "there was no history to inspect".
     """
     if type(limit) is not int or limit <= 0 or limit > MAX_OBSERVATIONS:
         raise BaselineEvidenceError("limit is malformed")
+    if repository_history_is_shallow(repo_root):
+        raise HistoryUnavailableError(
+            "repository is a shallow clone; merge history is unavailable"
+        )
     output = _run_git(
         repo_root,
         ["log", "--merges", f"-n{limit}", "--pretty=format:%H"],
@@ -273,12 +313,21 @@ def _validate_provenance(obj):
 def reconstruct_pr_observation(repo_root, merge_commit_sha):
     """Reconstruct one :class:`HistoricalPRObservation` from git history.
 
+    Raises :class:`HistoryUnavailableError` if the checkout is shallow
+    (an arbitrary historical commit's parent objects are typically absent
+    in that case, even when the commit's own SHA happens to be known) --
+    never silently treats a shallow checkout as "not a merge commit".
+
     Raises :class:`BaselineEvidenceError` if ``merge_commit_sha`` is not a
     two-parent merge commit -- callers building a snapshot over many
     commits are expected to skip and record such failures rather than
     treat them as a hard stop (see :func:`create_baseline_evidence_snapshot`).
     """
     require_base_sha(merge_commit_sha, "merge_commit_sha")
+    if repository_history_is_shallow(repo_root):
+        raise HistoryUnavailableError(
+            "repository is a shallow clone; merge history is unavailable"
+        )
     parents_line = _run_git(
         repo_root, ["show", "-s", "--format=%P", merge_commit_sha],
     ).strip()
@@ -352,10 +401,19 @@ def reconstruct_pr_observation(repo_root, merge_commit_sha):
 
 @dataclass(frozen=True)
 class BaselineEvidenceSnapshot:
-    """Sealed, ordered collection of historical PR observations."""
+    """Sealed, ordered collection of historical PR observations.
+
+    ``history_available`` is the explicit signal distinguishing "the
+    repository's merge history was inspected" from "it could not be":
+    when ``False``, ``observations`` is always empty -- but an empty
+    ``observations`` with ``history_available=True`` is also a valid,
+    meaningful state (history was checked; there was genuinely nothing
+    in range). The two must never be confused.
+    """
 
     version: str
     observations: tuple
+    history_available: bool
     snapshot_sha256: str
     publication_authorized: bool = False
     queue_transition_authorized: bool = False
@@ -387,6 +445,12 @@ class BaselineEvidenceSnapshot:
             raise BaselineEvidenceError(
                 "observations are not canonically ordered/unique"
             )
+        if type(self.history_available) is not bool:
+            raise BaselineEvidenceError("history_available must be a bool")
+        if not self.history_available and self.observations:
+            raise BaselineEvidenceError(
+                "observations must be empty when history_available is False"
+            )
         require_no_authority(self)
         require_sha256(self.snapshot_sha256, "snapshot_sha256")
         if self.snapshot_sha256 != sha256_hex(canonical_json(self._body())):
@@ -395,6 +459,7 @@ class BaselineEvidenceSnapshot:
     def _body(self):
         return {
             "github_authorized": False,
+            "history_available": self.history_available,
             "main_advancement_authorized": False,
             "merge_authorized": False,
             "observations": [item.to_dict() for item in self.observations],
@@ -419,8 +484,19 @@ def create_baseline_evidence_snapshot(repo_root, *, limit=15):
     skipped rather than aborting the whole snapshot -- this function
     trades completeness for never crashing on repository history it
     cannot cleanly interpret.
+
+    When the checkout is shallow, this does NOT raise and does NOT
+    pretend zero merges exist -- it returns a snapshot with
+    ``history_available=False`` and empty ``observations``, so a caller
+    can tell "nothing to report" apart from "couldn't check" by reading
+    ``history_available`` rather than guessing from an empty list.
     """
-    shas = discover_merge_commit_shas(repo_root, limit=limit)
+    try:
+        shas = discover_merge_commit_shas(repo_root, limit=limit)
+        history_available = True
+    except HistoryUnavailableError:
+        shas = ()
+        history_available = False
     observations = []
     for sha in shas:
         try:
@@ -430,7 +506,11 @@ def create_baseline_evidence_snapshot(repo_root, *, limit=15):
     ordered = tuple(
         sorted(observations, key=lambda item: item.merge_commit_sha)
     )
-    values = {"version": SNAPSHOT_VERSION, "observations": ordered}
+    values = {
+        "version": SNAPSHOT_VERSION,
+        "observations": ordered,
+        "history_available": history_available,
+    }
     for name in AUTHORITY_FLAGS:
         values[name] = False
     provisional = object.__new__(BaselineEvidenceSnapshot)

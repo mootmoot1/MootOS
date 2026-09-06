@@ -190,13 +190,29 @@ this gap — they are recorded as `"unknown"`, never a fabricated zero.
 **11. What actual baseline observations were captured?**
 `create_baseline_evidence_snapshot(repo_root, limit=25)` reconstructs 25
 real `HistoricalPRObservation`s from this repository's own merge
-history. Concretely verified: PR #93 (CB-029) reconstructs as branch
+history — **when run against a full (non-shallow) local clone**.
+Concretely verified that way: PR #93 (CB-029) reconstructs as branch
 `grok/continuous-builder-cb029-context-engine-v1`, `provider_label`
 `"grok"`, `+5646/-0` across 11 files, 9 commits. Across the last 25
 merges the real, mixed distribution recovered was `codex: 15, grok: 4,
 chatgpt: 3, unknown: 2, claude: 1` (branch-prefix heuristic; 2 merges'
 branch names didn't match any of the 4 known prefixes and were correctly
 left `"unknown"` rather than guessed).
+
+This local, full-history reconstruction is **not** universally available
+— it requires a full clone. CI checks out this repository with
+`fetch-depth: 1` (shallow), where the commit graph above simply does not
+exist locally. `discover_merge_commit_shas`/`reconstruct_pr_observation`
+detect this via `repository_history_is_shallow()` and raise
+`HistoryUnavailableError` rather than returning an empty/zero result;
+`BaselineEvidenceSnapshot.history_available` carries the same signal
+through the aggregate snapshot API, so "history could not be checked" is
+never conflated with "history was checked and found empty". The GP-A7
+test suite is split accordingly: hermetic logic tests run a synthetic,
+disposable git repository built fresh in `tmp_path` (works identically
+in any CI checkout depth) and are the primary/required coverage; the
+CB-029 real-history proof above is an explicit, environment-dependent
+test that is skipped (not failed) when the outer checkout is shallow.
 
 **12. What was reconstructed vs directly measured?**
 Every `HistoricalPRObservation` field carries an explicit
@@ -311,3 +327,6 @@ timestamp, hostname, or random input anywhere in either digest.
   directly in Python and covered by uniqueness tests); a future
   JSON/YAML corpus loader would need its own duplicate-ID and
   leakage-prevention checks re-verified independently of this phase's.
+- Real MootOS-history reconstruction (GP-A7) requires a full local
+  clone; it is not available in a shallow checkout (e.g. CI's
+  `fetch-depth: 1`), and is not claimed to be — see item 11 above.
