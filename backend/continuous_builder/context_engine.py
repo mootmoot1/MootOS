@@ -1786,3 +1786,327 @@ def selection_grants_edit_permission(plan, path):
             # Context Engine never grants write; policy must re-check.
             return False
     return False
+
+
+
+# ---------------------------------------------------------------------------
+# CB-029D — static AST enrichment (no execute / import / eval)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class InterfaceSummary:
+    """Static interface summary for a Python module — evidence only."""
+
+    path: str
+    base_sha: str
+    file_sha256: str
+    classes: tuple
+    functions: tuple
+    constants: tuple
+    imports: tuple
+    available: bool
+    restriction: str | None
+    summary_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _INTERFACE_TOKEN:
+            raise ContextEngineError(
+                "interface summary requires trusted system construction"
+            )
+        _canonical_repo_path(self.path)
+        _require_base_sha(self.base_sha)
+        _require_sha256(self.file_sha256, "file digest")
+        for field_name, value, bound in (
+            ("classes", self.classes, MAX_INTERFACE_SYMBOLS),
+            ("functions", self.functions, MAX_INTERFACE_SYMBOLS),
+            ("constants", self.constants, MAX_INTERFACE_SYMBOLS),
+            ("imports", self.imports, MAX_IMPORTS),
+        ):
+            if type(value) is not tuple or len(value) > bound:
+                raise ContextEngineError(f"{field_name} malformed")
+        if type(self.available) is not bool:
+            raise ContextEngineError("available malformed")
+        if self.available and self.restriction is not None:
+            raise ContextEngineError("available summary cannot be restricted")
+        if not self.available and self.restriction is None:
+            raise ContextEngineError("unavailable summary needs restriction")
+        _require_no_authority(self)
+        _require_sha256(self.summary_sha256, "summary digest")
+        if self.summary_sha256 != _digest(self._payload()):
+            raise ContextEngineError("summary digest mismatch")
+
+    def _body(self):
+        body = {
+            "available": self.available,
+            "base_sha": self.base_sha,
+            "classes": list(self.classes),
+            "constants": list(self.constants),
+            "file_sha256": self.file_sha256,
+            "functions": list(self.functions),
+            "imports": list(self.imports),
+            "path": self.path,
+            "restriction": self.restriction,
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["summary_sha256"] = self.summary_sha256
+        return body
+
+
+def _seal_interface_summary(
+    *,
+    path,
+    base_sha,
+    file_sha256,
+    classes,
+    functions,
+    constants,
+    imports,
+    available,
+    restriction,
+):
+    values = {
+        "path": path,
+        "base_sha": base_sha,
+        "file_sha256": file_sha256,
+        "classes": tuple(classes),
+        "functions": tuple(functions),
+        "constants": tuple(constants),
+        "imports": tuple(imports),
+        "available": available,
+        "restriction": restriction,
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(InterfaceSummary)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return InterfaceSummary(
+        **values,
+        summary_sha256=_digest(provisional._payload()),
+        _token=_INTERFACE_TOKEN,
+    )
+
+
+def _format_signature(node):
+    """Format a function/method signature without evaluating defaults."""
+    args = node.args
+    parts = []
+    for arg in args.posonlyargs:
+        parts.append(arg.arg)
+    if args.posonlyargs:
+        parts.append("/")
+    for arg in args.args:
+        parts.append(arg.arg)
+    if args.vararg is not None:
+        parts.append("*" + args.vararg.arg)
+    elif args.kwonlyargs:
+        parts.append("*")
+    for arg in args.kwonlyargs:
+        parts.append(arg.arg)
+    if args.kwarg is not None:
+        parts.append("**" + args.kwarg.arg)
+    # Never render default values (may execute-like / secret-ish literals).
+    return f"{node.name}({', '.join(parts)})"
+
+
+def _safe_constant_name(node):
+    if isinstance(node, ast.Name) and node.id.isupper():
+        return node.id
+    if isinstance(node, ast.Tuple):
+        names = []
+        for elt in node.elts:
+            if isinstance(elt, ast.Name) and elt.id.isupper():
+                names.append(elt.id)
+            else:
+                return None
+        return ",".join(names) if names else None
+    return None
+
+
+def enrich_interface_summary(repo_root, *, base_sha, path):
+    """Static AST enrichment: classes/fns/signatures/constants/imports.
+
+    No execute, import, eval, decorator execution, or default evaluation.
+    AST fail → unavailable with parse_failure uncertainty-compatible code.
+    """
+    _require_base_sha(base_sha)
+    secret = classify_secret_path(path)
+    if secret is not None:
+        try:
+            canon = _canonical_repo_path(path)
+        except ContextEngineError:
+            canon = "restricted"
+        return _seal_interface_summary(
+            path=canon,
+            base_sha=base_sha,
+            file_sha256=_digest(b""),
+            classes=(),
+            functions=(),
+            constants=(),
+            imports=(),
+            available=False,
+            restriction=secret,
+        )
+
+    excerpt = extract_excerpt(
+        repo_root,
+        base_sha=base_sha,
+        path=path,
+        budget_bytes=HARD_MAX_EXCERPT_BUDGET_BYTES,
+    )
+    if not excerpt.available:
+        return _seal_interface_summary(
+            path=excerpt.path,
+            base_sha=base_sha,
+            file_sha256=excerpt.file_sha256,
+            classes=(),
+            functions=(),
+            constants=(),
+            imports=(),
+            available=False,
+            restriction=excerpt.restriction or "unavailable",
+        )
+    if not excerpt.path.endswith(".py"):
+        return _seal_interface_summary(
+            path=excerpt.path,
+            base_sha=base_sha,
+            file_sha256=excerpt.file_sha256,
+            classes=(),
+            functions=(),
+            constants=(),
+            imports=(),
+            available=False,
+            restriction="non_python",
+        )
+    # Prefer full file for interface when within hard max; else use excerpt.
+    try:
+        _root, canon, full = _resolve_regular_file(repo_root, excerpt.path)
+        data = full.read_bytes()
+        if len(data) > HARD_MAX_EXCERPT_BUDGET_BYTES * 4:
+            source = excerpt.text
+            file_digest = excerpt.file_sha256
+        else:
+            source = data.decode("utf-8")
+            file_digest = _digest(data)
+            if _content_looks_secret(source):
+                return _seal_interface_summary(
+                    path=canon,
+                    base_sha=base_sha,
+                    file_sha256=file_digest,
+                    classes=(),
+                    functions=(),
+                    constants=(),
+                    imports=(),
+                    available=False,
+                    restriction="secret_content",
+                )
+    except (ContextEngineError, OSError, UnicodeDecodeError):
+        source = excerpt.text
+        file_digest = excerpt.file_sha256
+        canon = excerpt.path
+
+    try:
+        tree = ast.parse(source, filename=canon)
+    except SyntaxError:
+        return _seal_interface_summary(
+            path=canon,
+            base_sha=base_sha,
+            file_sha256=file_digest,
+            classes=(),
+            functions=(),
+            constants=(),
+            imports=(),
+            available=False,
+            restriction="parse_failure",
+        )
+
+    classes = []
+    functions = []
+    constants = []
+    imports = []
+
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            methods = []
+            for child in node.body:
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    methods.append(_format_signature(child))
+            entry = {
+                "name": node.name,
+                "methods": methods[:MAX_INTERFACE_SYMBOLS],
+                "bases": [
+                    ast.dump(b) if not isinstance(b, ast.Name) else b.id
+                    for b in node.bases[:8]
+                ],
+            }
+            classes.append(entry)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.append(_format_signature(node))
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                name = _safe_constant_name(target)
+                if name:
+                    constants.append(name)
+        elif isinstance(node, ast.AnnAssign):
+            name = _safe_constant_name(node.target)
+            if name:
+                constants.append(name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                imports.append(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            for alias in node.names:
+                if node.level:
+                    # Relative import — record conservatively without resolving.
+                    imports.append("." * node.level + mod + ":" + alias.name)
+                else:
+                    imports.append((mod + ":" + alias.name) if mod else alias.name)
+
+    return _seal_interface_summary(
+        path=canon,
+        base_sha=base_sha,
+        file_sha256=file_digest,
+        classes=classes[:MAX_INTERFACE_SYMBOLS],
+        functions=functions[:MAX_INTERFACE_SYMBOLS],
+        constants=sorted(set(constants))[:MAX_INTERFACE_SYMBOLS],
+        imports=imports[:MAX_IMPORTS],
+        available=True,
+        restriction=None,
+    )
+
+
+def interface_summary_for_neighbors(repo_root, *, base_sha, paths):
+    """Build interface summaries for neighbor modules (bounded)."""
+    if type(paths) not in (list, tuple):
+        raise ContextEngineError("paths malformed")
+    if len(paths) > MAX_EXCERPTS:
+        raise ContextEngineError("paths exceed bound")
+    out = []
+    for path in paths:
+        if not str(path).endswith(".py"):
+            continue
+        out.append(
+            enrich_interface_summary(
+                repo_root, base_sha=base_sha, path=path
+            )
+        )
+        if len(out) >= MAX_EXCERPTS:
+            break
+    return tuple(out)
