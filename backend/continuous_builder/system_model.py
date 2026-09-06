@@ -1250,10 +1250,11 @@ def _resolve_import_to_component(imported_name, component_ids):
 
     Returns (kind, target_component_id).
     Never invents certainty for ambiguous cases.
+    Prefers the longest matching component id so a parent package does not
+    make a more specific child match ambiguous.
     """
     if not imported_name or not isinstance(imported_name, str):
         return "unresolved_import", None
-    # Stdlib / external heuristic: top-level not in known internal roots.
     top = imported_name.split(".", 1)[0]
     internal_roots = {
         "backend",
@@ -1267,45 +1268,41 @@ def _resolve_import_to_component(imported_name, component_ids):
     if top not in internal_roots:
         return "external_import", None
 
-    # Prefer longest matching component id derived from import prefixes.
-    candidates = []
-    # Map common patterns:
-    # backend.continuous_builder.foo -> backend.continuous_builder
-    # backend.foo -> backend.foo (package) or backend
-    if imported_name.startswith("backend.continuous_builder"):
-        cid = "backend.continuous_builder"
-        if cid in component_ids:
-            candidates.append(cid)
-    elif imported_name.startswith("backend."):
-        rest = imported_name[len("backend."):].split(".", 1)[0]
-        cid = f"backend.{rest}"
-        if cid in component_ids:
-            candidates.append(cid)
-        elif "backend" in component_ids:
-            candidates.append("backend")
-    elif imported_name.startswith("tests"):
-        if "tests" in component_ids:
-            candidates.append("tests")
-    elif imported_name.startswith("scripts"):
-        if "scripts" in component_ids:
-            candidates.append("scripts")
-
-    # Also try exact package-hint style component match on prefixes.
     parts = imported_name.split(".")
+    matches = []
     for i in range(len(parts), 0, -1):
         prefix = ".".join(parts[:i])
-        if prefix in component_ids and prefix not in candidates:
-            candidates.append(prefix)
+        if prefix in component_ids:
+            matches.append(prefix)
+    # Special-case: backend.<module> files live in the flat "backend"
+    # component when no deeper package component exists.
+    if (
+        imported_name.startswith("backend.")
+        and "backend" in component_ids
+        and "backend" not in matches
+    ):
+        rest = imported_name[len("backend."):]
+        deeper = f"backend.{rest.split('.', 1)[0]}"
+        if deeper not in component_ids:
+            matches.append("backend")
 
+    if not matches:
+        if imported_name.startswith("tests") and "tests" in component_ids:
+            return "internal_import", "tests"
+        if imported_name.startswith("scripts") and "scripts" in component_ids:
+            return "internal_import", "scripts"
+        return "unresolved_import", None
+
+    # Longest match wins; only ambiguous if two equal-length distinct ids.
+    longest = max(len(item) for item in matches)
+    top_matches = [item for item in matches if len(item) == longest]
     unique = []
-    for item in candidates:
+    for item in top_matches:
         if item not in unique:
             unique.append(item)
     if len(unique) == 1:
         return "internal_import", unique[0]
-    if len(unique) > 1:
-        return "ambiguous_import", None
-    return "unresolved_import", None
+    return "ambiguous_import", None
 
 
 def _parse_python_imports(source_bytes):
