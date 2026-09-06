@@ -110,58 +110,83 @@ scheduling, retries, worker PR authority or Main advancement is added here.
 
 ## Validation status
 
-**HOLD: mandatory real contained adversarial proofs remain incomplete.**
+**READY FOR REVIEW** (do not merge automatically). Authority flags remain false;
+`human_review_required` remains true. Passing proofs are evidence, not authority.
 
-- Initial focused verifier/check-runner/artifact/trust-chain/supervisor run:
-  205 passed, 6 opt-in Docker cases skipped.
-- Final CB-026C tests after security review: 47 passed, 3 real cases skipped.
-- Broader Continuous Builder run interrupted after 464.86 seconds:
-  554 passed, 2 failed, 6 skipped; not a completed/passing broader run.
-  The two existing overflow tests observed `check_timeout` rather than overflow
-  during host delays. Their unchanged isolated rerun passed both in 0.96 seconds.
-- Full flake8 passed for both new Python files.
+### Delayed-create cleanup fix (CB-026B `check_runtime`)
 
-Real proof used the existing local CB-026B image manifest
-`a6f5e9858a815c7db9cefb9d647f919faafe63639321e658d680b48fb3d0d775`,
+Confirmed: when `docker create` timed out without a verified container id,
+`_cleanup_container` could treat a single empty name listing as
+`cleanup_confirmed=True` while the daemon later finished create (observed
+orphan `a9e82eef…`). Fix: `_cleanup_container(..., create_verified=…)`; without
+a verified create id, best-effort rm + bounded grace re-poll still runs, but
+`cleanup_confirmed` stays false (fail closed). Regression tests cover empty-ps
+after unverified create and timed-out create paths.
+
+### Focused tests (this completion)
+
+- Adversarial verifier + check_runner (excluding opt-in real Docker): 117 passed
+- verifier_core + worker_artifact + trust_chain_proof + supervisor: 94 passed
+- Cleanup regressions (`cleanup_unverified` / `cleanup_verified` /
+  `timed_out_create`): 3 passed
+- Opt-in real adversarial (`-k real_adversarial`): **3 passed**
+- Blocking flake8 (`F,E9`) on touched Python: clean
+
+### Real contained adversarial proofs
+
+Image digest `a6f5e9858a815c7db9cefb9d647f919faafe63639321e658d680b48fb3d0d775`,
 config `4adf2d1d6e5959603d214b4c841382668ceebbbc47438b3a2d03b32c54957b72`.
-No images were built/pulled or packages installed. Docker Desktop reported
-4.47.0 (206054), Engine 28.4.0, API 1.51, amd64. Image inspection intermittently
-returned HTTP 500; bounded daemon diagnostics also timed out.
+Docker Desktop 4.47.0 / Engine 28.4.0. No images built/pulled. After proofs,
+`docker ps -a --filter name=cb026b` empty; CHECK_ROOT empty per case.
+Upstream worker admission in these three cases is **simulated**; transport is
+the real offline Docker check path. No separate host-proof harness script was
+present in the worktree to re-run; earlier doc recorded one historical offline
+worker admission that then failed closed on Docker control uncertainty.
 
-One actual offline worker completed and its output was admitted:
-execution `cb026c-worker-positive`, receipt
-`af6cf94b2ef69c53bcc634fa0c2d34c86117fa0e175a134df6bf6a9feba35014`.
-Worker cleanup and stdout provenance were confirmed. The following public check
-failed closed during Docker control with `checks_uncertain` / `execution_uncertain`:
-receipt `b427466f20494c375698ef9e0957ac2c5acd94dadb3de16aacf79af722fdab47`.
-No verifier execution was confirmed in that receipt. Workspace cleanup was true;
-the check, worker and artifact staging roots were subsequently observed empty.
+**A. Positive** (`value.txt = b"2\n"`, sha256
+`53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3`)
 
-A later Docker listing nevertheless found an unstarted container from that
-timed-out create: `a9e82eef656b70526b2449683fcec9354df8f38ddce78ed6b0a57964c42fb2e7`.
-Its mount's parent-path hash exactly matched the failed check receipt's workspace
-identity. State was `created`, not running, with no start time. Thus the earlier
-cleanup observation did not establish durable absence after a delayed Docker
-create. This is an additional containment-lifecycle HOLD, not a passing proof.
-The new layer already refuses further held-out execution after an uncertain
-public result. CB-026B's delayed-create cleanup behavior needs separate review;
-its implementation and limits were not changed in this slice.
-After identifying it as this proof's container, it was explicitly removed and
-a successful exact-ID Docker listing confirmed absence. No unrelated container,
-image or volume was removed.
+- candidate_tree `1671980e21142e16a86779adca33468fcc2d7d6af9c4af76ed93ed052be1a311`
+- structural `ae4062cae4e3e49c29cf8be29c068dc66ff19b2531f94a4969fa21c964e92c21`
+- public: checks_passed, receipt
+  `528f607a8b526425922c4008edf7c71a0dd01fe4e2b722c003927484856abb95`,
+  termination+cleanup confirmed
+- held-out runs: both checks_passed; containers
+  `73f1893d…d2be9132`, `9383b389…e7a58328`; termination+cleanup confirmed
+- classification: `adversarial_verification_passed`
+- adversarial receipt
+  `b6a431763140fbd49dfa95d1919e2a65f02c47fe05093442c8d464a73ef7a06f`
+- all authority flags false; human_review_required true
 
-Positive public/private success, the gamed-public real rejection, and the real
-repeat control have **not** been established. The local proof harness is ready
-to run them once Docker responds within existing bounds. Its repeat negative
-tightens only the second collection deadline to inject a real timeout; it does
-not fabricate a receipt or change the candidate/check plan. That control would
-prove inconsistent execution evidence fails closed, not that a deterministic
-data-only candidate became intrinsically nondeterministic. Unit tests separately
-cover pass/fail and fail/pass observed repeat outcomes.
+**B. Gamed public** (`value.txt = b"3\n"`, sha256
+`1121cfccd5913f0a63fec40a6ffd44ea64f9dc135c66634ba001d10bcf4302a2`)
 
-Do not merge until the mandatory real cases and normal CI are complete.
+- candidate_tree `ca3ed4a0bb08e98373e9def4b291973b7179264c6228b3d1b2a819b3a994cfae`
+- public: checks_passed (weak public digit check), receipt
+  `d88d9f01b3f8be552eb8f6609438131c3514a7b6b6bbbd44ccd781bc32eeacb3`
+- held-out: both checks_failed (exit 1); containers
+  `d09ad7c8…777174bf`, `7a0df969…3671a84`; termination+cleanup confirmed
+- classification: `adversarial_verification_failed`
+  (`held_out_check_failed`, `public_private_outcome_diverged`,
+  `repeat_verification_failed`)
+- adversarial receipt
+  `6a3ddf44bdb44c47f4a3d834c4a612d917f18c678cab81e0c92ab95f6cb62f3e`
 
-The three opt-in cases are reproducible with the existing reviewed image:
+**C. Repeat / nondeterministic** (same correct value as positive; second
+held-out collection deadline tightened to inject real timeout)
+
+- public: checks_passed, receipt
+  `bee0684d8b60760ad40c2b2735bf1700aa428ae0f8b8f1a6d8795db9e61b0002`
+- held-out outcomes: `checks_passed` then `checks_uncertain` (timeout);
+  containers `bed91ab1…8c4dcf`, `b602fa40…cdcd53b35`; cleanup confirmed
+- classification: `adversarial_verification_uncertain` with
+  `nondeterministic_outcome` (also `adversarial_evidence_uncertain`,
+  `held_out_check_failed`, `public_private_outcome_diverged`,
+  `repeat_verification_failed`)
+- adversarial receipt
+  `1902d6d062cd10fad5d35e77710051c550766c8fe7222d20fe3bc69952ad0575`
+
+Do not merge automatically. CI status is recorded on the PR after push.
 
 ```bash
 CB026B_TEST_IMAGE_DIGEST=a6f5e9858a815c7db9cefb9d647f919faafe63639321e658d680b48fb3d0d775 \
@@ -172,4 +197,3 @@ PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider \
 
 These tests simulate upstream worker admission and use the actual production
 Docker check transport. They must not be described as a real worker launch.
-The separate host proof harness uses the actual worker runtime as described above.

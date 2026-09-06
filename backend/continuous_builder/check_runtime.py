@@ -30,6 +30,8 @@ _TMPFS = {
 }
 _MEMORY = 512 * 1024 * 1024
 _PIDS = 16
+# Bounded orphan sweep after create without a verified id (not a confirm window).
+_UNVERIFIED_CREATE_CLEANUP_GRACE_SECONDS = 2.0
 
 
 def _control(cli, argv, timeout=5):
@@ -145,13 +147,42 @@ def _stop(cli, name):
         return False
 
 
-def _cleanup_container(cli, name):
+def _cleanup_container(cli, name, *, create_verified):
+    """Remove by name; only confirm when create identity was verified.
+
+    A timed-out create may still finish in the daemon after the CLI is killed.
+    Without a verified container id, one empty name listing is not durable
+    proof of absence, so cleanup_confirmed must stay false (fail closed).
+    Best-effort rm plus a short grace re-poll still runs to catch delayed
+    creates when possible; confirmation is never granted on that path.
+    """
     try:
-        cli.run(("rm", "--force", name), 5)
-        remaining = _control(cli, (
-            "ps", "-a", "--filter", "name=^/" + name + "$", "--format", "{{.ID}}",
-        ))
-        return remaining.strip() == b""
+        if create_verified:
+            cli.run(("rm", "--force", name), 5)
+            remaining = _control(cli, (
+                "ps", "-a", "--filter", "name=^/" + name + "$",
+                "--format", "{{.ID}}",
+            ))
+            return remaining.strip() == b""
+        # Unverified create: best-effort orphan sweep across a bounded grace
+        # window. Never confirm — delayed create can appear after any empty ps.
+        deadline = time.monotonic() + _UNVERIFIED_CREATE_CLEANUP_GRACE_SECONDS
+        while True:
+            try:
+                cli.run(("rm", "--force", name), 5)
+            except WorkerRuntimeError:
+                pass
+            try:
+                cli.run((
+                    "ps", "-a", "--filter", "name=^/" + name + "$",
+                    "--format", "{{.ID}}",
+                ), 5)
+            except WorkerRuntimeError:
+                pass
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.25)
+        return False
     except (WorkerRuntimeError, CheckRunnerError):
         return False
 
@@ -270,7 +301,10 @@ def _execute_one(cli, image, plan, check, root, index, deadline):
     finally:
         if not result["termination_confirmed"]:
             result["termination_confirmed"] = _stop(cli, name)
-        result["cleanup_confirmed"] = _cleanup_container(cli, name)
+        # Only a verified create id makes a single empty listing meaningful.
+        create_verified = bool(result["container_id"])
+        result["cleanup_confirmed"] = _cleanup_container(
+            cli, name, create_verified=create_verified)
         if not result["termination_confirmed"]:
             failures.add("execution_uncertain")
         if not result["cleanup_confirmed"]:
