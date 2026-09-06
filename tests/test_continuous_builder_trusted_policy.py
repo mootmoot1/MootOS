@@ -384,13 +384,17 @@ def test_categories_and_policies_are_bounded():
 
 def test_omitting_self_path_from_protected_set_fails():
     registry = create_mootos_tcb_registry_v1()
-    self_path = "backend/continuous_builder/trusted_policy.py"
+    self_component = next(
+        component for component in registry.components
+        if component.component_id == "cb_trusted_policy"
+    )
     components = tuple(
         component for component in registry.components
         if component.component_id != "cb_trusted_policy"
     )
     reduced = tuple(
-        path for path in registry.protected_paths if path != self_path
+        path for path in registry.protected_paths
+        if path not in self_component.paths
     )
     with pytest.raises(TrustedPolicyError, match="protect its own path"):
         TrustedPolicyRegistry(
