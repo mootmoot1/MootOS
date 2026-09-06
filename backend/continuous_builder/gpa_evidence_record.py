@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 
 from .gpa_eval_schema import (
     AUTHORITY_FLAGS,
+    PROVENANCE_CODES,
     UNKNOWN,
     GPAEvalSchemaError,
     canonical_json,
@@ -49,15 +50,6 @@ from .gpa_eval_schema import (
 EVIDENCE_SCHEMA_VERSION = "gpa-evidence-record-v1"
 MAX_TEXT_FIELD_BYTES = 2048
 MAX_PROVENANCE_ENTRIES = 64
-
-PROVENANCE_CODES = frozenset(
-    {
-        "measured_directly",
-        "reconstructed",
-        "user_reported",
-        "provider_reported",
-    }
-)
 
 OUTCOME_STATES = frozenset({"completed", "failed", "timeout", "cancelled"})
 VERIFIER_RESULTS = frozenset({"pass", "fail"})

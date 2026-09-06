@@ -33,6 +33,7 @@ __all__ = [
     "GPAEvalSchemaError",
     "GPA_SCHEMA_SUITE_VERSION",
     "UNKNOWN",
+    "PROVENANCE_CODES",
     "AUTHORITY_FLAGS",
     "canonical_json",
     "sha256_hex",
@@ -63,10 +64,22 @@ GPA_SCHEMA_SUITE_VERSION = "gpa-eval-schema-suite-v1"
 
 # The literal sentinel for "not knowable", distinct from any real value
 # (including zero, False, or an empty string). Every optional observational
-# field in GP-A4's evidence record accepts either a validly typed value or
-# exactly this sentinel -- never a fabricated zero/False standing in for
-# missing data.
+# field in GP-A4's evidence record (and GP-A7's historical observations)
+# accepts either a validly typed value or exactly this sentinel -- never a
+# fabricated zero/False standing in for missing data.
 UNKNOWN = "unknown"
+
+# How a known (non-UNKNOWN) observational field value was obtained. Shared
+# by GP-A4 (EvidenceRecord.field_provenance) and GP-A7 (historical PR
+# observations) so both use one vocabulary instead of two.
+PROVENANCE_CODES = frozenset(
+    {
+        "measured_directly",
+        "reconstructed",
+        "user_reported",
+        "provider_reported",
+    }
+)
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
