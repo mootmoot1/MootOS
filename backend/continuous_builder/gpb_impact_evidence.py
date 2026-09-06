@@ -35,7 +35,7 @@ IMPACT_EVIDENCE_VERSION = "gpb-impact-evidence-v1"
 MAX_PATHS = 64
 MAX_COMPONENTS = 128
 MAX_EDGES = 256
-MAX_UNCERTAINTIES = 64
+MAX_UNCERTAINTIES = 128
 MAX_RECORD_BYTES = 64 * 1024
 
 _TOKEN = object()
@@ -109,8 +109,10 @@ class DecompositionImpactEvidence:
             len(self.uncertainties) > MAX_UNCERTAINTIES
         ):
             raise ImpactEvidenceError("uncertainties is malformed")
-        if self.uncertainties != tuple(sorted(set(self.uncertainties))):
-            raise ImpactEvidenceError("uncertainties is not canonical")
+        # Canonical form is priority-stable unique order (ownership/TCB/impact
+        # before dep noise), not pure lexicographic -- see collect_impact_evidence.
+        if len(set(self.uncertainties)) != len(self.uncertainties):
+            raise ImpactEvidenceError("uncertainties contains duplicates")
         require_no_authority(self)
         if self.execution_authorized is not False:
             raise ImpactEvidenceError("cannot claim execution_authorized")
