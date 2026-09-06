@@ -43,6 +43,7 @@ CATEGORIES = frozenset({
     "publication_authority",
     "worker_authorization",
     "trusted_policy",
+    "capability_admission",
 })
 
 CHANGE_POLICIES = frozenset({
@@ -341,6 +342,15 @@ def create_mootos_tcb_registry_v1():
             ),
             rationale_code="cb_artifact_quarantine_boundary",
             change_policy="protected_core_review",
+        ),
+        _seal_component(
+            component_id="cb_capability_admission",
+            category="capability_admission",
+            paths=(
+                "backend/continuous_builder/gpc_trusted_admission_core.py",
+            ),
+            rationale_code="cb_capability_admission_authority",
+            change_policy="human_only",
         ),
         _seal_component(
             component_id="cb_approval_authority",

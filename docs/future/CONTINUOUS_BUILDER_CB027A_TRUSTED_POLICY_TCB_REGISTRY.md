@@ -117,3 +117,12 @@ is 11; component count remains 9. Digests are recomputed by canonical
 construction (`registry_sha256` =
 `7ee7252f202f07fc23e05b52bcb328614adf16262e4f6e7df9b1ecc623347e15`). Adding the path grants classification only
 — zero authority.
+
+## Sync note (GP-C trusted admission)
+
+Authorized GP-C follow-up adds exactly one protected path:
+`backend/continuous_builder/gpc_trusted_admission_core.py` under new
+component `cb_capability_admission` / category `capability_admission`
+(`human_only`). Path count **13**; component count **10**. Current
+`registry_sha256` =
+`642c451728ba422ae4a4e229c02021ce79c4be8b9fc199996f27e8cd9873d692`.

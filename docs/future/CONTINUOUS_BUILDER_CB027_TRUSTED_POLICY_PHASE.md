@@ -56,9 +56,9 @@ Law: **THE SYSTEM OWNS TRUTH. THE WORKER ONLY PROPOSES CHANGES.**
 
 ## Exact TCB path set (v1, phase closure)
 
-Path count: **12**. Registry digest (`registry_sha256`):
+Path count: **13**. Registry digest (`registry_sha256`):
 
-`b7a686ac087f4d1756d7a28293301e430221b77a4d16e07ee89ace85cbb7f3d4`
+`642c451728ba422ae4a4e229c02021ce79c4be8b9fc199996f27e8cd9873d692`
 
 | Path | Component | Category | Policy |
 | --- | --- | --- | --- |
@@ -74,6 +74,7 @@ Path count: **12**. Registry digest (`registry_sha256`):
 | `scripts/capability_build/pr_publication_authorization.py` | cb_publication_authority | publication_authority | human_only |
 | `backend/continuous_builder/trusted_policy.py` | cb_trusted_policy | trusted_policy | human_only |
 | `backend/continuous_builder/trusted_policy_enforcement.py` | cb_trusted_policy | trusted_policy | human_only |
+| `backend/continuous_builder/gpc_trusted_admission_core.py` | cb_capability_admission | capability_admission | human_only |
 
 The enforcement engine is therefore protected by the same canonical policy it
 uses to classify worker-proposed changes. A proposal that modifies

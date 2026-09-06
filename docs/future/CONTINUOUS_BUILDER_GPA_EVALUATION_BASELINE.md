@@ -71,7 +71,7 @@ duplicated into a competing list.
 ## Trust review (TCB)
 
 None of `gpa_*.py` is added to `create_mootos_tcb_registry_v1()`. The TCB
-registry is unchanged by this phase: **12 protected paths, 9 components,
+registry at GP-A close was **12 protected paths, 9 components,
 digest unchanged** (verified: `create_architecture_baseline_manifest`'s
 own `tcb_registry_sha256`/`tcb_protected_path_count`/`tcb_component_count`
 fields, live-checked against `trusted_policy.create_trusted_policy_
@@ -237,7 +237,7 @@ touched.
 
 **14. Did TCB membership change?**
 No. `create_mootos_tcb_registry_v1()` in `trusted_policy.py` was not
-touched; component count (9), protected-path count (12), and
+touched; component count (10), protected-path count (13), and
 `registry_sha256` are identical before and after this phase (verified
 live in `test_manifest_binds_live_tcb_registry_digest`).
 

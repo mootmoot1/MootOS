@@ -276,9 +276,9 @@ def test_15_unknown_does_not_become_pass_or_safe(tmp_path):
 
 def test_16_does_not_weaken_cb027():
     registry = create_mootos_tcb_registry_v1()
-    assert len(registry.protected_paths) == 12
+    assert len(registry.protected_paths) == 13
     assert registry.registry_sha256 == (
-        "b7a686ac087f4d1756d7a28293301e430221b77a4d16e07ee89ace85cbb7f3d4"
+        "642c451728ba422ae4a4e229c02021ce79c4be8b9fc199996f27e8cd9873d692"
     )
     assert system_model_is_descriptive_only() is True
     assert not is_tcb_path("backend/continuous_builder/system_model.py")
@@ -315,7 +315,7 @@ def test_20_missing_protected_paths_detected(tmp_path):
         item for item in model.uncertainties
         if item.kind == "missing_protected_path"
     ]
-    assert len(missing) == 12
+    assert len(missing) == 13
 
 
 def test_21_malformed_registry_digest_fail_closed(tmp_path):
