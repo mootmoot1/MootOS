@@ -391,7 +391,10 @@ def create_mootos_tcb_registry_v1():
         _seal_component(
             component_id="cb_trusted_policy",
             category="trusted_policy",
-            paths=(_SELF_PATH,),
+            paths=(
+                _SELF_PATH,
+                "backend/continuous_builder/trusted_policy_enforcement.py",
+            ),
             rationale_code="cb_tcb_registry_self_protection",
             change_policy="human_only",
         ),
