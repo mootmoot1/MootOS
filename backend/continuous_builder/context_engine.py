@@ -2110,3 +2110,270 @@ def interface_summary_for_neighbors(repo_root, *, base_sha, paths):
         if len(out) >= MAX_EXCERPTS:
             break
     return tuple(out)
+
+
+
+# ---------------------------------------------------------------------------
+# CB-029E — deterministic ADR / arch / docs / tests retrieval (no LLM)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DependencySummary:
+    """Component dependency/dependent evidence from System Model."""
+
+    component_id: str
+    dependencies: tuple
+    dependents: tuple
+    summary_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _DEP_TOKEN:
+            raise ContextEngineError(
+                "dependency summary requires trusted system construction"
+            )
+        if _COMPONENT_ID.fullmatch(self.component_id) is None:
+            raise ContextEngineError("component id malformed")
+        if type(self.dependencies) is not tuple or type(self.dependents) is not tuple:
+            raise ContextEngineError("dependency lists malformed")
+        _require_no_authority(self)
+        _require_sha256(self.summary_sha256, "dep summary digest")
+        if self.summary_sha256 != _digest(self._payload()):
+            raise ContextEngineError("dep summary digest mismatch")
+
+    def _body(self):
+        body = {
+            "component_id": self.component_id,
+            "dependencies": list(self.dependencies),
+            "dependents": list(self.dependents),
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["summary_sha256"] = self.summary_sha256
+        return body
+
+
+def seal_dependency_summary(model, component_id):
+    if not isinstance(model, SystemModel):
+        raise ContextEngineError("model invalid")
+    if not isinstance(component_id, str) or (
+        _COMPONENT_ID.fullmatch(component_id) is None
+    ):
+        raise ContextEngineError("component id malformed")
+    deps = tuple(
+        sorted(
+            dependencies_of(model, component_id),
+            key=lambda e: (
+                e.get("imported_name", ""),
+                e.get("kind", ""),
+                e.get("source_path", ""),
+            ),
+        )
+    )
+    dents = tuple(
+        sorted(
+            dependents_of(model, component_id),
+            key=lambda e: (
+                e.get("source_component_id", ""),
+                e.get("imported_name", ""),
+                e.get("source_path", ""),
+            ),
+        )
+    )
+    values = {
+        "component_id": component_id,
+        "dependencies": deps,
+        "dependents": dents,
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(DependencySummary)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return DependencySummary(
+        **values,
+        summary_sha256=_digest(provisional._payload()),
+        _token=_DEP_TOKEN,
+    )
+
+
+def _is_architecture_doc(path):
+    lower = path.lower()
+    name = path.split("/")[-1]
+    if "/architecture/" in lower or "/adr/" in lower:
+        return True
+    upper = name.upper()
+    if upper.startswith("ADR") or "ARCHITECTURE" in upper:
+        return True
+    if path.startswith("docs/future/") and name.endswith(".md"):
+        # Continuous Builder / system intelligence docs are architecture-adjacent.
+        if any(
+            key in upper
+            for key in (
+                "SYSTEM", "ARCHITECTURE", "THREAT", "TRUST", "TCB",
+                "CONTINUOUS_BUILDER", "WORKER",
+            )
+        ):
+            return True
+    return False
+
+
+def _is_test_path(path):
+    name = path.split("/")[-1]
+    return (
+        path.startswith("tests/")
+        or name.startswith("test_")
+        or name.endswith("_test.py")
+    )
+
+
+def _module_stem_from_path(path):
+    if not path.endswith(".py"):
+        return None
+    name = path.split("/")[-1]
+    if name == "__init__.py":
+        return None
+    return name[:-3]
+
+
+def classify_test_relation(seed_paths, test_path):
+    """Distinguish related / required / probable / unknown — deterministic."""
+    if not _is_test_path(test_path):
+        return "unknown"
+    test_name = test_path.split("/")[-1]
+    stems = []
+    for seed in seed_paths:
+        stem = _module_stem_from_path(seed)
+        if stem:
+            stems.append(stem)
+    for stem in stems:
+        # required: test_<stem> or <stem>_test
+        if test_name in (f"test_{stem}.py", f"{stem}_test.py"):
+            return "required"
+        if stem in test_name:
+            return "related"
+    # probable: same component directory naming
+    for seed in seed_paths:
+        seed_dir = "/".join(seed.split("/")[:-1])
+        test_dir = "/".join(test_path.split("/")[:-1])
+        if seed_dir and (
+            test_path.startswith("tests/")
+            and seed_dir.replace("backend/", "").replace("/", "_") in test_name
+        ):
+            return "probable"
+        if seed.startswith("backend/continuous_builder/") and (
+            "continuous_builder" in test_name or "context_engine" in test_name
+        ):
+            return "probable"
+    return "unknown"
+
+
+def retrieve_architecture_evidence(
+    repo_root, model, *, base_sha, seed_paths=(), budget_docs=MAX_ARCH_DOCS
+):
+    """Deterministic arch/ADR/docs retrieval with digests/regions — no LLM."""
+    if not isinstance(model, SystemModel):
+        raise ContextEngineError("model invalid")
+    _require_base_sha(base_sha)
+    if type(budget_docs) is not int or budget_docs < 1 or budget_docs > MAX_ARCH_DOCS:
+        raise ContextEngineError("budget_docs out of bounds")
+    docs = [
+        item.path for item in model.inventory.files
+        if item.category == "documentation" or item.path.endswith(".md")
+    ]
+    selected = []
+    for path in sorted(docs):
+        if not _is_architecture_doc(path):
+            continue
+        if classify_secret_path(path) is not None:
+            continue
+        selected.append(path)
+        if len(selected) >= budget_docs:
+            break
+    evidence = []
+    for path in selected:
+        ex = extract_excerpt(
+            repo_root,
+            base_sha=base_sha,
+            path=path,
+            region=(1, 80),
+            budget_bytes=DEFAULT_EXCERPT_BUDGET_BYTES,
+        )
+        evidence.append(ex)
+    return tuple(evidence)
+
+
+def retrieve_related_tests(
+    model, *, seed_paths=(), budget_tests=MAX_RELATED_TESTS
+):
+    """Deterministic related-tests listing with relation kinds."""
+    if not isinstance(model, SystemModel):
+        raise ContextEngineError("model invalid")
+    if type(seed_paths) not in (list, tuple):
+        raise ContextEngineError("seed_paths malformed")
+    if type(budget_tests) is not int or budget_tests < 1 or (
+        budget_tests > MAX_RELATED_TESTS
+    ):
+        raise ContextEngineError("budget_tests out of bounds")
+    seeds = tuple(_canonical_repo_path(p) for p in seed_paths)
+    tests = [
+        item.path for item in model.inventory.files
+        if item.category == "test" or _is_test_path(item.path)
+    ]
+    scored = []
+    for path in tests:
+        kind = classify_test_relation(seeds, path)
+        if kind == "unknown":
+            # Still include as unknown only when under tests/ and component-ish
+            continue
+        scored.append((kind, path))
+    order = {"required": 0, "related": 1, "probable": 2, "unknown": 3}
+    scored.sort(key=lambda item: (order[item[0]], item[1]))
+    out = []
+    for kind, path in scored[:budget_tests]:
+        out.append(
+            {
+                "path": path,
+                "relation": kind,
+                "digest": next(
+                    (
+                        item.content_sha256
+                        for item in model.inventory.files
+                        if item.path == path
+                    ),
+                    _digest(b""),
+                ),
+            }
+        )
+    # If nothing matched, include unknown tests sharing component prefix.
+    if not out:
+        for path in sorted(tests)[:budget_tests]:
+            out.append(
+                {
+                    "path": path,
+                    "relation": "unknown",
+                    "digest": next(
+                        (
+                            item.content_sha256
+                            for item in model.inventory.files
+                            if item.path == path
+                        ),
+                        _digest(b""),
+                    ),
+                }
+            )
+    return tuple(out)
