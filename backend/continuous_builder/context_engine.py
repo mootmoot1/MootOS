@@ -3093,3 +3093,476 @@ def assemble_context_package(repo_root, request, model):
         flags=flags,
     )
     return package, receipt
+
+
+
+# ---------------------------------------------------------------------------
+# CB-029G — supplement protocol (bounded; cannot enlarge authority)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ContextSupplementRequest:
+    """Worker supplement ask — cannot change objective or enlarge write."""
+
+    original_request_sha256: str
+    package_sha256: str
+    base_sha: str
+    worker_id: str
+    subject: str
+    reason: str
+    category: str
+    budget_bytes: int
+    request_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _SUPP_REQ_TOKEN:
+            raise ContextEngineError(
+                "supplement request requires trusted system construction"
+            )
+        _require_sha256(self.original_request_sha256, "original request digest")
+        _require_sha256(self.package_sha256, "package digest")
+        _require_base_sha(self.base_sha)
+        _require_text(self.worker_id, "worker_id", 128)
+        if _TASK_ID.fullmatch(self.worker_id) is None:
+            raise ContextEngineError("worker_id malformed")
+        _require_text(self.subject, "subject", MAX_TEXT_FIELD_BYTES)
+        _require_text(self.reason, "reason", MAX_TEXT_FIELD_BYTES)
+        if self.category not in SUPPLEMENT_CATEGORIES:
+            raise ContextEngineError("supplement category unsupported")
+        if (
+            type(self.budget_bytes) is not int
+            or self.budget_bytes < 256
+            or self.budget_bytes > MAX_SUPPLEMENT_BUDGET_BYTES
+        ):
+            raise ContextEngineError("supplement budget out of bounds")
+        _require_no_authority(self)
+        _require_sha256(self.request_sha256, "supplement request digest")
+        if self.request_sha256 != _digest(self._payload()):
+            raise ContextEngineError("supplement request digest mismatch")
+
+    def _body(self):
+        body = {
+            "base_sha": self.base_sha,
+            "budget_bytes": self.budget_bytes,
+            "category": self.category,
+            "original_request_sha256": self.original_request_sha256,
+            "package_sha256": self.package_sha256,
+            "reason": self.reason,
+            "subject": self.subject,
+            "worker_id": self.worker_id,
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["request_sha256"] = self.request_sha256
+        return body
+
+
+def seal_supplement_request(
+    *,
+    original_request,
+    package,
+    worker_id,
+    subject,
+    reason,
+    category,
+    budget_bytes=DEFAULT_EXCERPT_BUDGET_BYTES,
+):
+    if not isinstance(original_request, ContextTaskRequest):
+        raise ContextEngineError("original request invalid")
+    if not isinstance(package, ContextPackage):
+        raise ContextEngineError("package invalid")
+    if package.request_sha256 != original_request.request_sha256:
+        raise ContextEngineError("package/request identity mismatch")
+    if package.base_sha != original_request.base_sha:
+        raise ContextEngineError("package/request base mismatch")
+    values = {
+        "original_request_sha256": original_request.request_sha256,
+        "package_sha256": package.package_sha256,
+        "base_sha": original_request.base_sha,
+        "worker_id": worker_id,
+        "subject": subject,
+        "reason": reason,
+        "category": category,
+        "budget_bytes": budget_bytes,
+    }
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(ContextSupplementRequest)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return ContextSupplementRequest(
+        **values,
+        request_sha256=_digest(provisional._payload()),
+        _token=_SUPP_REQ_TOKEN,
+    )
+
+
+@dataclass(frozen=True)
+class ContextSupplement:
+    """Sealed supplement response — descriptive only."""
+
+    supplement_request_sha256: str
+    original_request_sha256: str
+    package_sha256: str
+    base_sha: str
+    category: str
+    granted: bool
+    denial_code: str | None
+    excerpt: object | None
+    interface: object | None
+    dependency_summary: object | None
+    tests: tuple
+    architecture: tuple
+    tcb_classification: object | None
+    bytes_used: int
+    supplement_sha256: str
+    publication_authorized: bool = False
+    queue_transition_authorized: bool = False
+    github_authorized: bool = False
+    merge_authorized: bool = False
+    main_advancement_authorized: bool = False
+    result_trusted: bool = False
+    worker_output_trusted: bool = False
+    _token: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self._token is not _SUPP_TOKEN:
+            raise ContextEngineError(
+                "supplement requires trusted system construction"
+            )
+        _require_sha256(
+            self.supplement_request_sha256, "supplement request digest"
+        )
+        _require_sha256(self.original_request_sha256, "original request digest")
+        _require_sha256(self.package_sha256, "package digest")
+        _require_base_sha(self.base_sha)
+        if self.category not in SUPPLEMENT_CATEGORIES:
+            raise ContextEngineError("category unsupported")
+        if type(self.granted) is not bool:
+            raise ContextEngineError("granted malformed")
+        if self.granted and self.denial_code is not None:
+            raise ContextEngineError("granted supplement cannot be denied")
+        if not self.granted and self.denial_code is None:
+            raise ContextEngineError("denied supplement needs denial_code")
+        if type(self.tests) is not tuple or type(self.architecture) is not tuple:
+            raise ContextEngineError("supplement collections malformed")
+        _require_no_authority(self)
+        _require_sha256(self.supplement_sha256, "supplement digest")
+        if self.supplement_sha256 != _digest(self._payload()):
+            raise ContextEngineError("supplement digest mismatch")
+
+    def _body(self):
+        body = {
+            "architecture": [
+                item.to_dict() if hasattr(item, "to_dict") else item
+                for item in self.architecture
+            ],
+            "base_sha": self.base_sha,
+            "bytes_used": self.bytes_used,
+            "category": self.category,
+            "denial_code": self.denial_code,
+            "dependency_summary": (
+                self.dependency_summary.to_dict()
+                if self.dependency_summary is not None
+                else None
+            ),
+            "excerpt": (
+                self.excerpt.to_dict() if self.excerpt is not None else None
+            ),
+            "granted": self.granted,
+            "interface": (
+                self.interface.to_dict() if self.interface is not None else None
+            ),
+            "original_request_sha256": self.original_request_sha256,
+            "package_sha256": self.package_sha256,
+            "supplement_request_sha256": self.supplement_request_sha256,
+            "tcb_classification": self.tcb_classification,
+            "tests": list(self.tests),
+        }
+        body.update(_authority_body())
+        return body
+
+    def _payload(self):
+        return _canonical(self._body())
+
+    def to_dict(self):
+        body = self._body()
+        body["supplement_sha256"] = self.supplement_sha256
+        return body
+
+
+def _seal_supplement(**fields):
+    values = dict(fields)
+    for name in AUTHORITY_FLAGS:
+        values[name] = False
+    provisional = object.__new__(ContextSupplement)
+    for name, value in values.items():
+        object.__setattr__(provisional, name, value)
+    return ContextSupplement(
+        **values,
+        supplement_sha256=_digest(provisional._payload()),
+        _token=_SUPP_TOKEN,
+    )
+
+
+def _deny_supplement(supp_req, denial_code):
+    return _seal_supplement(
+        supplement_request_sha256=supp_req.request_sha256,
+        original_request_sha256=supp_req.original_request_sha256,
+        package_sha256=supp_req.package_sha256,
+        base_sha=supp_req.base_sha,
+        category=supp_req.category,
+        granted=False,
+        denial_code=denial_code,
+        excerpt=None,
+        interface=None,
+        dependency_summary=None,
+        tests=(),
+        architecture=(),
+        tcb_classification=None,
+        bytes_used=0,
+    )
+
+
+def fulfill_supplement(
+    repo_root,
+    supp_req,
+    *,
+    original_request,
+    package,
+    model,
+    prior_supplement_count=0,
+):
+    """Fulfill a supplement request under hard caps and denial rules.
+
+    Cannot: change objective, enlarge write, remove forbidden, grant
+    authority, exceed budget, bypass secret/TCB, whole-repo dump, replay
+    wrong task/revision. Categories only from SUPPLEMENT_CATEGORIES.
+    No shell / generic FS. Multi-supplement hard cap.
+    """
+    if not isinstance(supp_req, ContextSupplementRequest):
+        raise ContextEngineError("supplement request invalid")
+    if not isinstance(original_request, ContextTaskRequest):
+        raise ContextEngineError("original request invalid")
+    if not isinstance(package, ContextPackage):
+        raise ContextEngineError("package invalid")
+    if not isinstance(model, SystemModel):
+        raise ContextEngineError("model invalid")
+
+    # Replay / identity checks
+    if supp_req.original_request_sha256 != original_request.request_sha256:
+        return _deny_supplement(supp_req, "replay_wrong_task")
+    if supp_req.package_sha256 != package.package_sha256:
+        return _deny_supplement(supp_req, "replay_wrong_package")
+    if supp_req.base_sha != original_request.base_sha:
+        return _deny_supplement(supp_req, "replay_wrong_revision")
+    if supp_req.base_sha != model.base_sha:
+        return _deny_supplement(supp_req, "replay_wrong_revision")
+    if package.request_sha256 != original_request.request_sha256:
+        return _deny_supplement(supp_req, "package_task_mismatch")
+    if type(prior_supplement_count) is not int or prior_supplement_count < 0:
+        raise ContextEngineError("prior_supplement_count malformed")
+    if prior_supplement_count >= MAX_SUPPLEMENTS_PER_PACKAGE:
+        return _deny_supplement(supp_req, "supplement_cap_exceeded")
+
+    # Reject shell / generic FS / whole-repo style subjects
+    subject = supp_req.subject
+    if subject in (".", "/", "*", "**", "repo", "whole-repo", "ALL"):
+        return _deny_supplement(supp_req, "whole_repo_denied")
+    if subject.startswith("shell:") or subject.startswith("exec:"):
+        return _deny_supplement(supp_req, "shell_denied")
+
+    budget = min(supp_req.budget_bytes, MAX_SUPPLEMENT_BUDGET_BYTES)
+    remaining_package = (
+        original_request.budget.package_budget_bytes - package.bytes_used
+    )
+    if remaining_package < 256:
+        return _deny_supplement(supp_req, "package_budget_exhausted")
+    budget = min(budget, remaining_package)
+
+    category = supp_req.category
+    excerpt = None
+    interface = None
+    dep_summary = None
+    tests = ()
+    architecture = ()
+    tcb_hit = None
+    bytes_used = 0
+
+    if category == "file_excerpt":
+        try:
+            path = _canonical_repo_path(subject)
+        except ContextEngineError:
+            return _deny_supplement(supp_req, "path_rejected")
+        if path in original_request.scope.forbidden_paths:
+            return _deny_supplement(supp_req, "forbidden_path")
+        if classify_secret_path(path) is not None:
+            return _deny_supplement(supp_req, "secret_bypass_denied")
+        # Cannot enlarge write: supplement never adds to allowed_paths.
+        excerpt = extract_excerpt(
+            repo_root,
+            base_sha=supp_req.base_sha,
+            path=path,
+            budget_bytes=min(budget, HARD_MAX_EXCERPT_BUDGET_BYTES),
+        )
+        bytes_used = _measure(excerpt)
+        if bytes_used > budget:
+            return _deny_supplement(supp_req, "budget_exceeded")
+        if not excerpt.available and excerpt.restriction and (
+            "secret" in excerpt.restriction
+        ):
+            return _deny_supplement(supp_req, "secret_bypass_denied")
+
+    elif category == "interface_summary":
+        try:
+            path = _canonical_repo_path(subject)
+        except ContextEngineError:
+            return _deny_supplement(supp_req, "path_rejected")
+        if classify_secret_path(path) is not None:
+            return _deny_supplement(supp_req, "secret_bypass_denied")
+        if path in original_request.scope.forbidden_paths:
+            return _deny_supplement(supp_req, "forbidden_path")
+        interface = enrich_interface_summary(
+            repo_root, base_sha=supp_req.base_sha, path=path
+        )
+        bytes_used = _measure(interface)
+        if bytes_used > budget:
+            return _deny_supplement(supp_req, "budget_exceeded")
+
+    elif category == "component_dependencies":
+        if _COMPONENT_ID.fullmatch(subject) is None:
+            return _deny_supplement(supp_req, "component_id_malformed")
+        dep_summary = seal_dependency_summary(model, subject)
+        # Return dependencies only (dependents cleared for category purity)
+        values = {
+            "component_id": dep_summary.component_id,
+            "dependencies": dep_summary.dependencies,
+            "dependents": (),
+        }
+        for name in AUTHORITY_FLAGS:
+            values[name] = False
+        provisional = object.__new__(DependencySummary)
+        for name, value in values.items():
+            object.__setattr__(provisional, name, value)
+        dep_summary = DependencySummary(
+            **values,
+            summary_sha256=_digest(provisional._payload()),
+            _token=_DEP_TOKEN,
+        )
+        bytes_used = _measure(dep_summary)
+        if bytes_used > budget:
+            return _deny_supplement(supp_req, "budget_exceeded")
+
+    elif category == "component_dependents":
+        if _COMPONENT_ID.fullmatch(subject) is None:
+            return _deny_supplement(supp_req, "component_id_malformed")
+        dep_summary = seal_dependency_summary(model, subject)
+        values = {
+            "component_id": dep_summary.component_id,
+            "dependencies": (),
+            "dependents": dep_summary.dependents,
+        }
+        for name in AUTHORITY_FLAGS:
+            values[name] = False
+        provisional = object.__new__(DependencySummary)
+        for name, value in values.items():
+            object.__setattr__(provisional, name, value)
+        dep_summary = DependencySummary(
+            **values,
+            summary_sha256=_digest(provisional._payload()),
+            _token=_DEP_TOKEN,
+        )
+        bytes_used = _measure(dep_summary)
+        if bytes_used > budget:
+            return _deny_supplement(supp_req, "budget_exceeded")
+
+    elif category == "related_tests":
+        try:
+            seeds = (_canonical_repo_path(subject),)
+        except ContextEngineError:
+            return _deny_supplement(supp_req, "path_rejected")
+        tests = retrieve_related_tests(model, seed_paths=seeds)
+        bytes_used = len(_canonical(list(tests)))
+        if bytes_used > budget:
+            return _deny_supplement(supp_req, "budget_exceeded")
+
+    elif category == "architecture_evidence":
+        architecture = retrieve_architecture_evidence(
+            repo_root,
+            model,
+            base_sha=supp_req.base_sha,
+            seed_paths=(subject,) if subject.endswith(".py") else (),
+            budget_docs=min(4, MAX_ARCH_DOCS),
+        )
+        bytes_used = sum(_measure(item) for item in architecture)
+        if bytes_used > budget:
+            return _deny_supplement(supp_req, "budget_exceeded")
+
+    elif category == "tcb_classification":
+        try:
+            path = _canonical_repo_path(subject)
+        except ContextEngineError:
+            return _deny_supplement(supp_req, "path_rejected")
+        tcb_hit = model_tcb_classification(model, path)
+        # Descriptive only — cannot downgrade protected.
+        if tcb_hit.get("is_tcb") is True:
+            tcb_hit = dict(tcb_hit)
+            tcb_hit["write_not_granted"] = True
+        bytes_used = len(_canonical(tcb_hit))
+        if bytes_used > budget:
+            return _deny_supplement(supp_req, "budget_exceeded")
+    else:
+        return _deny_supplement(supp_req, "category_unsupported")
+
+    return _seal_supplement(
+        supplement_request_sha256=supp_req.request_sha256,
+        original_request_sha256=supp_req.original_request_sha256,
+        package_sha256=supp_req.package_sha256,
+        base_sha=supp_req.base_sha,
+        category=category,
+        granted=True,
+        denial_code=None,
+        excerpt=excerpt,
+        interface=interface,
+        dependency_summary=dep_summary,
+        tests=tuple(tests),
+        architecture=tuple(architecture),
+        tcb_classification=tcb_hit,
+        bytes_used=bytes_used,
+    )
+
+
+# Future adapter API surface (contracts only — no Codex/Grok/GPU adapters).
+def adapter_build_context_package(repo_root, request, model):
+    """Provider-neutral entry for future adapters. No provider logic here."""
+    return assemble_context_package(repo_root, request, model)
+
+
+def adapter_fulfill_supplement(
+    repo_root, supp_req, *, original_request, package, model,
+    prior_supplement_count=0,
+):
+    """Provider-neutral supplement entry for future adapters."""
+    return fulfill_supplement(
+        repo_root,
+        supp_req,
+        original_request=original_request,
+        package=package,
+        model=model,
+        prior_supplement_count=prior_supplement_count,
+    )
