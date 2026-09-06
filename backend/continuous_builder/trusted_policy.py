@@ -399,6 +399,7 @@ def create_mootos_tcb_registry_v1():
             component_id="cb_verifier_core",
             category="verifier",
             paths=(
+                "backend/continuous_builder/adversarial_verifier.py",
                 "backend/continuous_builder/verifier_core.py",
             ),
             rationale_code="cb_structural_verifier_referee",

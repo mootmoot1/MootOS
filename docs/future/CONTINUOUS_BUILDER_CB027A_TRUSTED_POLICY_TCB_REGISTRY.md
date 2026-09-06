@@ -1,7 +1,9 @@
 # CB-027A — trusted policy / TCB registry v1
 
-Base: `ae46b4a227f57ebe7f7107d3985917c469b9b0d7` (trusted Main; independent of
-unmerged PR #89 / CB-026C).
+Base: `b29bb81aded896a41b86504bc86ac127a9ea636a` (trusted Main after CB-026C /
+PR #89 merge). Sync correction: protect
+`backend/continuous_builder/adversarial_verifier.py` under existing
+`cb_verifier_core` (category `verifier`).
 
 ## Boundary
 
@@ -50,7 +52,7 @@ No mutation mechanism is provided in this slice.
 
 | Component | Category | Paths | Why |
 | --- | --- | --- | --- |
-| `cb_verifier_core` | verifier | `backend/continuous_builder/verifier_core.py` | Structural candidate referee |
+| `cb_verifier_core` | verifier | `adversarial_verifier.py`, `verifier_core.py` | Structural / adversarial verifier referee |
 | `cb_check_runner` | verifier | `check_runner.py`, `check_runtime.py` | Bounded behavioral check authority |
 | `cb_sandbox_policy` | sandbox | `sandbox_policy.py` | Deny-by-default containment policy |
 | `cb_runtime_enforcement` | execution_policy | `runtime_enforcement.py` | Runtime foundation / enforcement contracts |
@@ -104,4 +106,14 @@ gates). Not implemented here — classification and registry identity only.
 ## Out of scope
 
 Docker proofs, worker execution, queue/GitHub/merge automation, ADR-031 gate
-replacement, broad protected-core expansion, CB-026C / PR #89 dependency.
+replacement, broad protected-core expansion, CB-027B enforcement wiring.
+
+## Sync note (post CB-026C)
+
+After Main advanced to `b29bb81aded896a41b86504bc86ac127a9ea636a`, this slice
+adds the CB-026C file `backend/continuous_builder/adversarial_verifier.py` to
+the canonical protected set under `cb_verifier_core` / `verifier`. Path count
+is 11; component count remains 9. Digests are recomputed by canonical
+construction (`registry_sha256` =
+`7ee7252f202f07fc23e05b52bcb328614adf16262e4f6e7df9b1ecc623347e15`). Adding the path grants classification only
+— zero authority.

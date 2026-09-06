@@ -81,6 +81,7 @@ def test_self_protection_includes_trusted_policy_module():
 @pytest.mark.parametrize(
     "path",
     [
+        "backend/continuous_builder/adversarial_verifier.py",
         "backend/continuous_builder/verifier_core.py",
         "backend/continuous_builder/check_runner.py",
         "backend/continuous_builder/check_runtime.py",
