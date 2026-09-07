@@ -17,7 +17,7 @@ ENFORCEMENT_PATH = "backend/continuous_builder/trusted_policy_enforcement.py"
 def test_enforcement_module_is_in_canonical_tcb_registry():
     registry = create_mootos_tcb_registry_v1()
     assert ENFORCEMENT_PATH in registry.protected_paths
-    assert len(registry.protected_paths) == 16
+    assert len(registry.protected_paths) == 17
 
     component = registry.component_for_path(ENFORCEMENT_PATH)
     assert component is not None
@@ -58,5 +58,5 @@ def test_registry_digest_is_deterministic_after_enforcement_self_protection():
     second = create_mootos_tcb_registry_v1()
     assert first.registry_sha256 == second.registry_sha256
     assert first.registry_sha256 == (
-        "9fbe94a110e527cf48ab91a0feb38c0b90515facc22cf55ff585852ed938b108"
+        "b23b086b640bbde70cb73f23ee4a3b1ff6973888e8dbe69359fed928dcbfa9bf"
     )

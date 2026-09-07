@@ -128,9 +128,9 @@ def test_case_i_zero_authority_on_real_model(real_model):
 
 def test_case_j_cb027_behavior_intact(real_model):
     registry = create_mootos_tcb_registry_v1()
-    assert len(registry.protected_paths) == 16
+    assert len(registry.protected_paths) == 17
     assert registry.registry_sha256 == (
-        "9fbe94a110e527cf48ab91a0feb38c0b90515facc22cf55ff585852ed938b108"
+        "b23b086b640bbde70cb73f23ee4a3b1ff6973888e8dbe69359fed928dcbfa9bf"
     )
     # Missing-protected uncertainties should be empty on real checkout.
     missing = [
