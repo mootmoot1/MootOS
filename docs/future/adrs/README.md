@@ -8,6 +8,7 @@ These ADRs record proposed long-horizon architecture decisions from the Septembe
 - ADR-041 — Continuous Builder binds approved blueprints to an append-only durable queue.
 - ADR-042 — Automated coding workers require container containment and independent verification.
 - ADR-043 — Continuous Builder planning, providers, retries, and outcomes are deterministic and receipt-driven.
+- ADR-044 — Builder queue lifecycle and GP-D execution lifecycle are separate machines.
 
 ADR-040 is the accepted V0.4D real-composition decision in `docs/`; it is
 current architectural evidence, not part of this future proposal package.

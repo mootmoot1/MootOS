@@ -429,6 +429,23 @@ Then proceed to GP-E.
 
 ---
 
+## 18b. Targeted hardening applied (docs follow-on)
+
+Post-audit **TARGETED HARDENING** landed as docs/ADR only on the same branch/PR (no production code). Implements audit items A1–A5 and decision B1 documentation.
+
+| Deliverable | Path |
+| --- | --- |
+| Persistence / store authority map | `docs/future/CONTINUOUS_BUILDER_PERSISTENCE_AUTHORITY_MAP.md` |
+| Concept glossary (incl. `ready` disambiguation) | `docs/future/CONTINUOUS_BUILDER_CONCEPT_GLOSSARY.md` |
+| Lifecycle separation ADR | `docs/future/adrs/ADR-044-builder-queue-vs-gpd-execution-lifecycle.md` |
+| TCB dependency closure + digest inventory + check-cycle + CE/SM disposition | `docs/future/CONTINUOUS_BUILDER_TCB_DEPENDENCY_CLOSURE.md` |
+
+**Still explicitly not done (correct):** CE/SM split; non-TCB digest consolidation code; lease unify; JSONL→SQLite; TCB expansion; any backend behavior change.
+
+**GP-E readiness after this hardening:** Safe to **start GP-E design/binding** against GPD as execution truth and queue as product lifecycle, provided authors obey ADR-044 and the glossary. Still **do not** conflate admission with launch, or `terminal_success` with Main merge.
+
+---
+
 ## 19. Audit integrity
 
 - Production code changed in this PR: **NONE** (docs-only).
