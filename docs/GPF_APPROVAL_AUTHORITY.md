@@ -69,7 +69,8 @@ semantics, current candidate, expiration at consumption, admission, gate binding
 and every F1-F4 blocker remain obligations of a future trusted consumer.
 
 Authorized public keys live only in the module's immutable production map,
-currently empty. IDs are "sha256:" + SHA256(raw 32-byte public key). Enrollment
+now containing one human-enrolled public key. IDs are "sha256:" +
+SHA256(raw 32-byte public key). Enrollment
 and rotation require human-only changes; no public-key loader or caller trust
 root is accepted. The caller-asserted approver name is not authenticated identity.
 Human-held private keys never enter MootOS. Tests generate ephemeral keys in
@@ -96,9 +97,10 @@ cb_launch_receipt_signature_verification protects:
 
 Registry metadata hashes do not cover module/library content. No other runtime
 module enters the repository import closure. The ordinary receipt remains outside
-TCB. The production allowlist is empty: no real approval authenticates yet.
+TCB. The production allowlist contains one human-enrolled public key; authenticating
+a real approval requires its separately supplied detached signature.
 
-Next stop: human public-key enrollment and separately reviewed trusted launch
+Next stop: separately reviewed trusted launch
 consumption/decision boundary. Preparation is deliberately not wired to this
 verifier and cannot set launch_authorized=True. Its existing “authority absent”
 helper describes that unwired preparation path. Any new launch-authority TCB
@@ -118,3 +120,30 @@ surface requires a separate proposal before editing. Main merge is human-only.
 - An unchanged GP-A history assertion expects CB029 among the latest five merge
   commits and fails against this existing full-history checkout. No GP-A behavior
   or history test was changed to hide that failure.
+
+
+## Human public-key enrollment
+
+One human approval key was generated locally on 2026-09-07. Only public
+verification material is enrolled in source:
+
+- signer_key_id: sha256:712fdc1c22d40f838af779c26c89e68122e9afa2770fa6091913287f40a1483a
+- raw public key (hex): a3d6f3ca5d13e054149ec868c03137b286c3714cac42a619ebb44900615cdef8
+
+Private material remains outside the repository and was never printed or used
+by tests. Directory mode 0700, private PKCS8 PEM mode 0600, raw public file mode
+0600 were confirmed. File modes do not isolate processes running as the same
+OS user: ordinary GP workers must use the existing sandbox policy excluding
+host home/credential mounts. No worker receives this key or a signing API.
+The signing invocation returned only public data and filesystem metadata.
+
+Tests parse the enrolled public bytes, recompute the fingerprint and verify
+immutable membership. All test signatures use synthetic ephemeral keys; no
+production signing operation is used as a test. Existing wrong-key, replacement,
+fingerprint-mismatch, unknown-key and empty-map tests remain fail-closed.
+
+Enrollment changes protected source contents, not TCB registry membership or its
+metadata digest. No launch consumer or launch authorization is added here.
+
+Enrollment focused verification: 71 tests passed; all signing tests use ephemeral
+synthetic keys. The launch-consumer architecture stop is independent of enrollment.

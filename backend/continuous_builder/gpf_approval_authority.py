@@ -3,7 +3,7 @@
 Trust assumes an isolated, human-controlled interpreter/package installation.
 Python object privacy and evidence digests are not security boundaries. Always
 reverify transported evidence with its original receipt and detached signature.
-No production keys are enrolled; enrollment/rotation is a human-only TCB edit.
+Public-key enrollment/rotation/removal is a human-only TCB edit.
 """
 
 import hashlib
@@ -20,7 +20,12 @@ DOMAIN = b"MootOS/GPF/HumanApprovalReceipt/v1\x00"
 MAX_RECEIPT_BYTES = 8 * 1024
 EVIDENCE_VERSION = "gpf-trusted-human-approval-evidence-v1"
 # Raw public verification keys only. No caller-supplied trust roots or loaders.
-_AUTHORIZED_PUBLIC_KEYS = MappingProxyType({})
+_AUTHORIZED_PUBLIC_KEYS = MappingProxyType({
+    "sha256:712fdc1c22d40f838af779c26c89e68122e9afa2770fa6091913287f40a1483a":
+        bytes.fromhex(
+            "a3d6f3ca5d13e054149ec868c03137b286c3714cac42a619ebb44900615cdef8"
+        ),
+})
 _FALSE_FLAGS = frozenset({
     "approver_authenticated", "launch_authorized", "dispatch_authorized",
     "publication_authorized", "queue_transition_authorized",

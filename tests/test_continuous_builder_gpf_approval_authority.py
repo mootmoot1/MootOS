@@ -196,8 +196,9 @@ def test_bad_signature_or_trust_root(receipt, signer, monkeypatch, case):
         authority.verify_human_approval(**args)
 
 
-def test_empty_production_allowlist_fails_closed(receipt):
-    assert dict(authority._AUTHORIZED_PUBLIC_KEYS) == {}
+def test_empty_production_allowlist_fails_closed(receipt, monkeypatch):
+    monkeypatch.setattr(authority, "_AUTHORIZED_PUBLIC_KEYS",
+                        MappingProxyType({}))
     private = Ed25519PrivateKey.generate()
     public = private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
     key_id = "sha256:" + hashlib.sha256(public).hexdigest()
@@ -294,3 +295,45 @@ def test_old_evidence_cannot_match_new_validly_signed_receipt(receipt, signer):
 
 def test_signing_domain_is_versioned_protocol_constant():
     assert authority.DOMAIN == b"MootOS/GPF/HumanApprovalReceipt/v1\x00"
+
+
+def test_enrolled_public_key_structure_and_fingerprint():
+    keys = authority._AUTHORIZED_PUBLIC_KEYS
+    expected = (
+        "sha256:"
+        "712fdc1c22d40f838af779c26c89e68122e9afa2770fa6091913287f40a1483a"
+    )
+    assert tuple(keys) == (expected,)
+    public = keys[expected]
+    assert type(public) is bytes and len(public) == 32
+    assert expected == "sha256:" + hashlib.sha256(public).hexdigest()
+    authority.Ed25519PublicKey.from_public_bytes(public)
+    with pytest.raises(TypeError):
+        keys[expected] = b"x" * 32
+
+
+def test_enrolled_public_key_cannot_verify_synthetic_signer(receipt):
+    raw = canonical(receipt.to_dict())
+    synthetic = Ed25519PrivateKey.generate()
+    with pytest.raises(authority.ApprovalAuthorityError):
+        authority.verify_human_approval(
+            receipt_bytes=raw,
+            detached_signature=synthetic.sign(authority.DOMAIN + raw),
+            signer_key_id=next(iter(authority._AUTHORIZED_PUBLIC_KEYS)),
+        )
+
+
+def test_altered_enrolled_public_key_fingerprint_rejected(
+    receipt, monkeypatch,
+):
+    key_id, public = next(iter(authority._AUTHORIZED_PUBLIC_KEYS.items()))
+    altered = bytes([public[0] ^ 1]) + public[1:]
+    monkeypatch.setattr(authority, "_AUTHORIZED_PUBLIC_KEYS",
+                        MappingProxyType({key_id: altered}))
+    with pytest.raises(authority.ApprovalAuthorityError,
+                       match="pinned key fingerprint mismatch"):
+        authority.verify_human_approval(
+            receipt_bytes=canonical(receipt.to_dict()),
+            detached_signature=b"x" * 64,
+            signer_key_id=key_id,
+        )
