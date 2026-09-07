@@ -13,6 +13,7 @@ Layout::
     <root>/jobs/<job_id>/checkpoints.jsonl
     <root>/jobs/<job_id>/side_effects.jsonl
     <root>/jobs/<job_id>/reconciliations.jsonl
+    <root>/jobs/<job_id>/attempts/<attempt_id>/dispatch_reservation.json
 
 No GitHub / provider / worker execution occurs here.
 """
@@ -294,3 +295,57 @@ class JobLedgerStore:
                 raise JobStoreError("reconciliation digest drift on load")
             out.append(rec)
         return out
+
+    # -- GP-F1: durable dispatch reservation / replay prevention --------
+    #
+    # One reservation slot per (job_id, attempt_id), mirroring
+    # write_header's own idempotent-write idiom: an identical reservation
+    # already on disk is a no-op (replay); a differing one is refused
+    # (fail closed), never silently overwritten. This is the smallest
+    # extension of the existing durable ledger needed to answer "has this
+    # exact WorkerRequest already been dispatched for this attempt?" -- it
+    # grants no launch authority on its own.
+
+    def _dispatch_reservation_path(self, job_id, attempt_id):
+        return (
+            _job_dir(self.root, job_id)
+            / "attempts" / attempt_id / "dispatch_reservation.json"
+        )
+
+    def write_dispatch_reservation(self, reservation):
+        from .gpf_dispatch_reservation import (
+            DispatchReservation,
+            classify_reservation_attempt,
+        )
+
+        if not isinstance(reservation, DispatchReservation):
+            raise JobStoreError("dispatch reservation invalid")
+        path = self._dispatch_reservation_path(
+            reservation.job_id, reservation.attempt_id
+        )
+        if path.exists():
+            existing = self.load_dispatch_reservation(
+                reservation.job_id, reservation.attempt_id
+            )
+            if classify_reservation_attempt(existing, reservation) == "conflict":
+                raise JobStoreError(
+                    "refusing to overwrite a conflicting dispatch reservation"
+                )
+            return existing, "replay"
+        _atomic_write_json(path, reservation.to_dict())
+        return reservation, "new"
+
+    def load_dispatch_reservation(self, job_id, attempt_id):
+        from .gpf_dispatch_reservation import (
+            reseal_dispatch_reservation_from_storage,
+        )
+
+        path = self._dispatch_reservation_path(job_id, attempt_id)
+        if not path.is_file():
+            return None
+        data = dict(_read_json(path))
+        digest = data.pop("reservation_sha256")
+        reservation = reseal_dispatch_reservation_from_storage(**data)
+        if reservation.reservation_sha256 != digest:
+            raise JobStoreError("dispatch reservation digest drift on load")
+        return reservation
