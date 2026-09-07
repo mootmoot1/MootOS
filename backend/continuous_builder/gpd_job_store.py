@@ -390,3 +390,56 @@ class JobLedgerStore:
                 raise JobStoreError("supervisor decision digest drift on load")
             out.append(decision)
         return out
+
+    # -- GP-F4: human approval receipts (append-only evidence) ---------
+    #
+    # Stored beside the attempt, in the same file-backed ledger, with no
+    # schema migration and no new persistence technology. Append-only
+    # rather than idempotent-write because one attempt can require
+    # several gates: each receipt is its own entry, and a second,
+    # differing receipt for the same gate is deliberately NOT rejected
+    # here -- the store stays a dumb recorder, and
+    # gpf_launch_preparation fails closed on the conflict at read time.
+    #
+    # Storing a receipt is not approving anything. These bytes carry no
+    # authority: nothing in this ledger can establish that an authorized
+    # human wrote them (see gpf_human_approval_receipt).
+
+    def _human_approval_receipt_path(self, job_id, attempt_id):
+        return (
+            _job_dir(self.root, job_id)
+            / "attempts" / attempt_id / "human_approval_receipts.jsonl"
+        )
+
+    def append_human_approval_receipt(self, receipt):
+        from .gpf_human_approval_receipt import HumanApprovalReceipt
+
+        if not isinstance(receipt, HumanApprovalReceipt):
+            raise JobStoreError("human approval receipt invalid")
+        _append_jsonl(
+            self._human_approval_receipt_path(
+                receipt.job_id, receipt.attempt_id
+            ),
+            receipt.to_dict(),
+        )
+        return receipt
+
+    def load_human_approval_receipts(self, job_id, attempt_id):
+        from .gpf_human_approval_receipt import (
+            reseal_human_approval_receipt_from_storage,
+        )
+
+        rows = _read_jsonl(
+            self._human_approval_receipt_path(job_id, attempt_id)
+        )
+        out = []
+        for row in rows:
+            data = dict(row)
+            digest = data.pop("receipt_sha256")
+            receipt = reseal_human_approval_receipt_from_storage(**data)
+            if receipt.receipt_sha256 != digest:
+                raise JobStoreError(
+                    "human approval receipt digest drift on load"
+                )
+            out.append(receipt)
+        return out
