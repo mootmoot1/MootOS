@@ -167,7 +167,7 @@ def test_case_i_tcb_paths_not_downgraded(real_model):
 
 def test_case_j_system_model_still_outside_tcb(real_model):
     assert is_tcb_path("backend/continuous_builder/system_model.py") is False
-    assert len(create_mootos_tcb_registry_v1().protected_paths) == 13
+    assert len(create_mootos_tcb_registry_v1().protected_paths) == 15
 
 
 def test_case_k_supplement_interface(real_package, real_model):

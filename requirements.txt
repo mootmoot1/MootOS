@@ -3,3 +3,10 @@ httpx==0.28.1
 openai==1.93.0
 python-dotenv==1.1.1
 uvicorn[standard]==0.34.3
+
+# GP-F approval verification TCB closure; all edits require human review.
+# Temporary shared-manifest protection: see docs/GPF_APPROVAL_AUTHORITY.md.
+cryptography==46.0.7
+cffi==2.0.0
+pycparser==2.23
+typing-extensions==4.15.0

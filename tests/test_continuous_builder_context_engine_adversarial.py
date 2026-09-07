@@ -455,7 +455,7 @@ def test_28_engine_outside_tcb_descriptive():
     assert "backend/continuous_builder/context_engine.py" not in (
         registry.protected_paths
     )
-    assert len(registry.protected_paths) == 13
+    assert len(registry.protected_paths) == 15
 
 
 def test_29_ordering_stable_identity(tmp_path):
@@ -702,7 +702,7 @@ def test_45_allowed_forbidden_conflict_rejected():
 def test_46_engine_does_not_expand_tcb_registry():
     before = create_mootos_tcb_registry_v1().registry_sha256
     assert before == create_mootos_tcb_registry_v1().registry_sha256
-    assert len(create_mootos_tcb_registry_v1().protected_paths) == 13
+    assert len(create_mootos_tcb_registry_v1().protected_paths) == 15
 
 
 def test_47_supplement_cannot_change_objective_identity(tmp_path):

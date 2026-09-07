@@ -428,6 +428,18 @@ def create_mootos_tcb_registry_v1():
             change_policy="protected_core_review",
         ),
     )
+    components += (
+        _seal_component(
+            component_id="cb_launch_approval_authority",
+            category="approval_authority",
+            paths=(
+                "backend/continuous_builder/gpf_approval_authority.py",
+                "requirements.txt",
+            ),
+            rationale_code="cb_launch_receipt_signature_verification",
+            change_policy="human_only",
+        ),
+    )
     return _seal_registry(components)
 
 

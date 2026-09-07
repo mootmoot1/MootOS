@@ -655,6 +655,9 @@ def test_no_tcb_or_execution_importers():
     registry = create_mootos_tcb_registry_v1()
     assert not any("gpe_" in path for path in registry.protected_paths)
     for path in registry.protected_paths:
+        if path == "requirements.txt":
+            # GP-F crypto manifest is protected data, not a Python importer.
+            continue
         tree = ast.parse((root / path).read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
