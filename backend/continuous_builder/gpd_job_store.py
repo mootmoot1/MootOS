@@ -14,6 +14,7 @@ Layout::
     <root>/jobs/<job_id>/side_effects.jsonl
     <root>/jobs/<job_id>/reconciliations.jsonl
     <root>/jobs/<job_id>/attempts/<attempt_id>/dispatch_reservation.json
+    <root>/jobs/<job_id>/attempts/<attempt_id>/supervisor_decisions.jsonl
 
 No GitHub / provider / worker execution occurs here.
 """
@@ -349,3 +350,43 @@ class JobLedgerStore:
         if reservation.reservation_sha256 != digest:
             raise JobStoreError("dispatch reservation digest drift on load")
         return reservation
+
+    # -- GP-F3: supervisor control decisions (append-only evidence) -----
+    #
+    # A SupervisorControlDecision is a pure re-derivation of current
+    # truth (see gpf_supervisor.py) -- unlike the dispatch reservation,
+    # it is not a one-time fact, so it is appended, not idempotently
+    # written: each evaluation is its own history entry, mirroring how
+    # heartbeats/checkpoints are recorded. Restart never has to trust an
+    # old decision -- gpf_supervisor.evaluate_supervisor_control() can
+    # always recompute a fresh one from the same authoritative evidence.
+
+    def append_supervisor_decision(self, decision):
+        from .gpf_supervisor import SupervisorControlDecision
+
+        if not isinstance(decision, SupervisorControlDecision):
+            raise JobStoreError("supervisor decision invalid")
+        path = (
+            _job_dir(self.root, decision.job_id)
+            / "attempts" / decision.attempt_id / "supervisor_decisions.jsonl"
+        )
+        _append_jsonl(path, decision.to_dict())
+        return decision
+
+    def load_supervisor_decisions(self, job_id, attempt_id):
+        from .gpf_supervisor import reseal_supervisor_decision_from_storage
+
+        path = (
+            _job_dir(self.root, job_id)
+            / "attempts" / attempt_id / "supervisor_decisions.jsonl"
+        )
+        rows = _read_jsonl(path)
+        out = []
+        for row in rows:
+            data = dict(row)
+            digest = data.pop("decision_sha256")
+            decision = reseal_supervisor_decision_from_storage(**data)
+            if decision.decision_sha256 != digest:
+                raise JobStoreError("supervisor decision digest drift on load")
+            out.append(decision)
+        return out
