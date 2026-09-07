@@ -41,7 +41,7 @@ def test_trust_review_system_model_stays_outside_tcb():
     """Descriptive evidence only — no enforcement power — not in TCB."""
     assert system_model_is_descriptive_only() is True
     registry = create_mootos_tcb_registry_v1()
-    assert len(registry.protected_paths) == 15
+    assert len(registry.protected_paths) == 16
     path = "backend/continuous_builder/system_model.py"
     assert path not in registry.protected_paths
     assert is_tcb_path(path) is False
@@ -149,7 +149,7 @@ def test_malformed_path_classification_uncertain(tmp_path):
 
 def test_cb027_registry_unchanged():
     registry = create_mootos_tcb_registry_v1()
-    assert len(registry.protected_paths) == 15
+    assert len(registry.protected_paths) == 16
     assert registry.registry_sha256 == (
-        "56e38846274900aaab74c396afd65635187c369d5b1928764adb5aadde857dec"
+        "9fbe94a110e527cf48ab91a0feb38c0b90515facc22cf55ff585852ed938b108"
     )
