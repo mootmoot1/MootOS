@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 DOMAIN = b"MootOS/GPF/HumanApprovalReceipt/v1\x00"
 MAX_RECEIPT_BYTES = 8 * 1024
 EVIDENCE_VERSION = "gpf-trusted-human-approval-evidence-v1"
+SUBJECT_VERSION = "gpf-trusted-human-approval-subject-v1"
 # Raw public verification keys only. No caller-supplied trust roots or loaders.
 _AUTHORIZED_PUBLIC_KEYS = MappingProxyType({
     "sha256:712fdc1c22d40f838af779c26c89e68122e9afa2770fa6091913287f40a1483a":
@@ -192,6 +193,84 @@ def verify_human_approval(*, receipt_bytes: bytes, detached_signature: bytes,
     for name, value in values.items():
         object.__setattr__(evidence, name, value)
     return evidence
+
+
+@dataclass(frozen=True, init=False)
+class TrustedHumanApprovalSubject:
+    """Authenticated receipt content, still not a launch authorization.
+
+    Exposes the signed subject a trusted consumer must interpret itself:
+    which candidate, which gate, which already-admitted capabilities and
+    scope the human narrowed to, and until when the receipt claims to be
+    valid. Interpreting these strings as permission is the consumer's own
+    boundary. Expiry is reported, never decided, here. There is no public
+    constructor: every field must come from a verified signature.
+    """
+
+    schema_version: str
+    receipt_sha256: str
+    approval_id: str
+    job_id: str
+    attempt_id: str
+    request_id: str
+    request_sha256: str
+    header_sha256: str
+    subject_sha256: str
+    gate: str
+    approved_capability_ids: tuple
+    approved_scope: tuple
+    created_at: str
+    valid_until: object
+    signer_key_id: str
+    signature_algorithm: str
+    authenticated: bool
+    subject_evidence_sha256: str
+
+    def __init__(self, *args, **kwargs):
+        raise ApprovalAuthorityError(
+            "approval subject requires signature verification")
+
+    def to_dict(self):
+        body = {item.name: getattr(self, item.name) for item in fields(self)}
+        for name in ("approved_capability_ids", "approved_scope"):
+            body[name] = list(body[name])
+        return body
+
+
+def verify_human_approval_subject(
+    *, receipt_bytes: bytes, detached_signature: bytes, signer_key_id: str,
+) -> TrustedHumanApprovalSubject:
+    """Authenticate the receipt, then expose its signed subject verbatim.
+
+    Same signature check as :func:`verify_human_approval`; this adds only
+    the already-authenticated subject fields a launch-eligibility referee
+    must compare against admitted ceilings. It decides nothing: not gate
+    satisfaction, not currentness, not expiry, not launch.
+    """
+    evidence = verify_human_approval(
+        receipt_bytes=receipt_bytes, detached_signature=detached_signature,
+        signer_key_id=signer_key_id)
+    body = _parse_receipt(receipt_bytes)
+    _check(body["receipt_sha256"] == evidence.receipt_sha256,
+           "verified receipt digest mismatch")
+    values = {name: body[name] for name in _IDS + _DIGESTS + (
+        "gate", "created_at", "valid_until")}
+    values.update(
+        schema_version=SUBJECT_VERSION,
+        approved_capability_ids=tuple(body["approved_capability_ids"]),
+        approved_scope=tuple(body["approved_scope"]),
+        signer_key_id=evidence.signer_key_id,
+        signature_algorithm=evidence.signature_algorithm,
+        authenticated=True,
+    )
+    payload = dict(values)
+    for name in ("approved_capability_ids", "approved_scope"):
+        payload[name] = list(payload[name])
+    values["subject_evidence_sha256"] = _digest(_canonical(payload))
+    subject = object.__new__(TrustedHumanApprovalSubject)
+    for name, value in values.items():
+        object.__setattr__(subject, name, value)
+    return subject
 
 
 def validate_trusted_human_approval_evidence(

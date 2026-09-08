@@ -262,6 +262,6 @@ def test_case_h_authority_all_false_across_phase_outputs():
     for flag in SNAP_FLAGS:
         assert getattr(snapshot, flag) is False
     assert registry.registry_sha256 == (
-        "b23b086b640bbde70cb73f23ee4a3b1ff6973888e8dbe69359fed928dcbfa9bf"
+        "989f05d88ef634c980c2d65250cb3afcee69cdd8867f9c8a4909f00b63c9a837"
     )
-    assert len(registry.protected_paths) == 17
+    assert len(registry.protected_paths) == 19

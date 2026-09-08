@@ -460,6 +460,24 @@ def create_mootos_tcb_registry_v1():
             change_policy="human_only",
         ),
     )
+    components += (
+        _seal_component(
+            component_id="cb_launch_state_projection",
+            category="worker_authorization",
+            paths=(
+                "backend/continuous_builder/gpf_launch_state_projection.py",
+            ),
+            rationale_code="system_owned_launch_state_projection",
+            change_policy="human_only",
+        ),
+        _seal_component(
+            component_id="cb_launch_eligibility_semantics",
+            category="worker_authorization",
+            paths=("backend/continuous_builder/gpf_launch_semantics.py",),
+            rationale_code="trusted_launch_eligibility_referee",
+            change_policy="human_only",
+        ),
+    )
     return _seal_registry(components)
 
 

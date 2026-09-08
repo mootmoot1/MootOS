@@ -438,8 +438,8 @@ def test_core_is_tcb_protected():
     path = "backend/continuous_builder/gpc_trusted_admission_core.py"
     registry = create_mootos_tcb_registry_v1()
     assert path in registry.protected_paths
-    assert len(registry.protected_paths) == 17
-    assert len(registry.components) == 13
+    assert len(registry.protected_paths) == 19
+    assert len(registry.components) == 15
     component = registry.component_for_path(path)
     assert component.component_id == "cb_capability_admission"
     assert component.category == "capability_admission"
