@@ -460,6 +460,44 @@ def create_mootos_tcb_registry_v1():
             change_policy="human_only",
         ),
     )
+    # GP-F trusted launch closure: executable dependencies a launch verdict
+    # is actually derived from. An eligibility decision must not rest on
+    # worker-modifiable code, so the modules that reconstruct GP-D lifecycle
+    # state, recompute the digests that reconstruction is checked against,
+    # and decide what a protected path even is are protected here too.
+    components += (
+        _seal_component(
+            component_id="cb_durable_state_contract",
+            category="execution_policy",
+            paths=(
+                "backend/continuous_builder/gpd_job_events.py",
+                "backend/continuous_builder/gpd_job_header.py",
+                "backend/continuous_builder/gpd_job_state.py",
+            ),
+            rationale_code="gpd_lifecycle_reconstruction_contract",
+            change_policy="human_only",
+        ),
+        _seal_component(
+            component_id="cb_schema_digest_primitives",
+            category="verifier",
+            paths=(
+                "backend/continuous_builder/gpa_eval_schema.py",
+                "backend/continuous_builder/timestamps.py",
+            ),
+            rationale_code="canonical_digest_and_record_validation",
+            change_policy="human_only",
+        ),
+        _seal_component(
+            component_id="cb_path_canonicalization",
+            category="trusted_policy",
+            paths=(
+                "backend/continuous_builder/paths.py",
+                "backend/continuous_builder/text_safety.py",
+            ),
+            rationale_code="protected_path_canonicalization",
+            change_policy="human_only",
+        ),
+    )
     components += (
         _seal_component(
             component_id="cb_launch_state_projection",
