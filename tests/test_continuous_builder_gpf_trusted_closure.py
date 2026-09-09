@@ -126,10 +126,10 @@ def test_newly_protected_dependencies_are_registered_human_only():
 
 def test_registry_shape_after_hardening():
     registry = create_mootos_tcb_registry_v1()
-    assert len(registry.protected_paths) == 26
-    assert len(registry.components) == 18
+    assert len(registry.protected_paths) == 28
+    assert len(registry.components) == 20
     assert registry.registry_sha256 == (
-        "21be7975fcfb9754031cbf0e741386ea5a8683648a7497b1a371164a37114d5d"
+        "89faaa9cab36a21d33c792f8692a9f9982c4e83587ac2e9d1c1d64ff117b47eb"
     )
 
 
