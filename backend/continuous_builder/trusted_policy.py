@@ -428,6 +428,112 @@ def create_mootos_tcb_registry_v1():
             change_policy="protected_core_review",
         ),
     )
+    components += (
+        _seal_component(
+            component_id="cb_launch_approval_authority",
+            category="approval_authority",
+            paths=(
+                "backend/continuous_builder/gpf_approval_authority.py",
+                "requirements.txt",
+            ),
+            rationale_code="cb_launch_receipt_signature_verification",
+            change_policy="human_only",
+        ),
+    )
+    components += (
+        _seal_component(
+            component_id="cb_launch_assignment_authority",
+            category="worker_authorization",
+            paths=(
+                "backend/continuous_builder/gpf_launch_candidate_binding.py",
+            ),
+            rationale_code="system_owned_launch_candidate_assignment",
+            change_policy="human_only",
+        ),
+    )
+    components += (
+        _seal_component(
+            component_id="cb_launch_facts_source",
+            category="worker_authorization",
+            paths=("backend/continuous_builder/gpf_launch_facts.py",),
+            rationale_code="system_owned_launch_facts_currentness",
+            change_policy="human_only",
+        ),
+    )
+    # GP-F trusted launch closure: executable dependencies a launch verdict
+    # is actually derived from. An eligibility decision must not rest on
+    # worker-modifiable code, so the modules that reconstruct GP-D lifecycle
+    # state, recompute the digests that reconstruction is checked against,
+    # and decide what a protected path even is are protected here too.
+    components += (
+        _seal_component(
+            component_id="cb_durable_state_contract",
+            category="execution_policy",
+            paths=(
+                "backend/continuous_builder/gpd_job_events.py",
+                "backend/continuous_builder/gpd_job_header.py",
+                "backend/continuous_builder/gpd_job_state.py",
+            ),
+            rationale_code="gpd_lifecycle_reconstruction_contract",
+            change_policy="human_only",
+        ),
+        _seal_component(
+            component_id="cb_schema_digest_primitives",
+            category="verifier",
+            paths=(
+                "backend/continuous_builder/gpa_eval_schema.py",
+                "backend/continuous_builder/timestamps.py",
+            ),
+            rationale_code="canonical_digest_and_record_validation",
+            change_policy="human_only",
+        ),
+        _seal_component(
+            component_id="cb_path_canonicalization",
+            category="trusted_policy",
+            paths=(
+                "backend/continuous_builder/paths.py",
+                "backend/continuous_builder/text_safety.py",
+            ),
+            rationale_code="protected_path_canonicalization",
+            change_policy="human_only",
+        ),
+    )
+    components += (
+        _seal_component(
+            component_id="cb_launch_state_projection",
+            category="worker_authorization",
+            paths=(
+                "backend/continuous_builder/gpf_launch_state_projection.py",
+            ),
+            rationale_code="system_owned_launch_state_projection",
+            change_policy="human_only",
+        ),
+        _seal_component(
+            component_id="cb_launch_eligibility_semantics",
+            category="worker_authorization",
+            paths=("backend/continuous_builder/gpf_launch_semantics.py",),
+            rationale_code="trusted_launch_eligibility_referee",
+            change_policy="human_only",
+        ),
+    )
+    components += (
+        _seal_component(
+            component_id="cb_launch_dispatch_intent",
+            category="worker_authorization",
+            paths=(
+                "backend/continuous_builder/gpf_launch_dispatch_intent.py",
+            ),
+            rationale_code="system_owned_dispatch_readiness",
+            change_policy="human_only",
+        ),
+        _seal_component(
+            component_id="cb_launch_consumption",
+            category="worker_authorization",
+            paths=("backend/continuous_builder/gpf_launch_consumption.py",),
+            rationale_code="one_shot_dispatch_consumption",
+            change_policy="human_only",
+        ),
+    )
     return _seal_registry(components)
 
 

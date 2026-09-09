@@ -13,6 +13,8 @@ Layout::
     <root>/jobs/<job_id>/checkpoints.jsonl
     <root>/jobs/<job_id>/side_effects.jsonl
     <root>/jobs/<job_id>/reconciliations.jsonl
+    <root>/jobs/<job_id>/attempts/<attempt_id>/dispatch_reservation.json
+    <root>/jobs/<job_id>/attempts/<attempt_id>/supervisor_decisions.jsonl
 
 No GitHub / provider / worker execution occurs here.
 """
@@ -293,4 +295,151 @@ class JobLedgerStore:
             if rec.reconciliation_sha256 != digest:
                 raise JobStoreError("reconciliation digest drift on load")
             out.append(rec)
+        return out
+
+    # -- GP-F1: durable dispatch reservation / replay prevention --------
+    #
+    # One reservation slot per (job_id, attempt_id), mirroring
+    # write_header's own idempotent-write idiom: an identical reservation
+    # already on disk is a no-op (replay); a differing one is refused
+    # (fail closed), never silently overwritten. This is the smallest
+    # extension of the existing durable ledger needed to answer "has this
+    # exact WorkerRequest already been dispatched for this attempt?" -- it
+    # grants no launch authority on its own.
+
+    def _dispatch_reservation_path(self, job_id, attempt_id):
+        return (
+            _job_dir(self.root, job_id)
+            / "attempts" / attempt_id / "dispatch_reservation.json"
+        )
+
+    def write_dispatch_reservation(self, reservation):
+        from .gpf_dispatch_reservation import (
+            DispatchReservation,
+            classify_reservation_attempt,
+        )
+
+        if not isinstance(reservation, DispatchReservation):
+            raise JobStoreError("dispatch reservation invalid")
+        path = self._dispatch_reservation_path(
+            reservation.job_id, reservation.attempt_id
+        )
+        if path.exists():
+            existing = self.load_dispatch_reservation(
+                reservation.job_id, reservation.attempt_id
+            )
+            if classify_reservation_attempt(existing, reservation) == "conflict":
+                raise JobStoreError(
+                    "refusing to overwrite a conflicting dispatch reservation"
+                )
+            return existing, "replay"
+        _atomic_write_json(path, reservation.to_dict())
+        return reservation, "new"
+
+    def load_dispatch_reservation(self, job_id, attempt_id):
+        from .gpf_dispatch_reservation import (
+            reseal_dispatch_reservation_from_storage,
+        )
+
+        path = self._dispatch_reservation_path(job_id, attempt_id)
+        if not path.is_file():
+            return None
+        data = dict(_read_json(path))
+        digest = data.pop("reservation_sha256")
+        reservation = reseal_dispatch_reservation_from_storage(**data)
+        if reservation.reservation_sha256 != digest:
+            raise JobStoreError("dispatch reservation digest drift on load")
+        return reservation
+
+    # -- GP-F3: supervisor control decisions (append-only evidence) -----
+    #
+    # A SupervisorControlDecision is a pure re-derivation of current
+    # truth (see gpf_supervisor.py) -- unlike the dispatch reservation,
+    # it is not a one-time fact, so it is appended, not idempotently
+    # written: each evaluation is its own history entry, mirroring how
+    # heartbeats/checkpoints are recorded. Restart never has to trust an
+    # old decision -- gpf_supervisor.evaluate_supervisor_control() can
+    # always recompute a fresh one from the same authoritative evidence.
+
+    def append_supervisor_decision(self, decision):
+        from .gpf_supervisor import SupervisorControlDecision
+
+        if not isinstance(decision, SupervisorControlDecision):
+            raise JobStoreError("supervisor decision invalid")
+        path = (
+            _job_dir(self.root, decision.job_id)
+            / "attempts" / decision.attempt_id / "supervisor_decisions.jsonl"
+        )
+        _append_jsonl(path, decision.to_dict())
+        return decision
+
+    def load_supervisor_decisions(self, job_id, attempt_id):
+        from .gpf_supervisor import reseal_supervisor_decision_from_storage
+
+        path = (
+            _job_dir(self.root, job_id)
+            / "attempts" / attempt_id / "supervisor_decisions.jsonl"
+        )
+        rows = _read_jsonl(path)
+        out = []
+        for row in rows:
+            data = dict(row)
+            digest = data.pop("decision_sha256")
+            decision = reseal_supervisor_decision_from_storage(**data)
+            if decision.decision_sha256 != digest:
+                raise JobStoreError("supervisor decision digest drift on load")
+            out.append(decision)
+        return out
+
+    # -- GP-F4: human approval receipts (append-only evidence) ---------
+    #
+    # Stored beside the attempt, in the same file-backed ledger, with no
+    # schema migration and no new persistence technology. Append-only
+    # rather than idempotent-write because one attempt can require
+    # several gates: each receipt is its own entry, and a second,
+    # differing receipt for the same gate is deliberately NOT rejected
+    # here -- the store stays a dumb recorder, and
+    # gpf_launch_preparation fails closed on the conflict at read time.
+    #
+    # Storing a receipt is not approving anything. These bytes carry no
+    # authority: nothing in this ledger can establish that an authorized
+    # human wrote them (see gpf_human_approval_receipt).
+
+    def _human_approval_receipt_path(self, job_id, attempt_id):
+        return (
+            _job_dir(self.root, job_id)
+            / "attempts" / attempt_id / "human_approval_receipts.jsonl"
+        )
+
+    def append_human_approval_receipt(self, receipt):
+        from .gpf_human_approval_receipt import HumanApprovalReceipt
+
+        if not isinstance(receipt, HumanApprovalReceipt):
+            raise JobStoreError("human approval receipt invalid")
+        _append_jsonl(
+            self._human_approval_receipt_path(
+                receipt.job_id, receipt.attempt_id
+            ),
+            receipt.to_dict(),
+        )
+        return receipt
+
+    def load_human_approval_receipts(self, job_id, attempt_id):
+        from .gpf_human_approval_receipt import (
+            reseal_human_approval_receipt_from_storage,
+        )
+
+        rows = _read_jsonl(
+            self._human_approval_receipt_path(job_id, attempt_id)
+        )
+        out = []
+        for row in rows:
+            data = dict(row)
+            digest = data.pop("receipt_sha256")
+            receipt = reseal_human_approval_receipt_from_storage(**data)
+            if receipt.receipt_sha256 != digest:
+                raise JobStoreError(
+                    "human approval receipt digest drift on load"
+                )
+            out.append(receipt)
         return out

@@ -276,9 +276,9 @@ def test_15_unknown_does_not_become_pass_or_safe(tmp_path):
 
 def test_16_does_not_weaken_cb027():
     registry = create_mootos_tcb_registry_v1()
-    assert len(registry.protected_paths) == 13
+    assert len(registry.protected_paths) == 28
     assert registry.registry_sha256 == (
-        "642c451728ba422ae4a4e229c02021ce79c4be8b9fc199996f27e8cd9873d692"
+        "89faaa9cab36a21d33c792f8692a9f9982c4e83587ac2e9d1c1d64ff117b47eb"
     )
     assert system_model_is_descriptive_only() is True
     assert not is_tcb_path("backend/continuous_builder/system_model.py")
@@ -315,7 +315,7 @@ def test_20_missing_protected_paths_detected(tmp_path):
         item for item in model.uncertainties
         if item.kind == "missing_protected_path"
     ]
-    assert len(missing) == 13
+    assert len(missing) == 28
 
 
 def test_21_malformed_registry_digest_fail_closed(tmp_path):
@@ -332,6 +332,11 @@ def test_22_no_timestamps_in_digests(tmp_path):
     _write(root / "a.py", "a\n")
     model = build_system_model(root, base_sha=BASE)
     text = model.canonical_bytes().decode("utf-8")
+    # Protected TCB paths are legitimate digest content, and one of them is
+    # literally named timestamps.py. Strip the path strings first so this
+    # still asserts "no wall-clock value", not "no filename spelled like one".
+    for path in create_mootos_tcb_registry_v1().protected_paths:
+        text = text.replace(path, "")
     for needle in ("timestamp", "created_at", "mtime", "ctime", "time.time"):
         assert needle not in text
 

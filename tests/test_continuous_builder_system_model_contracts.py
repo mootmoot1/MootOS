@@ -135,8 +135,13 @@ def test_digest_stable_and_order_sensitive(tmp_path):
     assert first.model_sha256 == second.model_sha256
     assert first.inventory.inventory_sha256 == second.inventory.inventory_sha256
     assert first.canonical_bytes() == second.canonical_bytes()
-    # Payload must not embed timestamps.
+    # Payload must not embed timestamps. Protected TCB paths are legitimate
+    # digest content and one of them is literally named timestamps.py, so
+    # strip the path strings first: this asserts "no wall-clock value", not
+    # "no filename spelled like one".
     payload = first.canonical_bytes().decode("utf-8")
+    for path in create_mootos_tcb_registry_v1().protected_paths:
+        payload = payload.replace(path, "")
     assert "timestamp" not in payload
     assert "created_at" not in payload
     assert "mtime" not in payload
